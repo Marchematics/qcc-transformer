@@ -206,6 +206,29 @@ a kernel-equivalence check, not RULER, retrieval, or pretrained-LM quality.
 The target retrieval gates remain `missing` until a trained checkpoint and
 JSONL evaluation set are supplied.
 
+### Colab synthetic retrieval diagnostic (STE content gate)
+
+The differentiable archive uses a straight-through content gate: the forward
+pass is exactly the hard inference threshold, while a sigmoid surrogate supplies
+gradients below the threshold.  A query-position curriculum (uniform positions
+32--500 during 512-token training) was trained on a Colab Tesla T4 and then
+evaluated with the persistent `decode_chunk` path.  The checkpoint and machine-
+readable record are preserved in
+[`artifacts/colab_gpu/checkpoints/qcc_curriculum.pt`](artifacts/colab_gpu/checkpoints/qcc_curriculum.pt)
+and [`artifacts/colab_gpu/retrieval_ste_summary.json`](artifacts/colab_gpu/retrieval_ste_summary.json).
+
+| Synthetic stream | Examples | Correct | Accuracy |
+|---|---:|---:|---:|
+| 512 tokens, query 384 | 50 | 50 | 100% |
+| 128K tokens, query 384 | 20 | 20 | 100% |
+| 128K tokens, query 96K | 20 | 20 | 100% |
+
+These records use independently sampled marker/value pairs and are an archive
+learnability diagnostic, not RULER or pretrained-language quality.  A separate
+max-context=1M fixed-query checkpoint reached 5/5 at query 500K but only 1/5 at
+query 900K; therefore the 1M retrieval gate is still open and is not claimed as
+passed.
+
 For million-token serving, the default `position_encoding="sinusoidal"` is
 stateless: configuring `max_position_embeddings=4_000_000` does not allocate a
 four-million-row learned position table. `archive_scan_block_size` controls the

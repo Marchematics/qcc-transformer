@@ -1,0 +1,34 @@
+step=1 loss=34.071815 accuracy=0.0000
+step=100 loss=29.855621 accuracy=0.0000
+step=200 loss=21.309011 accuracy=0.0000
+step=300 loss=4.831986 accuracy=0.0625
+step=400 loss=3.604762 accuracy=0.0625
+step=500 loss=3.500708 accuracy=0.0000
+step=600 loss=1.346285 accuracy=0.5625
+step=700 loss=2.657659 accuracy=0.2812
+step=800 loss=2.964888 accuracy=0.3438
+step=900 loss=3.374681 accuracy=0.0938
+step=1000 loss=3.255465 accuracy=0.0938
+step=1100 loss=3.386391 accuracy=0.0625
+step=1200 loss=2.531432 accuracy=0.2188
+step=1300 loss=1.168709 accuracy=0.6562
+step=1400 loss=0.146686 accuracy=1.0000
+step=1500 loss=0.001278 accuracy=1.0000
+{
+  "device": "cuda",
+  "checkpoint": "artifacts/qcc_curriculum.pt",
+  "dataset": "artifacts/retrieval_curriculum.jsonl",
+  "examples": 40,
+  "eval_lengths": [
+    512,
+    128000
+  ],
+  "train": {
+    "steps": 1500.0,
+    "final_loss": 0.0012775734066963196,
+    "final_accuracy": 1.0,
+    "best_loss": 0.0005628707585856318,
+    "best_accuracy": 1.0,
+    "train_seconds": 80.63069666899992
+  }
+}
