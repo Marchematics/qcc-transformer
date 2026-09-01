@@ -1226,8 +1226,13 @@ class QCCSelfAttention(nn.Module):
             dtype=state_dtype,
         )
         archive_outputs: list[Tensor] = []
-        for start in range(0, length, block_size):
-            end = min(length, start + block_size)
+        event_count = max(0, length - window)
+        # The first ``window`` tokens are still in exact local KV and must not
+        # enter the historical archive.  The inference path begins its archive
+        # recurrence at the same boundary; keeping this offset here is crucial
+        # for a train/inference-equivalent checkpoint.
+        for start in range(0, event_count, block_size):
+            end = min(event_count, start + block_size)
             block_key = k[:, :, start:end]
             block_value = v[:, :, start:end]
             score = torch.einsum(
@@ -1252,10 +1257,14 @@ class QCCSelfAttention(nn.Module):
             )
             archive_outputs.append(
                 self.archive._read_states_chunk(
-                    q[:, :, start:end], numerator_states, denominator_states
+                    q[:, :, window + start : window + end],
+                    numerator_states,
+                    denominator_states,
                 )
             )
-        archive_out = torch.cat(archive_outputs, dim=2)
+        archive_out = torch.zeros_like(local_out)
+        if archive_outputs:
+            archive_out[:, :, window:] = torch.cat(archive_outputs, dim=2)
         gate = torch.sigmoid(self.gate(hidden)).transpose(1, 2).unsqueeze(-1)
         mixed_out = gate * local_out + (1.0 - gate) * archive_out
         active = (torch.arange(length, device=hidden.device) >= window).view(
