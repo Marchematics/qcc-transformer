@@ -115,7 +115,10 @@ These are single-run CPU measurements, not a hardware-independent speedup
 claim.
 
 The sequence-level prefill path uses the same block recurrence as streaming
-decode (rather than a Python update/read loop). On the reference CPU with
+decode (rather than a Python update/read loop). On CUDA with Triton, dense
+decode chunks use two launches per bounded block (one recurrent update/partial
+response kernel and one code-routing reduction), replacing the former
+per-token launch pair. On the reference CPU with
 `--threads 1`, `d_model=256`, two layers, 8 heads, `window_size=32`, and
 `num_codes=16`, one run with warmup 1 and steps 2 measured:
 
@@ -294,21 +297,22 @@ logits = model(input_ids)
 
 ## Caveats
 
-The current reference implementation has three deliberate limitations: additive
-sinusoidal positions are used by default (RoPE is not yet implemented), the
-training path retains sequence-level Python loops, and the archive uses a
-clipped exponential accumulator. These are appropriate for validating the
-architecture and its gradients, but not for production throughput. The archive
-state is accumulated in fp32 to reduce long-stream drift.
+The current reference implementation has three deliberate limitations:
+additive sinusoidal positions are used by default (RoPE is available as an
+explicit option), the training path retains sequence-level Python loops, and
+the archive uses a clipped exponential accumulator. These are appropriate for
+validating the architecture and its gradients, but not for production
+throughput. The archive state is accumulated in fp32 to reduce long-stream
+drift.
 
 On a CUDA installation with Triton available, construct the model with
 `use_triton=True` (the default) to dispatch fused archive-update and archive-read
 kernels during `no_grad()` decoding. Sparse lazy configurations with power-of-two
 `active_codes` additionally dispatch fused selected-slot update/read kernels;
-other shapes automatically use PyTorch. The chunk API still performs ordered
-archive events, so a future GPU optimization is a single launch for a whole
-decode chunk. These kernels are optional and have not been benchmarked in this
-CPU-only environment.
+other shapes automatically use PyTorch. Dense `decode_chunk` calls dispatch a
+two-kernel fused archive path per `archive_scan_block_size` block, while
+sparse/lazy chunks retain the ordered top-k reference path. These kernels are
+optional and have not been benchmarked in this CPU-only environment.
 
 ## License
 

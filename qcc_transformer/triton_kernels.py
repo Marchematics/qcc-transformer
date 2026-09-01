@@ -401,6 +401,245 @@ try:  # pragma: no cover - exercised only on a Triton-enabled GPU runner
             output,
             mask=mask_d,
         )
+
+    @triton.jit
+    def _qcc_update_read_partial_kernel(
+        partial_ptr,
+        key_ptr,
+        value_ptr,
+        codes_ptr,
+        rates_ptr,
+        aged_rates_ptr,
+        mix_ptr,
+        numerator_ptr,
+        denominator_ptr,
+        num_events,
+        num_heads,
+        stride_pb,
+        stride_ph,
+        stride_pe,
+        stride_pc,
+        stride_pd,
+        stride_kb,
+        stride_kh,
+        stride_ke,
+        stride_kd,
+        stride_vb,
+        stride_vh,
+        stride_ve,
+        stride_vd,
+        stride_ch,
+        stride_cm,
+        stride_cd,
+        stride_rb,
+        stride_rh,
+        stride_re,
+        stride_rj,
+        stride_nb,
+        stride_nh,
+        stride_nm,
+        stride_nj,
+        stride_nd,
+        stride_db,
+        stride_dh,
+        stride_dm,
+        stride_dj,
+        BLOCK_D: tl.constexpr,
+        BLOCK_S: tl.constexpr,
+        NUM_CODES: tl.constexpr,
+        NUM_SCALES: tl.constexpr,
+        HEAD_DIM: tl.constexpr,
+    ):
+        """Update every scale for one code and emit its mixed response.
+
+        One program owns a ``(batch, head, code)`` state slot and walks the
+        events in order.  This preserves the recurrent update/read semantics,
+        while replacing one Python/Triton launch per event with one launch for
+        the complete decode block.  A second kernel performs the query routing
+        reduction across codes.
+        """
+
+        pid = tl.program_id(0)
+        codes_per_batch = num_heads * NUM_CODES
+        batch = pid // codes_per_batch
+        rem = pid % codes_per_batch
+        head = rem // NUM_CODES
+        code_id = rem % NUM_CODES
+        offs_d = tl.arange(0, BLOCK_D)
+        offs_s = tl.arange(0, BLOCK_S)
+        mask_d = offs_d < HEAD_DIM
+        mask_s = offs_s < NUM_SCALES
+        code = tl.load(
+            codes_ptr + head * stride_ch + code_id * stride_cm + offs_d * stride_cd,
+            mask=mask_d,
+            other=0.0,
+        ).to(tl.float32)
+        rates = tl.load(rates_ptr + offs_s, mask=mask_s, other=1.0).to(tl.float32)
+        aged_rates = tl.load(
+            aged_rates_ptr + offs_s, mask=mask_s, other=1.0
+        ).to(tl.float32)
+        mix = tl.load(
+            mix_ptr + head * stride_rh + code_id * stride_re + offs_s * stride_rj,
+            mask=mask_s,
+            other=0.0,
+        ).to(tl.float32)
+        state_num_offsets = (
+            batch * stride_nb
+            + head * stride_nh
+            + code_id * stride_nm
+            + offs_s[:, None] * stride_nj
+            + offs_d[None, :] * stride_nd
+        )
+        state_num_mask = mask_s[:, None] & mask_d[None, :]
+        state_num = tl.load(
+            numerator_ptr + state_num_offsets, mask=state_num_mask, other=0.0
+        ).to(tl.float32)
+        state_den_offsets = (
+            batch * stride_db
+            + head * stride_dh
+            + code_id * stride_dm
+            + offs_s * stride_dj
+        )
+        state_den = tl.load(
+            denominator_ptr + state_den_offsets, mask=mask_s, other=0.0
+        ).to(tl.float32)
+
+        for event in tl.range(0, num_events):
+            key = tl.load(
+                key_ptr
+                + batch * stride_kb
+                + head * stride_kh
+                + event * stride_ke
+                + offs_d * stride_kd,
+                mask=mask_d,
+                other=0.0,
+            ).to(tl.float32)
+            value = tl.load(
+                value_ptr
+                + batch * stride_vb
+                + head * stride_vh
+                + event * stride_ve
+                + offs_d * stride_vd,
+                mask=mask_d,
+                other=0.0,
+            ).to(tl.float32)
+            score = tl.sum(key * code, axis=0) / tl.sqrt(
+                tl.full((), HEAD_DIM, tl.float32)
+            )
+            weight = tl.exp(tl.minimum(tl.maximum(score, -20.0), 10.0))
+            addition = weight * aged_rates
+            state_den = state_den * rates + addition
+            state_num = state_num * rates[:, None] + addition[:, None] * value[None, :]
+            response = tl.sum(
+                mix[:, None]
+                * state_num
+                / tl.maximum(state_den[:, None], 1e-8),
+                axis=0,
+            )
+            partial_offsets = (
+                batch * stride_pb
+                + head * stride_ph
+                + event * stride_pe
+                + code_id * stride_pc
+                + offs_d * stride_pd
+            )
+            tl.store(partial_ptr + partial_offsets, response, mask=mask_d)
+
+        tl.store(
+            numerator_ptr + state_num_offsets,
+            state_num,
+            mask=state_num_mask,
+        )
+        tl.store(
+            denominator_ptr + state_den_offsets,
+            state_den,
+            mask=mask_s,
+        )
+
+    @triton.jit
+    def _qcc_route_partial_kernel(
+        output_ptr,
+        query_ptr,
+        partial_ptr,
+        codes_ptr,
+        num_heads,
+        stride_ob,
+        stride_oh,
+        stride_oe,
+        stride_od,
+        stride_qb,
+        stride_qh,
+        stride_qe,
+        stride_qd,
+        stride_pb,
+        stride_ph,
+        stride_pe,
+        stride_pc,
+        stride_pd,
+        stride_ch,
+        stride_cm,
+        stride_cd,
+        num_events,
+        BLOCK_D: tl.constexpr,
+        BLOCK_C: tl.constexpr,
+        NUM_CODES: tl.constexpr,
+        HEAD_DIM: tl.constexpr,
+    ):
+        """Route per-code responses for a query block in one GPU launch."""
+
+        pid = tl.program_id(0)
+        events_per_batch = num_heads * num_events
+        batch = pid // events_per_batch
+        rem = pid % events_per_batch
+        head = rem // num_events
+        event = rem % num_events
+        offs_d = tl.arange(0, BLOCK_D)
+        offs_c = tl.arange(0, BLOCK_C)
+        mask_d = offs_d < HEAD_DIM
+        mask_c = offs_c < NUM_CODES
+        query = tl.load(
+            query_ptr
+            + batch * stride_qb
+            + head * stride_qh
+            + event * stride_qe
+            + offs_d * stride_qd,
+            mask=mask_d,
+            other=0.0,
+        ).to(tl.float32)
+        code_offsets = (
+            head * stride_ch
+            + offs_c[:, None] * stride_cm
+            + offs_d[None, :] * stride_cd
+        )
+        code_mask = mask_c[:, None] & mask_d[None, :]
+        code_block = tl.load(codes_ptr + code_offsets, mask=code_mask, other=0.0).to(
+            tl.float32
+        )
+        logits = tl.sum(code_block * query[None, :], axis=1) / tl.sqrt(
+            tl.full((), HEAD_DIM, tl.float32)
+        )
+        logits = tl.where(mask_c, logits, -float("inf"))
+        max_logit = tl.max(logits, axis=0)
+        routing = tl.exp(logits - max_logit)
+        routing = tl.where(mask_c, routing / tl.sum(routing, axis=0), 0.0)
+        partial_offsets = (
+            batch * stride_pb
+            + head * stride_ph
+            + event * stride_pe
+            + offs_c[:, None] * stride_pc
+            + offs_d[None, :] * stride_pd
+        )
+        partial = tl.load(partial_ptr + partial_offsets, mask=code_mask, other=0.0).to(
+            tl.float32
+        )
+        output = tl.sum(routing[:, None] * partial, axis=0)
+        output_offsets = (
+            batch * stride_ob
+            + head * stride_oh
+            + event * stride_oe
+            + offs_d * stride_od
+        )
+        tl.store(output_ptr + output_offsets, output, mask=mask_d)
 except ImportError:  # pragma: no cover - normal CPU installation
     TRITON_AVAILABLE = False
 
@@ -645,3 +884,127 @@ def triton_sparse_read_archive(
         ACTIVE_CODES=active,
     )
     return output.to(query.dtype)
+
+
+def triton_update_read_archive_chunk(
+    key: torch.Tensor,
+    value: torch.Tensor,
+    query: torch.Tensor,
+    numerator: torch.Tensor,
+    denominator: torch.Tensor,
+    codes: torch.Tensor,
+    mix_logits: torch.Tensor,
+    rates: torch.Tensor,
+    window_size: int,
+    *,
+    block_size: int = 256,
+) -> torch.Tensor:
+    """Fuse dense archive update/read for a block of evicted tokens.
+
+    The recurrent state is still updated in event order, but each bounded
+    block uses two Triton launches (state/partial update and code routing)
+    instead of one update plus one read launch per token.  ``block_size``
+    bounds the temporary per-code response tensor, which is important for
+    million-token prefill where the public API may pass a very large block.
+    """
+
+    if not TRITON_AVAILABLE or not key.is_cuda:
+        raise RuntimeError("Triton CUDA runtime is unavailable")
+    if key.ndim != 4 or value.shape != key.shape or query.shape != key.shape:
+        raise ValueError("key, value, and query must have shape [batch, heads, events, head_dim]")
+    if numerator.ndim != 5 or denominator.ndim != 4:
+        raise ValueError("archive state has an invalid rank")
+    if block_size <= 0:
+        raise ValueError("block_size must be positive")
+    batch, heads, events, dim = key.shape
+    if events == 0:
+        return query.new_empty(query.shape)
+    if numerator.shape[0] != batch or numerator.shape[1] != heads:
+        raise ValueError("archive state batch/head shape does not match inputs")
+    num_codes = numerator.shape[2]
+    num_scales = numerator.shape[3]
+    if codes.shape != (heads, num_codes, dim):
+        raise ValueError("codes shape does not match archive state")
+    if rates.numel() != num_scales or mix_logits.shape != (heads, num_codes, num_scales):
+        raise ValueError("rates or mix_logits shape does not match archive state")
+
+    # Triton kernels use contiguous pointers for predictable coalescing.  The
+    # archive owns contiguous state, but copy back defensively for callers
+    # passing a strided state view.
+    original_numerator = numerator
+    original_denominator = denominator
+    numerator = numerator.contiguous()
+    denominator = denominator.contiguous()
+    key = key.contiguous()
+    value = value.contiguous()
+    query = query.contiguous()
+    codes = codes.contiguous()
+    rates = rates.to(device=key.device, dtype=torch.float32).contiguous()
+    mix = torch.softmax(mix_logits, dim=-1).to(device=key.device, dtype=torch.float32).contiguous()
+    aged_rates = rates.pow(window_size).contiguous()
+    block_dim = 1 << max(4, (dim - 1).bit_length())
+    block_scales = 1 << max(0, (num_scales - 1).bit_length())
+    block_codes = 1 << max(0, (num_codes - 1).bit_length())
+    outputs: list[torch.Tensor] = []
+
+    for start in range(0, events, block_size):
+        count = min(block_size, events - start)
+        key_block = key[:, :, start : start + count]
+        value_block = value[:, :, start : start + count]
+        query_block = query[:, :, start : start + count]
+        partial = torch.empty(
+            (batch, heads, count, num_codes, dim),
+            device=key.device,
+            dtype=torch.float32,
+        )
+        _qcc_update_read_partial_kernel[(batch * heads * num_codes,)](
+            partial,
+            key_block,
+            value_block,
+            codes,
+            rates,
+            aged_rates,
+            mix,
+            numerator,
+            denominator,
+            count,
+            heads,
+            *partial.stride(),
+            *key_block.stride(),
+            *value_block.stride(),
+            *codes.stride(),
+            *mix.stride(),
+            *numerator.stride(),
+            *denominator.stride(),
+            BLOCK_D=block_dim,
+            BLOCK_S=block_scales,
+            NUM_CODES=num_codes,
+            NUM_SCALES=num_scales,
+            HEAD_DIM=dim,
+        )
+        output = torch.empty(
+            (batch, heads, count, dim), device=key.device, dtype=query.dtype
+        )
+        _qcc_route_partial_kernel[(batch * heads * count,)](
+            output,
+            query_block,
+            partial,
+            codes,
+            heads,
+            *output.stride(),
+            *query_block.stride(),
+            *partial.stride(),
+            *codes.stride(),
+            count,
+            BLOCK_D=block_dim,
+            BLOCK_C=block_codes,
+            NUM_CODES=num_codes,
+            HEAD_DIM=dim,
+        )
+        outputs.append(output)
+
+    if numerator.data_ptr() != original_numerator.data_ptr():
+        original_numerator.copy_(numerator)
+    if denominator.data_ptr() != original_denominator.data_ptr():
+        original_denominator.copy_(denominator)
+    return torch.cat(outputs, dim=2)

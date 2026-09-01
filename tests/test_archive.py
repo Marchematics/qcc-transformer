@@ -9,6 +9,7 @@ from qcc_transformer.triton_kernels import (
     triton_read_archive,
     triton_sparse_read_archive,
     triton_update_archive,
+    triton_update_read_archive_chunk,
 )
 
 
@@ -423,6 +424,18 @@ def test_triton_kernel_is_optional_on_cpu() -> None:
             archive.decay_rates,
             1,
         )
+    with pytest.raises(RuntimeError, match="Triton CUDA runtime"):
+        triton_update_read_archive_chunk(
+            torch.zeros(1, 1, 2, 2),
+            torch.zeros(1, 1, 2, 2),
+            torch.zeros(1, 1, 2, 2),
+            archive.state.numerator,
+            archive.state.denominator,
+            archive.codes,
+            archive.mix_logits,
+            archive.decay_rates,
+            archive.window_size,
+        )
 
 
 @pytest.mark.skipif(not torch.cuda.is_available() or not TRITON_AVAILABLE, reason="CUDA and Triton required")
@@ -471,3 +484,29 @@ def test_triton_sparse_lazy_matches_reference() -> None:
     torch.testing.assert_close(fused.state.denominator, reference.state.denominator, rtol=3e-3, atol=3e-3)
     torch.testing.assert_close(fused.state.numerator, reference.state.numerator, rtol=3e-3, atol=3e-3)
     torch.testing.assert_close(fused_out, reference_out, rtol=3e-3, atol=3e-3)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available() or not TRITON_AVAILABLE, reason="CUDA and Triton required")
+def test_triton_fused_chunk_matches_reference() -> None:
+    torch.manual_seed(11)
+    kwargs = dict(
+        num_heads=2,
+        head_dim=16,
+        num_codes=8,
+        decay_rates=(0.9, 0.97, 0.995),
+        window_size=3,
+        scan_block_size=5,
+    )
+    reference = QCCArchive(**kwargs, use_triton=False).cuda()
+    fused = QCCArchive(**kwargs, use_triton=True).cuda()
+    keys = torch.randn(2, 2, 13, 16, device="cuda")
+    values = torch.randn_like(keys)
+    queries = torch.randn_like(keys)
+    with torch.no_grad():
+        reference.reset_state(2, device=keys.device)
+        fused.reset_state(2, device=keys.device)
+        reference_out = reference.update_read_chunk(keys, values, queries)
+        fused_out = fused.update_read_chunk(keys, values, queries)
+    torch.testing.assert_close(fused.state.denominator, reference.state.denominator, rtol=4e-3, atol=4e-3)
+    torch.testing.assert_close(fused.state.numerator, reference.state.numerator, rtol=4e-3, atol=4e-3)
+    torch.testing.assert_close(fused_out, reference_out, rtol=4e-3, atol=4e-3)

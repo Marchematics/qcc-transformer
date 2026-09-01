@@ -353,8 +353,30 @@ class QCCArchive(nn.Module):
                 outputs.append(self._lazy_read(query[:, :, index]))
             return torch.stack(outputs, dim=2)
 
-        # Preserve the fused path on CUDA; CPU and unsupported devices use the
-        # block scan to remove one Python loop iteration per token.
+        # Dense CUDA chunks use a two-launch fused update/read path.  The
+        # previous implementation issued one update and one read launch per
+        # event, which made chunked serving launch-bound even when the archive
+        # state itself was tiny.  Sparse/lazy archives retain their dedicated
+        # top-k path for now; CPU and unsupported devices use the block scan.
+        if self.use_triton and key.is_cuda and self.active_codes is None:
+            from .triton_kernels import TRITON_AVAILABLE, triton_update_read_archive_chunk
+
+            if TRITON_AVAILABLE:
+                return triton_update_read_archive_chunk(
+                    key,
+                    value,
+                    query,
+                    self._numerator,
+                    self._denominator,
+                    self.codes,
+                    self.mix_logits,
+                    self.decay_rates,
+                    self.window_size,
+                    block_size=self.scan_block_size,
+                )
+
+        # Sparse/lazy CUDA chunks and unsupported devices use the reference
+        # event path or block scan below.
         if self.use_triton and key.is_cuda:
             for index in range(events):
                 self.update(key[:, :, index], value[:, :, index])
