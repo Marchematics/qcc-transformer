@@ -203,7 +203,7 @@ class QCCArchive(nn.Module):
                 )
                 return
 
-        codes = self.codes.to(dtype=self._numerator.dtype)
+        codes = self.codes.to(device=key.device, dtype=self._numerator.dtype)
         score = torch.einsum("bhd,hmd->bhm", key.to(self._numerator.dtype), codes)
         score = score / math.sqrt(self.head_dim)
         # Clipping bounds the reference implementation. A fused kernel should
@@ -452,14 +452,17 @@ class QCCArchive(nn.Module):
     def _read_states(self, query: Tensor, numerator: Tensor, denominator: Tensor) -> Tensor:
         """Read one or many queries from explicit archive states."""
 
+        codes = self.codes.to(device=query.device, dtype=self._numerator.dtype)
         routing_logits = torch.einsum(
-            "bhd,hmd->bhm", query.to(self.codes.dtype), self.codes
+            "bhd,hmd->bhm", query.to(codes.dtype), codes
         ) / math.sqrt(self.head_dim)
         active = self.active_codes
         if active is None or active >= self.num_codes or torch.is_grad_enabled():
             denom = denominator.clamp_min(1e-8)
             response = numerator / denom.unsqueeze(-1)
-            mix = F.softmax(self.mix_logits, dim=-1).to(response.dtype)
+            mix = F.softmax(
+                self.mix_logits.to(device=query.device, dtype=response.dtype), dim=-1
+            )
             response = torch.einsum("hmj,bhmjd->bhmd", mix, response)
             routing = F.softmax(routing_logits, dim=-1).to(response.dtype)
             return torch.einsum("bhm,bhmd->bhd", routing, response).to(query.dtype)
@@ -471,7 +474,7 @@ class QCCArchive(nn.Module):
         )
         selected_den = denominator.gather(2, index_scales)
         selected = selected_num / selected_den.clamp_min(1e-8).unsqueeze(-1)
-        mix_logits = self.mix_logits.unsqueeze(0).expand(query.shape[0], -1, -1, -1).gather(
+        mix_logits = self.mix_logits.to(device=query.device).unsqueeze(0).expand(query.shape[0], -1, -1, -1).gather(
             2, index_scales
         )
         mix = F.softmax(mix_logits, dim=-1).to(selected.dtype)
@@ -522,7 +525,7 @@ class QCCArchive(nn.Module):
         numerator = numerator * decay.unsqueeze(-1)
         denominator = denominator * decay
         response = numerator / denominator.clamp_min(1e-8).unsqueeze(-1)
-        mix_logits = self.mix_logits.unsqueeze(0).expand(query.shape[0], -1, -1, -1).gather(
+        mix_logits = self.mix_logits.to(device=query.device).unsqueeze(0).expand(query.shape[0], -1, -1, -1).gather(
             2, index_scales
         )
         mix = F.softmax(mix_logits, dim=-1).to(response.dtype)
@@ -533,14 +536,17 @@ class QCCArchive(nn.Module):
     def _read_states_chunk(self, query: Tensor, numerator: Tensor, denominator: Tensor) -> Tensor:
         """Read a query block from explicit archive states."""
 
+        codes = self.codes.to(device=query.device, dtype=self._numerator.dtype)
         routing_logits = torch.einsum(
-            "bhed,hmd->bhem", query.to(self.codes.dtype), self.codes
+            "bhed,hmd->bhem", query.to(codes.dtype), codes
         ) / math.sqrt(self.head_dim)
         active = self.active_codes
         if active is None or active >= self.num_codes:
             denom = denominator.clamp_min(1e-8)
             response = numerator / denom.unsqueeze(-1)
-            mix = F.softmax(self.mix_logits, dim=-1).to(response.dtype)
+            mix = F.softmax(
+                self.mix_logits.to(device=query.device, dtype=response.dtype), dim=-1
+            )
             response = torch.einsum("hmj,bhemjd->bhemd", mix, response)
             routing = F.softmax(routing_logits, dim=-1).to(response.dtype)
             return torch.einsum("bhem,bhemd->bhed", routing, response).to(query.dtype)
@@ -552,7 +558,7 @@ class QCCArchive(nn.Module):
         )
         selected_den = denominator.gather(3, index_scales)
         selected = selected_num / selected_den.clamp_min(1e-8).unsqueeze(-1)
-        mix_logits = self.mix_logits.unsqueeze(0).unsqueeze(2).expand(
+        mix_logits = self.mix_logits.to(device=query.device).unsqueeze(0).unsqueeze(2).expand(
             query.shape[0], -1, query.shape[2], -1, -1
         ).gather(3, index_scales)
         mix = F.softmax(mix_logits, dim=-1).to(selected.dtype)
