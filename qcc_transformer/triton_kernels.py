@@ -730,11 +730,6 @@ try:  # pragma: no cover - exercised only on a Triton-enabled GPU runner
         offs_s = tl.arange(0, BLOCK_S)
         mask_d = offs_d < HEAD_DIM
         mask_s = offs_s < NUM_SCALES
-        code = tl.load(
-            codes_ptr + head * stride_ch + code_id * stride_cm + offs_d * stride_cd,
-            mask=mask_d,
-            other=0.0,
-        ).to(tl.float32)
         rates = tl.load(rates_ptr + offs_s, mask=mask_s, other=1.0).to(tl.float32)
         aged_rates = tl.load(
             aged_rates_ptr + offs_s, mask=mask_s, other=1.0
