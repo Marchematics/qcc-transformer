@@ -262,6 +262,23 @@ as `missing`, never as a passing score. For a modest-context matched quality
 check on the same retrieval records, add `--compare-full-retrieval`; the full
 baseline is automatically refused beyond `--full-max-length`.
 
+### Target-gate status
+
+The requested headline gates are intentionally tracked separately from the
+available smoke evidence:
+
+| Gate | Current evidence | Status |
+|---|---|---|
+| State @128K/1M/4M | `0.1258%` / `0.0161%` / `0.0040%` | measured |
+| Full-KV quality | `0.9981–0.9990` logit cosine at 512–2,048 tokens | short-context only |
+| RULER @128K | no trained checkpoint/dataset in this checkout | missing |
+| Retrieval @1M | evaluator and gate exist; no scored checkpoint | missing |
+| TTFT/TPOT speedup | CPU scaling only; CUDA fused kernels are unbenchmarked here | missing |
+| FullAttention context @4M | hypothetical storage accounting only | configured, not executed |
+
+No row marked `missing` or `short-context only` should be reported as a
+production or universal speedup claim.
+
 On the reference CPU environment (PyTorch 2.9.1, one thread), a persistent
 decode benchmark with the fused SDPA full-KV control measured:
 
