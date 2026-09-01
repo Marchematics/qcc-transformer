@@ -21,3 +21,5 @@ jobs:
           python -m pip install -e '.[dev]'
       - name: Test
         run: pytest
+      - name: Audit harness smoke test
+        run: python benchmarks/audit_targets.py --state-only --json
