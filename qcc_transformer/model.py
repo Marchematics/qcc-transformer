@@ -203,10 +203,90 @@ class QCCSelfAttention(nn.Module):
         self.archive = QCCArchive(
             num_heads, self.head_dim, num_codes, rates, window_size
         )
+        self._local_keys: list[Tensor] = []
+        self._local_values: list[Tensor] = []
+        self._seen_tokens = 0
 
     def _split_heads(self, x: Tensor) -> Tensor:
         bsz, length, _ = x.shape
         return x.view(bsz, length, self.num_heads, self.head_dim).transpose(1, 2)
+
+    def reset_cache(self, batch_size: int, *, device: torch.device) -> None:
+        """Reset the persistent state used by :meth:`step`."""
+
+        self.archive.reset_state(batch_size, device=device)
+        self._local_keys = []
+        self._local_values = []
+        self._seen_tokens = 0
+
+    def step(self, hidden: Tensor, *, reset_cache: bool = False) -> Tensor:
+        """Decode one token with bounded local KV plus recurrent archive state.
+
+        ``hidden`` is ``[batch, d_model]``. This method is intended for
+        ``torch.no_grad()`` serving; unlike :meth:`forward`, it does not replay
+        the prefix and therefore exposes the constant-history read path.
+        """
+
+        if hidden.ndim != 2 or hidden.shape[-1] != self.d_model:
+            raise ValueError("hidden must have shape [batch, d_model]")
+        bsz = hidden.shape[0]
+        if reset_cache or self.archive._numerator.shape[0] != bsz:
+            self.reset_cache(bsz, device=hidden.device)
+        q = self._split_heads(self.q_proj(hidden[:, None]))[:, :, 0]
+        key = self._split_heads(self.k_proj(hidden[:, None]))[:, :, 0]
+        value = self._split_heads(self.v_proj(hidden[:, None]))[:, :, 0]
+        self._local_keys.append(key)
+        self._local_values.append(value)
+        if self.use_archive and len(self._local_keys) > self.window_size:
+            self.archive.update(self._local_keys.pop(0), self._local_values.pop(0))
+
+        local_keys = torch.stack(self._local_keys, dim=2)
+        local_values = torch.stack(self._local_values, dim=2)
+        local_logits = torch.einsum("bhd,bhld->bhl", q, local_keys) / math.sqrt(self.head_dim)
+        local_prob = F.softmax(local_logits, dim=-1)
+        local_out = torch.einsum("bhl,bhld->bhd", local_prob, local_values)
+        if self.use_archive and self._seen_tokens >= self.window_size:
+            archive_out = self.archive.read(q)
+            gate = torch.sigmoid(self.gate(hidden)).unsqueeze(-1)
+            head_out = gate * local_out + (1.0 - gate) * archive_out
+        else:
+            head_out = local_out
+        self._seen_tokens += 1
+        return self.out_proj(head_out.reshape(bsz, self.d_model))
+
+    def _forward_inference(self, hidden: Tensor, q: Tensor, k: Tensor, v: Tensor) -> Tensor:
+        """Vectorized local path used by evaluation/decode (no autograd)."""
+
+        bsz, length, _ = hidden.shape
+        window = min(self.window_size, length)
+        # [B,H,D,T+W-1] -> [B,H,T,W,D]. This avoids Python-level K/V stacks.
+        k_pad = F.pad(k.transpose(-1, -2), (window - 1, 0))
+        v_pad = F.pad(v.transpose(-1, -2), (window - 1, 0))
+        k_windows = k_pad.unfold(-1, window, 1).permute(0, 1, 3, 4, 2)
+        v_windows = v_pad.unfold(-1, window, 1).permute(0, 1, 3, 4, 2)
+        local_logits = torch.einsum("bhtd,bhtwd->bhtw", q, k_windows)
+        local_logits = local_logits / math.sqrt(self.head_dim)
+        valid = torch.arange(window, device=hidden.device)[None, :] >= (
+            window - 1 - torch.arange(length, device=hidden.device)[:, None]
+        )
+        local_logits = local_logits.masked_fill(~valid[None, None], torch.finfo(local_logits.dtype).min)
+        local_prob = F.softmax(local_logits, dim=-1)
+        local_out = torch.einsum("bhtw,bhtwd->bhtd", local_prob, v_windows)
+
+        if self.use_archive:
+            self.archive.reset_state(bsz, device=hidden.device)
+            archive_out = torch.zeros_like(local_out)
+            for t in range(self.window_size, length):
+                self.archive.update(k[:, :, t - self.window_size], v[:, :, t - self.window_size])
+                archive_out[:, :, t] = self.archive.read(q[:, :, t])
+            gate = torch.sigmoid(self.gate(hidden)).transpose(1, 2).unsqueeze(-1)
+            mixed_out = gate * local_out + (1.0 - gate) * archive_out
+            active = (torch.arange(length, device=hidden.device) >= self.window_size).view(1, 1, length, 1)
+            head_out = torch.where(active, mixed_out, local_out)
+        else:
+            # Full-attention baseline uses PyTorch's fused causal kernel.
+            head_out = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+        return self.out_proj(head_out.transpose(1, 2).reshape(bsz, length, self.d_model))
 
     def forward(self, hidden: Tensor, *, reset_state: bool = True) -> Tensor:
         if hidden.ndim != 3 or hidden.shape[-1] != self.d_model:
@@ -215,6 +295,8 @@ class QCCSelfAttention(nn.Module):
         q = self._split_heads(self.q_proj(hidden))
         k = self._split_heads(self.k_proj(hidden))
         v = self._split_heads(self.v_proj(hidden))
+        if not torch.is_grad_enabled():
+            return self._forward_inference(hidden, q, k, v)
         if reset_state or self.archive._numerator.shape[0] != bsz:
             self.archive.reset_state(bsz, device=hidden.device)
 
@@ -240,7 +322,9 @@ class QCCSelfAttention(nn.Module):
                 head_out = gate * local_out + (1.0 - gate) * archive_out
             else:
                 head_out = local_out
-            outputs.append(head_out.transpose(1, 2).reshape(bsz, self.d_model))
+            # Concatenate heads in head-major order, matching the vectorized
+            # inference path and standard multi-head attention layouts.
+            outputs.append(head_out.reshape(bsz, self.d_model))
 
         return self.out_proj(torch.stack(outputs, dim=1))
 
@@ -261,6 +345,10 @@ class QCCDecoderLayer(nn.Module):
 
     def forward(self, x: Tensor, *, reset_state: bool) -> Tensor:
         x = x + self.attention(self.norm1(x), reset_state=reset_state)
+        return x + self.mlp(self.norm2(x))
+
+    def step(self, x: Tensor, *, reset_cache: bool = False) -> Tensor:
+        x = x + self.attention.step(self.norm1(x), reset_cache=reset_cache)
         return x + self.mlp(self.norm2(x))
 
 
@@ -297,6 +385,7 @@ class QCCForCausalLM(nn.Module):
         self.lm_head = nn.Linear(d_model, vocab_size, bias=False)
         self.lm_head.weight = self.token_embedding.weight
         self.max_position_embeddings = max_position_embeddings
+        self._cache_position = 0
 
     def forward(self, input_ids: Tensor, *, reset_state: bool = True) -> Tensor:
         if input_ids.ndim != 2:
@@ -308,6 +397,39 @@ class QCCForCausalLM(nn.Module):
         x = self.token_embedding(input_ids) + self.position_embedding(positions)
         for index, layer in enumerate(self.layers):
             x = layer(x, reset_state=reset_state or index > 0)
+        return self.lm_head(self.norm(x))
+
+    def reset_cache(self, batch_size: int = 1) -> None:
+        """Reset all layer caches before an independent generation stream."""
+
+        for layer in self.layers:
+            layer.attention.reset_cache(batch_size, device=self.token_embedding.weight.device)
+        self._cache_position = 0
+
+    @torch.no_grad()
+    def decode_step(self, input_ids: Tensor, *, reset_cache: bool = False) -> Tensor:
+        """Return logits for one token per batch element using persistent caches."""
+
+        if input_ids.ndim == 2 and input_ids.shape[1] == 1:
+            input_ids = input_ids[:, 0]
+        if input_ids.ndim != 1:
+            raise ValueError("decode_step input_ids must have shape [batch] or [batch, 1]")
+        if self._cache_position >= self.max_position_embeddings:
+            raise ValueError("decode position exceeds max_position_embeddings")
+        bsz = input_ids.shape[0]
+        cache_batch = getattr(self, "_cache_batch_size", None)
+        if reset_cache or self._cache_position == 0 or cache_batch != bsz:
+            for layer in self.layers:
+                layer.attention.reset_cache(bsz, device=input_ids.device)
+            self._cache_position = 0
+            self._cache_batch_size = bsz
+        position = torch.full(
+            (bsz,), self._cache_position, device=input_ids.device, dtype=torch.long
+        )
+        x = self.token_embedding(input_ids) + self.position_embedding(position)
+        for layer in self.layers:
+            x = layer.step(x)
+        self._cache_position += 1
         return self.lm_head(self.norm(x))
 
 

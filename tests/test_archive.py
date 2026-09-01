@@ -63,6 +63,66 @@ def test_first_evicted_token_enters_archive_at_window_boundary() -> None:
     assert torch.count_nonzero(populated) > 0
 
 
+def test_vectorized_inference_matches_reference_path() -> None:
+    torch.manual_seed(3)
+    model = QCCForCausalLM(
+        vocab_size=23,
+        d_model=24,
+        num_layers=1,
+        num_heads=4,
+        window_size=3,
+        num_codes=4,
+    )
+    tokens = torch.randint(0, 23, (2, 9))
+    model.train()
+    with torch.enable_grad():
+        reference = model(tokens)
+    model.eval()
+    with torch.no_grad():
+        optimized = model(tokens)
+    torch.testing.assert_close(optimized, reference, rtol=2e-4, atol=2e-4)
+
+
+def test_persistent_decode_matches_sequence_forward() -> None:
+    torch.manual_seed(4)
+    model = QCCForCausalLM(
+        vocab_size=29,
+        d_model=24,
+        num_layers=2,
+        num_heads=4,
+        max_position_embeddings=32,
+        window_size=3,
+        num_codes=4,
+    ).eval()
+    tokens = torch.randint(0, 29, (2, 11))
+    with torch.no_grad():
+        sequence_logits = model(tokens)
+        model.reset_cache(tokens.shape[0])
+        streamed = torch.stack(
+            [model.decode_step(tokens[:, t]) for t in range(tokens.shape[1])], dim=1
+        )
+    torch.testing.assert_close(streamed, sequence_logits, rtol=2e-4, atol=2e-4)
+
+
+def test_persistent_local_cache_never_exceeds_window() -> None:
+    model = QCCForCausalLM(
+        vocab_size=13,
+        d_model=16,
+        num_layers=1,
+        num_heads=4,
+        max_position_embeddings=64,
+        window_size=3,
+        num_codes=4,
+    ).eval()
+    with torch.no_grad():
+        model.reset_cache(1)
+        for token in torch.randint(0, 13, (20,)):
+            model.decode_step(token[None])
+    cache = model.layers[0].attention
+    assert len(cache._local_keys) <= cache.window_size
+    assert len(cache._local_values) <= cache.window_size
+
+
 def test_archive_state_is_constant_in_sequence_length() -> None:
     model = QCCForCausalLM(
         vocab_size=17, d_model=16, num_layers=3, num_heads=4, window_size=2

@@ -27,10 +27,31 @@ pytest
 ## Run the microbenchmark
 
 ```bash
-python benchmarks/benchmark_decode.py --length 512 --warmup 1 --steps 3
+python benchmarks/benchmark_decode.py --length 512 --mode decode --warmup 1 --steps 3
 ```
 
+`decode_step` maintains a persistent local/archive state and processes one
+token at a time. Use `--mode prefill` to benchmark the sequence-level path.
+
 The benchmark reports runtime only. It is not evidence of language-model quality. For a meaningful study, train matched small models and evaluate perplexity, Needle-in-a-Haystack, RULER, PG-19, cache memory, and decode TPOT at 32k+ context.
+
+On the reference CPU environment (PyTorch 2.9, one thread configuration not
+fixed), the persistent decode benchmark measured:
+
+| Tokens | QCC | Full KV | Relative |
+|---:|---:|---:|---:|
+| 1,024 | 1.63 s | 2.09 s | 1.28x |
+| 2,048 | 3.38 s | 9.09 s | 2.69x |
+| 4,096 | 6.87 s | 37.71 s | 5.49x |
+
+At 1,024 tokens in this configuration, the bounded QCC state contains
+164,864 elements versus 1,048,576 full-KV elements (6.36x fewer). The ratio
+continues to grow linearly with context length because the QCC archive and
+local window are bounded.
+
+These numbers are implementation evidence for the bounded-history trend, not
+a claim of a universal speedup. GPU results, batch scaling, kernel fusion, and
+language quality remain open experiments.
 
 ## Minimal API
 
