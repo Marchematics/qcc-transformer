@@ -780,11 +780,23 @@ class QCCSelfAttention(nn.Module):
             head_out = torch.where(active, mixed_out, local_out)
             keep = min(self.window_size, total_length)
             assert self._local_key_cache is not None and self._local_value_cache is not None
-            self._local_key_cache.zero_()
-            self._local_value_cache.zero_()
-            self._local_key_cache[:, :, :keep] = combined_k[:, :, -keep:]
-            self._local_value_cache[:, :, :keep] = combined_v[:, :, -keep:]
-            self._cache_start = 0
+            # Preserve the ring layout instead of clearing and rewriting the
+            # entire window.  A chunk may wrap around the physical end, so
+            # split the tail copy into at most two contiguous slices.  This
+            # makes cache maintenance proportional to the number of retained
+            # tokens rather than an additional O(window_size) memset.
+            evicted = max(0, total_length - self.window_size)
+            new_start = (self._cache_start + evicted) % self.window_size
+            tail_k = combined_k[:, :, -keep:]
+            tail_v = combined_v[:, :, -keep:]
+            first = min(keep, self.window_size - new_start)
+            self._local_key_cache[:, :, new_start : new_start + first] = tail_k[:, :, :first]
+            self._local_value_cache[:, :, new_start : new_start + first] = tail_v[:, :, :first]
+            if first < keep:
+                remainder = keep - first
+                self._local_key_cache[:, :, :remainder] = tail_k[:, :, first:]
+                self._local_value_cache[:, :, :remainder] = tail_v[:, :, first:]
+            self._cache_start = new_start
             self._cache_length = keep
         self._seen_tokens += length
         return self.out_proj(head_out.transpose(1, 2).reshape(bsz, length, self.d_model))
