@@ -823,9 +823,17 @@ class QCCSelfAttention(nn.Module):
         if self.use_archive:
             self.archive.reset_state(bsz, device=hidden.device)
             archive_out = torch.zeros_like(local_out)
-            for t in range(self.window_size, length):
-                self.archive.update(k[:, :, t - self.window_size], v[:, :, t - self.window_size])
-                archive_out[:, :, t] = self.archive.read(q[:, :, t])
+            # The archive state is a linear recurrence.  Feed all evicted
+            # tokens through the block scan at once instead of launching one
+            # Python-level update/read pair per position.  This preserves the
+            # post-update read semantics (the first event corresponds to
+            # position ``window_size``) while making prefill overhead scale in
+            # tensor blocks rather than interpreter iterations.
+            event_count = length - self.window_size
+            if event_count > 0:
+                archive_out[:, :, self.window_size :] = self.archive.update_read_chunk(
+                    k[:, :, :event_count], v[:, :, :event_count], q[:, :, self.window_size :]
+                )
             gate = torch.sigmoid(self.gate(hidden)).transpose(1, 2).unsqueeze(-1)
             mixed_out = gate * local_out + (1.0 - gate) * archive_out
             active = (torch.arange(length, device=hidden.device) >= self.window_size).view(1, 1, length, 1)

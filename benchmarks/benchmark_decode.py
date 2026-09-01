@@ -101,8 +101,18 @@ def main() -> None:
     parser.add_argument("--active-codes", type=int, default=None)
     parser.add_argument("--lazy-decay", action="store_true")
     parser.add_argument("--archive-read-stride", type=int, default=1)
+    parser.add_argument(
+        "--threads",
+        type=int,
+        default=None,
+        help="set torch intra-op thread count for reproducible CPU timings",
+    )
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
+    if args.threads is not None:
+        if args.threads <= 0:
+            raise ValueError("threads must be positive")
+        torch.set_num_threads(args.threads)
     device = torch.device(args.device)
     window_size = args.window_size or min(128, args.length - 1)
     if window_size <= 0:

@@ -85,6 +85,20 @@ contexts; the bounded path reaches parity around 4k tokens in this setup.
 These are single-run CPU measurements, not a hardware-independent speedup
 claim.
 
+The sequence-level prefill path uses the same block recurrence as streaming
+decode (rather than a Python update/read loop). On the reference CPU with
+`--threads 1`, `d_model=256`, two layers, 8 heads, `window_size=32`, and
+`num_codes=16`, one run with warmup 1 and steps 2 measured:
+
+| Prefill tokens | QCC | Full KV | Relative |
+|---:|---:|---:|---:|
+| 512 | 0.371 s | 0.581 s | 1.57x |
+| 1,024 | 0.904 s | 2.013 s | 2.23x |
+
+The benchmark exposes `--threads` so these CPU measurements can be reproduced.
+They are implementation evidence for bounded local/archive work, not a
+universal hardware-independent claim.
+
 To isolate archive learnability from language-model quality, run the synthetic
 teacher benchmark:
 
