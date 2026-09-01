@@ -560,6 +560,8 @@ class QCCSelfAttention(nn.Module):
         archive_query_cosine_threshold: Optional[float] = None,
         archive_scan_block_size: int = 256,
         rope_theta: Optional[float] = None,
+        max_position_embeddings: int = 4096,
+        decay_rates: Optional[tuple[float, ...]] = None,
     ) -> None:
         super().__init__()
         if d_model % num_heads:
@@ -572,6 +574,10 @@ class QCCSelfAttention(nn.Module):
             raise ValueError("archive_query_cosine_threshold must be in [-1, 1]")
         if rope_theta is not None and rope_theta <= 0:
             raise ValueError("rope_theta must be positive")
+        if max_position_embeddings <= 0:
+            raise ValueError("max_position_embeddings must be positive")
+        if decay_rates is not None and len(decay_rates) != num_scales:
+            raise ValueError("decay_rates must contain exactly num_scales values")
         self.d_model = d_model
         self.num_heads = num_heads
         self.head_dim = d_model // num_heads
@@ -591,8 +597,18 @@ class QCCSelfAttention(nn.Module):
         self.v_proj = nn.Linear(d_model, d_model)
         self.out_proj = nn.Linear(d_model, d_model)
         self.gate = nn.Linear(d_model, num_heads)
-        # Log-spaced rates cover short, medium, and long historical scales.
-        rates = tuple(1.0 - 10.0 ** (-x) for x in torch.linspace(1.3, 3.5, num_scales).tolist())
+        # Choose half-lives from the exact window to the configured context so
+        # a 1M-token model does not silently forget everything after a few
+        # thousand updates.  Explicit rates remain available for ablations.
+        if decay_rates is None:
+            min_horizon = max(1.0, float(window_size))
+            max_horizon = max(min_horizon, float(max_position_embeddings))
+            horizons = torch.logspace(
+                math.log10(min_horizon), math.log10(max_horizon), num_scales
+            )
+            rates = tuple(torch.exp(-math.log(2.0) / horizons).tolist())
+        else:
+            rates = decay_rates
         self.archive = QCCArchive(
             num_heads,
             self.head_dim,
@@ -1118,6 +1134,7 @@ class QCCForCausalLM(nn.Module):
         archive_read_stride: int = 1,
         archive_query_cosine_threshold: Optional[float] = None,
         archive_scan_block_size: int = 256,
+        archive_decay_rates: Optional[tuple[float, ...]] = None,
     ) -> None:
         super().__init__()
         self.token_embedding = nn.Embedding(vocab_size, d_model)
@@ -1147,6 +1164,8 @@ class QCCForCausalLM(nn.Module):
                 archive_query_cosine_threshold=archive_query_cosine_threshold,
                 archive_scan_block_size=archive_scan_block_size,
                 rope_theta=rope_theta if position_encoding == "rope" else None,
+                max_position_embeddings=max_position_embeddings,
+                decay_rates=archive_decay_rates,
             )
             for _ in range(num_layers)
         )

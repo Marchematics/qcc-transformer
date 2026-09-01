@@ -133,6 +133,13 @@ stateless: configuring `max_position_embeddings=4_000_000` does not allocate a
 four-million-row learned position table. `archive_scan_block_size` controls the
 temporary prefill working set (256 by default); reducing it lowers peak memory,
 while increasing it can improve throughput on a larger device.
+Unless `archive_decay_rates` is supplied explicitly, each layer derives a
+log-spaced set of exponential half-lives from `window_size` to
+`max_position_embeddings`. This keeps the slowest archive scale aligned with
+the configured context instead of silently forgetting million-token history.
+The rates are stored in fp32 for the reference/Triton paths, so horizons very
+close to the fp32 unit-roundoff can have a small (few-percent) effective
+half-life error; pass explicit rates when an ablation needs exact control.
 For relative-position experiments, set `position_encoding="rope"` (and tune
 `rope_theta`, default `1_000_000`); the rotary phase is applied consistently to
 prefill, token decode, and chunk decode. This is a compatibility/quality option,

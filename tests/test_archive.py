@@ -135,6 +135,25 @@ def test_rope_position_mode_matches_streaming_decode() -> None:
     torch.testing.assert_close(chunked, sequence, rtol=3e-4, atol=3e-4)
 
 
+def test_model_decay_schedule_reaches_configured_context_horizon() -> None:
+    model = QCCForCausalLM(
+        vocab_size=17,
+        d_model=32,
+        num_layers=1,
+        num_heads=4,
+        max_position_embeddings=1_000_000,
+        window_size=32,
+        num_codes=8,
+    )
+    rates = model.layers[0].attention.archive.decay_rates
+    # The slowest scale is parameterized to have an approximately one-million
+    # token half-life rather than underflowing after a few thousand updates.
+    # Rates are persisted in fp32 for kernel compatibility.  Near one, the
+    # representable spacing shifts the effective half-life by a few percent.
+    assert float(rates[-1].pow(1_000_000)) == pytest.approx(0.5, abs=0.02)
+    assert float(rates[0].pow(32)) == pytest.approx(0.5, abs=0.01)
+
+
 def test_first_evicted_token_enters_archive_at_window_boundary() -> None:
     torch.manual_seed(2)
     model = QCCForCausalLM(
