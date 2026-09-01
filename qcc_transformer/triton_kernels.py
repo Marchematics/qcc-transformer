@@ -99,6 +99,94 @@ try:  # pragma: no cover - exercised only on a Triton-enabled GPU runner
                 mask=mask_d,
             )
 
+    @triton.jit
+    def _qcc_read_kernel(
+        output_ptr,
+        query_ptr,
+        numerator_ptr,
+        denominator_ptr,
+        codes_ptr,
+        mix_ptr,
+        num_heads,
+        stride_ob,
+        stride_oh,
+        stride_od,
+        stride_qb,
+        stride_qh,
+        stride_qd,
+        stride_nb,
+        stride_nh,
+        stride_nm,
+        stride_nj,
+        stride_nd,
+        stride_db,
+        stride_dh,
+        stride_dm,
+        stride_dj,
+        stride_ch,
+        stride_cm,
+        stride_cd,
+        stride_mh,
+        stride_mm,
+        stride_mj,
+        NUM_CODES: tl.constexpr,
+        NUM_SCALES: tl.constexpr,
+        HEAD_DIM: tl.constexpr,
+        BLOCK_D: tl.constexpr,
+        BLOCK_M: tl.constexpr,
+    ):
+        pid = tl.program_id(0)
+        batch = pid // num_heads
+        head = pid % num_heads
+        offs_d = tl.arange(0, BLOCK_D)
+        offs_m = tl.arange(0, BLOCK_M)
+        mask_d = offs_d < HEAD_DIM
+        mask_m = offs_m < NUM_CODES
+        query = tl.load(
+            query_ptr + batch * stride_qb + head * stride_qh + offs_d * stride_qd,
+            mask=mask_d,
+            other=0.0,
+        ).to(tl.float32)
+        logits = tl.full((BLOCK_M,), -float("inf"), tl.float32)
+        for code_id in range(NUM_CODES):
+            code = tl.load(
+                codes_ptr + head * stride_ch + code_id * stride_cm + offs_d * stride_cd,
+                mask=mask_d,
+                other=0.0,
+            ).to(tl.float32)
+            dot = tl.sum(query * code, axis=0) / tl.sqrt(tl.full((), HEAD_DIM, tl.float32))
+            logits = tl.where(offs_m == code_id, dot, logits)
+        max_logit = tl.max(tl.where(mask_m, logits, -float("inf")), axis=0)
+        routing = tl.exp(logits - max_logit)
+        routing = tl.where(mask_m, routing / tl.sum(routing, axis=0), 0.0)
+
+        output = tl.zeros((BLOCK_D,), tl.float32)
+        for code_id in range(NUM_CODES):
+            response = tl.zeros((BLOCK_D,), tl.float32)
+            for scale in range(NUM_SCALES):
+                den_offset = (
+                    batch * stride_db
+                    + head * stride_dh
+                    + code_id * stride_dm
+                    + scale * stride_dj
+                )
+                den = tl.maximum(tl.load(denominator_ptr + den_offset).to(tl.float32), 1e-8)
+                num_offset = (
+                    batch * stride_nb
+                    + head * stride_nh
+                    + code_id * stride_nm
+                    + scale * stride_nj
+                    + offs_d * stride_nd
+                )
+                num = tl.load(numerator_ptr + num_offset, mask=mask_d, other=0.0).to(tl.float32)
+                mix = tl.load(mix_ptr + head * stride_mh + code_id * stride_mm + scale * stride_mj).to(tl.float32)
+                response += mix * num / den
+            output += routing[code_id] * response
+        tl.store(
+            output_ptr + batch * stride_ob + head * stride_oh + offs_d * stride_od,
+            output,
+            mask=mask_d,
+        )
 except ImportError:  # pragma: no cover - normal CPU installation
     TRITON_AVAILABLE = False
 
@@ -142,9 +230,6 @@ def triton_update_archive(
         aged_rates,
         bsz,
         heads,
-        codes_count,
-        scales,
-        dim,
         *numerator.stride(),
         *denominator.stride(),
         *key.stride(),
@@ -159,3 +244,47 @@ def triton_update_archive(
         original_numerator.copy_(numerator)
     if denominator.data_ptr() != original_denominator.data_ptr():
         original_denominator.copy_(denominator)
+
+
+def triton_read_archive(
+    query: torch.Tensor,
+    numerator: torch.Tensor,
+    denominator: torch.Tensor,
+    codes: torch.Tensor,
+    mix_logits: torch.Tensor,
+) -> torch.Tensor:
+    """Fuse routing, scale mixing, and response normalization for one read."""
+
+    if not TRITON_AVAILABLE or not query.is_cuda:
+        raise RuntimeError("Triton CUDA runtime is unavailable")
+    query = query.contiguous()
+    numerator = numerator.contiguous()
+    denominator = denominator.contiguous()
+    codes = codes.contiguous()
+    mix = torch.softmax(mix_logits, dim=-1).to(torch.float32).contiguous()
+    batch, heads, dim = query.shape
+    _, codes_count, scales, _ = numerator.shape
+    block_dim = 1 << max(4, (dim - 1).bit_length())
+    block_m = 1 << max(0, (codes_count - 1).bit_length())
+    output = torch.empty((batch, heads, dim), device=query.device, dtype=torch.float32)
+    _qcc_read_kernel[(batch * heads,)](
+        output,
+        query,
+        numerator,
+        denominator,
+        codes,
+        mix,
+        heads,
+        *output.stride(),
+        *query.stride(),
+        *numerator.stride(),
+        *denominator.stride(),
+        *codes.stride(),
+        *mix.stride(),
+        NUM_CODES=codes_count,
+        NUM_SCALES=scales,
+        HEAD_DIM=dim,
+        BLOCK_D=block_dim,
+        BLOCK_M=block_m,
+    )
+    return output.to(query.dtype)
