@@ -75,6 +75,23 @@ task and reports loss/accuracy at the delayed query. It is a diagnostic for
 long-range information retention; it is not evidence of general language
 quality.
 
+For a natural-text sanity check, run the on-demand Tiny Shakespeare experiment:
+
+```bash
+python benchmarks/benchmark_tiny_shakespeare.py --steps 100
+```
+
+The script downloads the public corpus into `work/`, trains matched QCC and
+full-KV character decoders, and reports held-out loss/perplexity plus training
+time. It uses strict next-token targets (the final context position is not
+scored). It is deliberately small and is not a claim about scaled LLM quality.
+
+Example CPU smoke run (`--steps 50 --eval-batches 5 --batch 4 --length 64
+--window 16 --d-model 32 --layers 1 --heads 4 --codes 4`) produced validation
+perplexity `28.601` for QCC and `32.695` for full KV. This single-seed result is
+included for reproducibility only; report multiple seeds before interpreting a
+quality difference.
+
 One CPU run (`--steps 200 --batch 16 --length 32 --query-position 24
 --window 6 --d-model 24 --layers 1 --heads 4 --codes 4 --vocab 24`) reached
 held-out accuracy `1.000` for both QCC and full KV. Held-out loss was `0.001903`
