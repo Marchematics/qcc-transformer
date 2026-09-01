@@ -38,6 +38,12 @@ def main() -> None:
     parser.add_argument("--num-codes", type=int, default=512)
     parser.add_argument("--active-codes", type=int, default=4)
     parser.add_argument("--strides", default="1,2,4,8")
+    parser.add_argument(
+        "--query-thresholds",
+        default="",
+        help="optional comma-separated adaptive query cosine thresholds",
+    )
+    parser.add_argument("--repeat-token", action="store_true")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
     if args.length <= args.window_size:
@@ -56,7 +62,10 @@ def main() -> None:
         lazy_decay=True,
         use_triton=False,
     )
-    tokens = torch.randint(0, common["vocab_size"], (1, args.length), device=device)
+    if args.repeat_token:
+        tokens = torch.zeros((1, args.length), dtype=torch.long, device=device)
+    else:
+        tokens = torch.randint(0, common["vocab_size"], (1, args.length), device=device)
     reference = QCCForCausalLM(**common, archive_read_stride=1).to(device).eval()
     reference_logits, reference_time = run_decode(reference, tokens)
     print(f"device={device} length={args.length} window={args.window_size}")
@@ -79,6 +88,30 @@ def main() -> None:
         )
         print(
             f"stride={stride} seconds={elapsed:.6f} relative={reference_time / elapsed:.2f}x "
+            f"logit_mse={mse:.6e} cosine={cosine:.6f}"
+        )
+    for raw_threshold in (value for value in args.query_thresholds.split(",") if value.strip()):
+        threshold = float(raw_threshold)
+        if not -1.0 <= threshold <= 1.0:
+            raise ValueError("query-thresholds values must be in [-1, 1]")
+        candidate = QCCForCausalLM(
+            **common,
+            archive_read_stride=1,
+            archive_query_cosine_threshold=threshold,
+        ).to(device).eval()
+        candidate.load_state_dict(reference.state_dict(), strict=True)
+        logits, elapsed = run_decode(candidate, tokens)
+        diff = logits - reference_logits
+        mse = float(diff.square().mean())
+        cosine = float(
+            torch.nn.functional.cosine_similarity(
+                logits.reshape(-1, logits.shape[-1]),
+                reference_logits.reshape(-1, reference_logits.shape[-1]),
+                dim=-1,
+            ).mean()
+        )
+        print(
+            f"query_threshold={threshold:g} seconds={elapsed:.6f} relative={reference_time / elapsed:.2f}x "
             f"logit_mse={mse:.6e} cosine={cosine:.6f}"
         )
 

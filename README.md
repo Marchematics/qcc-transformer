@@ -63,6 +63,19 @@ python benchmarks/benchmark_tradeoff.py --length 1024 --window-size 32 \
   --num-codes 128 --active-codes 4 --strides 1,2,4,8
 ```
 
+The same harness can probe adaptive query reuse (optionally with a repeated
+token stream):
+
+```bash
+python benchmarks/benchmark_tradeoff.py --length 128 --window-size 16 \
+  --num-codes 32 --active-codes 4 --strides 1,2 \
+  --query-thresholds 0.5 --repeat-token
+```
+
+In one CPU diagnostic run, the threshold-0.5 setting reached mean logit cosine
+`0.999878` and `1.05x` relative latency. This is workload-dependent evidence
+for the adaptive read knob, not a general speedup claim.
+
 In one single-thread CPU run, stride 2/4/8 achieved `1.16x`/`1.28x`/`1.33x`
 relative latency with mean logit cosine `0.999225`/`0.998860`/`0.998646`.
 The exact numbers depend on model size and hardware; stride 1 is the reference
