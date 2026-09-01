@@ -33,6 +33,22 @@ python benchmarks/benchmark_decode.py --length 512 --mode decode --warmup 1 --st
 `decode_step` maintains a persistent local/archive state and processes one
 token at a time. Use `--mode prefill` to benchmark the sequence-level path.
 
+To measure asymptotic behavior across context lengths, run:
+
+```bash
+python benchmarks/benchmark_scaling.py --lengths 256,512,1024,2048
+```
+
+The script reports per-length timings and log-log slopes. A slope near 1 for
+QCC and near 2 for full KV is the expected bounded-state versus quadratic
+scaling signature; actual values depend on hardware and kernel implementation.
+
+Single-thread CPU reference run (`256,512,1024,2048`, warmup 1, steps 2) gave
+QCC/full timings of `0.194/0.151`, `0.465/0.403`, `0.972/1.237`, and
+`2.007/6.383` seconds. The fitted slopes were `1.118` (QCC) and `1.781` (full
+KV). The fixed archive overhead dominates short contexts, while the bounded
+path becomes faster as history grows.
+
 To isolate archive learnability from language-model quality, run the synthetic
 teacher benchmark:
 
