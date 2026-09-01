@@ -98,6 +98,12 @@ def main() -> None:
     parser.add_argument("--window-size", type=int, default=128)
     parser.add_argument("--num-codes", type=int, default=16)
     parser.add_argument("--archive-scan-block-size", type=int, default=256)
+    parser.add_argument(
+        "--position-encoding",
+        choices=("sinusoidal", "learned", "rope"),
+        default="sinusoidal",
+    )
+    parser.add_argument("--rope-theta", type=float, default=1_000_000.0)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--run", action="store_true", help="process the full synthetic stream")
     parser.add_argument("--state-only", action="store_true", help="only print storage accounting")
@@ -119,6 +125,8 @@ def main() -> None:
         window_size=args.window_size,
         num_codes=args.num_codes,
         archive_scan_block_size=args.archive_scan_block_size,
+        position_encoding=args.position_encoding,
+        rope_theta=args.rope_theta,
     ).to(device)
     report = state_report(model, args.length)
     print(

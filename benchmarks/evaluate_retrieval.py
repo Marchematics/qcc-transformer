@@ -118,8 +118,11 @@ def main() -> None:
     parser.add_argument("--window-size", type=int, default=128)
     parser.add_argument("--num-codes", type=int, default=16)
     parser.add_argument(
-        "--position-encoding", choices=("sinusoidal", "learned"), default="sinusoidal"
+        "--position-encoding",
+        choices=("sinusoidal", "learned", "rope"),
+        default="sinusoidal",
     )
+    parser.add_argument("--rope-theta", type=float, default=1_000_000.0)
     parser.add_argument("--max-position-embeddings", type=int, default=1_000_001)
     parser.add_argument("--chunk-size", type=int, default=256)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
@@ -143,6 +146,7 @@ def main() -> None:
         window_size=args.window_size,
         num_codes=args.num_codes,
         position_encoding=args.position_encoding,
+        rope_theta=args.rope_theta,
     ).to(device)
     state_dict = _load_checkpoint(args.checkpoint)
     model.load_state_dict(state_dict, strict=True)
@@ -171,6 +175,7 @@ def main() -> None:
             window_size=args.max_position_embeddings,
             num_codes=args.num_codes,
             position_encoding=args.position_encoding,
+            rope_theta=args.rope_theta,
             use_archive=False,
         ).to(device)
         full.load_state_dict(state_dict, strict=True)

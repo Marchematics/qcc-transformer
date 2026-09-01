@@ -103,6 +103,12 @@ def main() -> None:
     parser.add_argument("--archive-read-stride", type=int, default=1)
     parser.add_argument("--archive-scan-block-size", type=int, default=256)
     parser.add_argument(
+        "--position-encoding",
+        choices=("sinusoidal", "learned", "rope"),
+        default="sinusoidal",
+    )
+    parser.add_argument("--rope-theta", type=float, default=1_000_000.0)
+    parser.add_argument(
         "--archive-query-cosine-threshold",
         type=float,
         default=None,
@@ -142,6 +148,8 @@ def main() -> None:
         archive_read_stride=args.archive_read_stride,
         archive_query_cosine_threshold=args.archive_query_cosine_threshold,
         archive_scan_block_size=args.archive_scan_block_size,
+        position_encoding=args.position_encoding,
+        rope_theta=args.rope_theta,
     )
     if args.repeat_token:
         tokens = torch.zeros((1, args.length), dtype=torch.long, device=device)

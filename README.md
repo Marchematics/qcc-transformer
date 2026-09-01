@@ -133,6 +133,10 @@ stateless: configuring `max_position_embeddings=4_000_000` does not allocate a
 four-million-row learned position table. `archive_scan_block_size` controls the
 temporary prefill working set (256 by default); reducing it lowers peak memory,
 while increasing it can improve throughput on a larger device.
+For relative-position experiments, set `position_encoding="rope"` (and tune
+`rope_theta`, default `1_000_000`); the rotary phase is applied consistently to
+prefill, token decode, and chunk decode. This is a compatibility/quality option,
+not an additional novelty claim.
 
 Use the long-context harness to audit storage at the target context before
 launching an expensive run:
@@ -164,6 +168,8 @@ For a feasible shorter-context quality control, append
 `--compare-full-kv`; it evaluates the same checkpoint with the full-KV control
 and reports the QCC/full accuracy ratio. Do not enable that option at 1M/4M
 unless the device can hold the deliberately unbounded baseline.
+For a checkpoint trained with rotary positions, pass
+`--position-encoding rope --rope-theta 1000000` to both model paths.
 
 The evaluator streams each record and reports whether the requested retrieval
 threshold was met. It requires a checkpoint and cannot silently turn an

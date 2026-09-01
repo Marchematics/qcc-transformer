@@ -104,6 +104,37 @@ def test_block_streaming_matches_single_scan_across_block_boundary() -> None:
     torch.testing.assert_close(block.state.numerator, single.state.numerator, rtol=2e-5, atol=2e-5)
 
 
+def test_rope_position_mode_matches_streaming_decode() -> None:
+    torch.manual_seed(43)
+    model = QCCForCausalLM(
+        vocab_size=19,
+        d_model=24,
+        num_layers=2,
+        num_heads=4,
+        max_position_embeddings=4_000_000,
+        window_size=3,
+        num_codes=4,
+        position_encoding="rope",
+    ).eval()
+    tokens = torch.randint(0, 19, (1, 17))
+    with torch.no_grad():
+        sequence = model(tokens)
+        model.reset_cache(1)
+        streamed = torch.stack(
+            [model.decode_step(tokens[:, index]) for index in range(tokens.shape[1])], dim=1
+        )
+        model.reset_cache(1)
+        chunked = torch.cat(
+            [
+                model.decode_chunk(tokens[:, :6], reset_cache=True),
+                model.decode_chunk(tokens[:, 6:]),
+            ],
+            dim=1,
+        )
+    torch.testing.assert_close(streamed, sequence, rtol=3e-4, atol=3e-4)
+    torch.testing.assert_close(chunked, sequence, rtol=3e-4, atol=3e-4)
+
+
 def test_first_evicted_token_enters_archive_at_window_boundary() -> None:
     torch.manual_seed(2)
     model = QCCForCausalLM(

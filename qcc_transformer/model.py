@@ -559,6 +559,7 @@ class QCCSelfAttention(nn.Module):
         archive_read_stride: int = 1,
         archive_query_cosine_threshold: Optional[float] = None,
         archive_scan_block_size: int = 256,
+        rope_theta: Optional[float] = None,
     ) -> None:
         super().__init__()
         if d_model % num_heads:
@@ -569,11 +570,22 @@ class QCCSelfAttention(nn.Module):
             raise ValueError("archive_read_stride must be positive")
         if archive_query_cosine_threshold is not None and not -1.0 <= archive_query_cosine_threshold <= 1.0:
             raise ValueError("archive_query_cosine_threshold must be in [-1, 1]")
+        if rope_theta is not None and rope_theta <= 0:
+            raise ValueError("rope_theta must be positive")
         self.d_model = d_model
         self.num_heads = num_heads
         self.head_dim = d_model // num_heads
         self.window_size = window_size
         self.use_archive = use_archive
+        self.rope_theta = rope_theta
+        rotary_dim = 2 * (self.head_dim // 2)
+        half_dim = rotary_dim // 2
+        rope_inv_freq = (
+            rope_theta ** (-torch.arange(half_dim, dtype=torch.float32) / max(half_dim, 1))
+            if rope_theta is not None
+            else torch.empty(0, dtype=torch.float32)
+        )
+        self.register_buffer("rope_inv_freq", rope_inv_freq, persistent=False)
         self.q_proj = nn.Linear(d_model, d_model)
         self.k_proj = nn.Linear(d_model, d_model)
         self.v_proj = nn.Linear(d_model, d_model)
@@ -609,6 +621,47 @@ class QCCSelfAttention(nn.Module):
         self._seen_tokens = 0
         self._archive_read_cache: Optional[Tensor] = None
         self._archive_query_cache: Optional[Tensor] = None
+
+    def _apply_rope(
+        self, query: Tensor, key: Tensor, positions: Optional[Tensor]
+    ) -> tuple[Tensor, Tensor]:
+        """Apply rotary phases to q/k for an optional relative-position path."""
+
+        if self.rope_theta is None or query.shape[-1] < 2:
+            return query, key
+        if positions is None:
+            if query.ndim == 4:
+                positions = torch.arange(query.shape[2], device=query.device)
+            else:
+                positions = torch.arange(query.shape[0], device=query.device)
+        positions = positions.to(device=query.device)
+        if query.ndim == 4:
+            if positions.ndim == 1:
+                positions = positions.unsqueeze(0)
+            angles = positions.to(torch.float32).unsqueeze(-1) * self.rope_inv_freq
+            cos = angles.cos().unsqueeze(1).to(query.dtype)
+            sin = angles.sin().unsqueeze(1).to(query.dtype)
+        elif query.ndim == 3:
+            if positions.ndim == 0:
+                positions = positions.expand(query.shape[0])
+            angles = positions.to(torch.float32).unsqueeze(-1) * self.rope_inv_freq
+            cos = angles.cos().unsqueeze(1).to(query.dtype)
+            sin = angles.sin().unsqueeze(1).to(query.dtype)
+        else:
+            raise ValueError("q/k tensors must have rank 3 or 4")
+        rotary_dim = self.rope_inv_freq.numel() * 2
+
+        def rotate(tensor: Tensor) -> Tensor:
+            prefix = tensor[..., :rotary_dim]
+            suffix = tensor[..., rotary_dim:]
+            pairs = prefix.reshape(*prefix.shape[:-1], -1, 2)
+            first, second = pairs.unbind(dim=-1)
+            rotated = torch.stack(
+                (first * cos - second * sin, first * sin + second * cos), dim=-1
+            ).flatten(-2)
+            return torch.cat((rotated, suffix), dim=-1)
+
+        return rotate(query), rotate(key)
 
     def _split_heads(self, x: Tensor) -> Tensor:
         bsz, length, _ = x.shape
@@ -658,7 +711,13 @@ class QCCSelfAttention(nn.Module):
             ),
         )
 
-    def step(self, hidden: Tensor, *, reset_cache: bool = False) -> Tensor:
+    def step(
+        self,
+        hidden: Tensor,
+        *,
+        reset_cache: bool = False,
+        position_ids: Optional[Tensor] = None,
+    ) -> Tensor:
         """Decode one token with bounded local KV plus recurrent archive state.
 
         ``hidden`` is ``[batch, d_model]``. This method is intended for
@@ -674,6 +733,11 @@ class QCCSelfAttention(nn.Module):
         q = self._split_heads(self.q_proj(hidden[:, None]))[:, :, 0]
         key = self._split_heads(self.k_proj(hidden[:, None]))[:, :, 0]
         value = self._split_heads(self.v_proj(hidden[:, None]))[:, :, 0]
+        if position_ids is None:
+            position_ids = torch.full(
+                (bsz,), self._seen_tokens, device=hidden.device, dtype=torch.long
+            )
+        q, key = self._apply_rope(q, key, position_ids)
         if self.use_archive:
             if self._local_key_cache is None:
                 shape = (bsz, self.num_heads, self.window_size, self.head_dim)
@@ -758,7 +822,13 @@ class QCCSelfAttention(nn.Module):
         return self.out_proj(head_out.reshape(bsz, self.d_model))
 
     @torch.no_grad()
-    def step_chunk(self, hidden: Tensor, *, reset_cache: bool = False) -> Tensor:
+    def step_chunk(
+        self,
+        hidden: Tensor,
+        *,
+        reset_cache: bool = False,
+        position_ids: Optional[Tensor] = None,
+    ) -> Tensor:
         """Decode a causal block while preserving the persistent cache.
 
         Projections and local attention are vectorized over the block. Archive
@@ -776,6 +846,11 @@ class QCCSelfAttention(nn.Module):
         q = self._split_heads(self.q_proj(hidden))
         k = self._split_heads(self.k_proj(hidden))
         v = self._split_heads(self.v_proj(hidden))
+        if position_ids is None:
+            position_ids = self._seen_tokens + torch.arange(
+                length, device=hidden.device, dtype=torch.long
+            )
+        q, k = self._apply_rope(q, k, position_ids)
 
         if self.use_archive:
             if self._local_key_cache is None:
@@ -920,13 +995,22 @@ class QCCSelfAttention(nn.Module):
             head_out = F.scaled_dot_product_attention(q, k, v, is_causal=True)
         return self.out_proj(head_out.transpose(1, 2).reshape(bsz, length, self.d_model))
 
-    def forward(self, hidden: Tensor, *, reset_state: bool = True) -> Tensor:
+    def forward(
+        self,
+        hidden: Tensor,
+        *,
+        reset_state: bool = True,
+        position_ids: Optional[Tensor] = None,
+    ) -> Tensor:
         if hidden.ndim != 3 or hidden.shape[-1] != self.d_model:
             raise ValueError("hidden must have shape [batch, sequence, d_model]")
         bsz, length, _ = hidden.shape
         q = self._split_heads(self.q_proj(hidden))
         k = self._split_heads(self.k_proj(hidden))
         v = self._split_heads(self.v_proj(hidden))
+        if position_ids is None:
+            position_ids = torch.arange(length, device=hidden.device, dtype=torch.long)
+        q, k = self._apply_rope(q, k, position_ids)
         if not torch.is_grad_enabled():
             return self._forward_inference(hidden, q, k, v)
         if reset_state or self.archive._numerator.shape[0] != bsz:
@@ -975,16 +1059,40 @@ class QCCDecoderLayer(nn.Module):
             nn.Dropout(dropout),
         )
 
-    def forward(self, x: Tensor, *, reset_state: bool) -> Tensor:
-        x = x + self.attention(self.norm1(x), reset_state=reset_state)
+    def forward(
+        self,
+        x: Tensor,
+        *,
+        reset_state: bool,
+        position_ids: Optional[Tensor] = None,
+    ) -> Tensor:
+        x = x + self.attention(
+            self.norm1(x), reset_state=reset_state, position_ids=position_ids
+        )
         return x + self.mlp(self.norm2(x))
 
-    def step_chunk(self, x: Tensor, *, reset_cache: bool = False) -> Tensor:
-        x = x + self.attention.step_chunk(self.norm1(x), reset_cache=reset_cache)
+    def step_chunk(
+        self,
+        x: Tensor,
+        *,
+        reset_cache: bool = False,
+        position_ids: Optional[Tensor] = None,
+    ) -> Tensor:
+        x = x + self.attention.step_chunk(
+            self.norm1(x), reset_cache=reset_cache, position_ids=position_ids
+        )
         return x + self.mlp(self.norm2(x))
 
-    def step(self, x: Tensor, *, reset_cache: bool = False) -> Tensor:
-        x = x + self.attention.step(self.norm1(x), reset_cache=reset_cache)
+    def step(
+        self,
+        x: Tensor,
+        *,
+        reset_cache: bool = False,
+        position_ids: Optional[Tensor] = None,
+    ) -> Tensor:
+        x = x + self.attention.step(
+            self.norm1(x), reset_cache=reset_cache, position_ids=position_ids
+        )
         return x + self.mlp(self.norm2(x))
 
 
@@ -1002,6 +1110,7 @@ class QCCForCausalLM(nn.Module):
         num_codes: int = 16,
         dropout: float = 0.0,
         position_encoding: str = "sinusoidal",
+        rope_theta: float = 1_000_000.0,
         use_archive: bool = True,
         use_triton: bool = True,
         active_codes: Optional[int] = None,
@@ -1016,8 +1125,12 @@ class QCCForCausalLM(nn.Module):
             self.position_embedding = SinusoidalPositionEmbedding(d_model)
         elif position_encoding == "learned":
             self.position_embedding = nn.Embedding(max_position_embeddings, d_model)
+        elif position_encoding == "rope":
+            if rope_theta <= 0:
+                raise ValueError("rope_theta must be positive")
+            self.position_embedding = None
         else:
-            raise ValueError("position_encoding must be 'sinusoidal' or 'learned'")
+            raise ValueError("position_encoding must be 'sinusoidal', 'learned', or 'rope'")
         self.position_encoding = position_encoding
         self.layers = nn.ModuleList(
             QCCDecoderLayer(
@@ -1033,6 +1146,7 @@ class QCCForCausalLM(nn.Module):
                 archive_read_stride=archive_read_stride,
                 archive_query_cosine_threshold=archive_query_cosine_threshold,
                 archive_scan_block_size=archive_scan_block_size,
+                rope_theta=rope_theta if position_encoding == "rope" else None,
             )
             for _ in range(num_layers)
         )
@@ -1050,9 +1164,16 @@ class QCCForCausalLM(nn.Module):
             raise ValueError("sequence exceeds max_position_embeddings")
         positions = torch.arange(length, device=input_ids.device).unsqueeze(0)
         token = self.token_embedding(input_ids)
-        x = token + self.position_embedding(positions).to(token.dtype)
+        if self.position_embedding is None:
+            x = token
+        else:
+            x = token + self.position_embedding(positions).to(token.dtype)
         for index, layer in enumerate(self.layers):
-            x = layer(x, reset_state=reset_state or index > 0)
+            x = layer(
+                x,
+                reset_state=reset_state or index > 0,
+                position_ids=positions,
+            )
         return self.lm_head(self.norm(x))
 
     def reset_cache(self, batch_size: int = 1) -> None:
@@ -1084,9 +1205,12 @@ class QCCForCausalLM(nn.Module):
             (bsz,), self._cache_position, device=input_ids.device, dtype=torch.long
         )
         token = self.token_embedding(input_ids)
-        x = token + self.position_embedding(position).to(token.dtype)
+        if self.position_embedding is None:
+            x = token
+        else:
+            x = token + self.position_embedding(position).to(token.dtype)
         for layer in self.layers:
-            x = layer.step(x)
+            x = layer.step(x, position_ids=position)
         self._cache_position += 1
         return self.lm_head(self.norm(x))
 
@@ -1115,9 +1239,12 @@ class QCCForCausalLM(nn.Module):
             device=input_ids.device,
         ).unsqueeze(0)
         token = self.token_embedding(input_ids)
-        x = token + self.position_embedding(positions).to(token.dtype)
+        if self.position_embedding is None:
+            x = token
+        else:
+            x = token + self.position_embedding(positions).to(token.dtype)
         for layer in self.layers:
-            x = layer.step_chunk(x)
+            x = layer.step_chunk(x, position_ids=positions)
         self._cache_position += length
         return self.lm_head(self.norm(x))
 
