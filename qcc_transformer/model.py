@@ -1240,11 +1240,20 @@ class QCCSelfAttention(nn.Module):
             ) / math.sqrt(self.head_dim)
             content_weight = torch.exp(score.clamp(min=-20.0, max=10.0))
             if self.archive.content_threshold is not None:
-                content_weight = torch.where(
-                    score >= self.archive.content_threshold,
-                    content_weight,
-                    torch.zeros_like(content_weight),
-                )
+                # Keep a smooth surrogate while gradients are enabled so a
+                # value token just below the hard inference threshold still
+                # receives a signal to become salient.  No-grad/reference and
+                # Triton paths retain the exact hard gate.
+                if torch.is_grad_enabled():
+                    content_weight = content_weight * torch.sigmoid(
+                        (score - self.archive.content_threshold) / 0.1
+                    )
+                else:
+                    content_weight = torch.where(
+                        score >= self.archive.content_threshold,
+                        content_weight,
+                        torch.zeros_like(content_weight),
+                    )
             denominator_add = content_weight.unsqueeze(-1) * age.view(1, 1, 1, 1, -1)
             numerator_add = denominator_add.unsqueeze(-1) * block_value.to(
                 state_dtype
