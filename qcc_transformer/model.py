@@ -283,7 +283,11 @@ class QCCArchive(nn.Module):
             if query.ndim == 4
             else torch.isfinite(self._landmark_score),
             routing_logits,
-            torch.full_like(routing_logits, -torch.inf),
+            # Keep the masked softmax finite when a head has not observed a
+            # threshold-passing event yet.  The corresponding values are
+            # zeroed below, so a uniform probability over invalid slots has
+            # no effect on the response.
+            torch.full_like(routing_logits, -1.0e9),
         )
         routing = F.softmax(routing_logits, dim=-1).to(self._landmark_value.dtype)
         values = torch.where(
