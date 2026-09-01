@@ -84,6 +84,7 @@ class QCCArchive(nn.Module):
         active_codes: Optional[int] = None,
         lazy_decay: bool = False,
         scan_block_size: int = 256,
+        content_threshold: Optional[float] = None,
     ) -> None:
         super().__init__()
         if num_heads <= 0 or head_dim <= 0 or num_codes <= 0:
@@ -99,6 +100,8 @@ class QCCArchive(nn.Module):
             raise ValueError("lazy_decay requires active_codes to bound touched slots")
         if scan_block_size <= 0:
             raise ValueError("scan_block_size must be positive")
+        if content_threshold is not None and not math.isfinite(content_threshold):
+            raise ValueError("content_threshold must be finite when provided")
 
         self.num_heads = num_heads
         self.head_dim = head_dim
@@ -112,6 +115,11 @@ class QCCArchive(nn.Module):
         self.active_codes = active_codes
         self.lazy_decay = lazy_decay
         self.scan_block_size = scan_block_size
+        # Optional hard event gate.  Scores below the threshold do not enter
+        # the archive, which prevents long runs of uninformative filler from
+        # diluting a sparse retrieval signal.  ``None`` preserves the original
+        # dense recurrence exactly.
+        self.content_threshold = content_threshold
         self.register_buffer("decay_rates", rates, persistent=True)
         self.codes = nn.Parameter(torch.randn(num_heads, num_codes, head_dim) / math.sqrt(head_dim))
         self.mix_logits = nn.Parameter(torch.zeros(num_heads, num_codes, self.num_scales))
@@ -200,6 +208,7 @@ class QCCArchive(nn.Module):
                     self.codes,
                     rates,
                     self.window_size,
+                    self.content_threshold,
                 )
                 return
 
@@ -209,6 +218,12 @@ class QCCArchive(nn.Module):
         # Clipping bounds the reference implementation. A fused kernel should
         # use per-code log rescaling instead of clipping for higher fidelity.
         content_weight = torch.exp(score.clamp(min=-20.0, max=10.0))
+        if self.content_threshold is not None:
+            content_weight = torch.where(
+                score >= self.content_threshold,
+                content_weight,
+                torch.zeros_like(content_weight),
+            )
         age = rates.pow(self.window_size).view(1, 1, 1, self.num_scales)
 
         denominator_decay = rates.view(1, 1, 1, self.num_scales)
@@ -269,10 +284,24 @@ class QCCArchive(nn.Module):
         delta = (self._step - old_step).clamp_min(0)
         rates = self.decay_rates.to(device=key.device, dtype=state_dtype)
         decay = rates.view(1, 1, 1, -1).pow(delta)
-        old_den = old_den * decay
-        old_num = old_num * decay.unsqueeze(-1)
+        selected_active = (
+            torch.ones_like(values, dtype=torch.bool)
+            if self.content_threshold is None
+            else (values / math.sqrt(self.head_dim) >= self.content_threshold)
+        )
+        old_den = torch.where(
+            selected_active.unsqueeze(-1), old_den * decay, old_den
+        )
+        old_num = torch.where(
+            selected_active.unsqueeze(-1).unsqueeze(-1),
+            old_num * decay.unsqueeze(-1),
+            old_num,
+        )
         content_weight = torch.exp(
             (values / math.sqrt(self.head_dim)).clamp(min=-20.0, max=10.0)
+        )
+        content_weight = torch.where(
+            selected_active, content_weight, torch.zeros_like(content_weight)
         )
         age = rates.pow(self.window_size).view(1, 1, 1, -1)
         denominator_add = content_weight.unsqueeze(-1) * age
@@ -289,7 +318,13 @@ class QCCArchive(nn.Module):
             new_num,
         )
         self._last_step.scatter_(
-            2, index_scales, torch.full_like(old_step, self._step)
+            2,
+            index_scales,
+            torch.where(
+                selected_active.unsqueeze(-1),
+                torch.full_like(old_step, self._step),
+                old_step,
+            ),
         )
 
     def _parallel_decay_scan(
@@ -633,6 +668,7 @@ class QCCSelfAttention(nn.Module):
         archive_read_stride: int = 1,
         archive_query_cosine_threshold: Optional[float] = None,
         archive_scan_block_size: int = 256,
+        archive_content_threshold: Optional[float] = None,
         rope_theta: Optional[float] = None,
         max_position_embeddings: int = 4096,
         decay_rates: Optional[tuple[float, ...]] = None,
@@ -693,6 +729,7 @@ class QCCSelfAttention(nn.Module):
             active_codes=active_codes,
             lazy_decay=lazy_decay,
             scan_block_size=archive_scan_block_size,
+            content_threshold=archive_content_threshold,
         )
         self.archive_read_stride = archive_read_stride
         # Optional adaptive remote-read suppression. ``None`` keeps exact
@@ -1319,6 +1356,7 @@ class QCCForCausalLM(nn.Module):
         archive_read_stride: int = 1,
         archive_query_cosine_threshold: Optional[float] = None,
         archive_scan_block_size: int = 256,
+        archive_content_threshold: Optional[float] = None,
         archive_decay_rates: Optional[tuple[float, ...]] = None,
     ) -> None:
         super().__init__()
@@ -1355,6 +1393,7 @@ class QCCForCausalLM(nn.Module):
                 archive_read_stride=archive_read_stride,
                 archive_query_cosine_threshold=archive_query_cosine_threshold,
                 archive_scan_block_size=archive_scan_block_size,
+                archive_content_threshold=archive_content_threshold,
                 rope_theta=rope_theta if position_encoding == "rope" else None,
                 max_position_embeddings=max_position_embeddings,
                 decay_rates=archive_decay_rates,

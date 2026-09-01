@@ -173,6 +173,7 @@ def main() -> None:
     parser.add_argument("--heads", type=int, default=8)
     parser.add_argument("--window-size", type=int, default=128)
     parser.add_argument("--num-codes", type=int, default=16)
+    parser.add_argument("--archive-content-threshold", type=float, default=None)
     parser.add_argument(
         "--position-encoding",
         choices=("sinusoidal", "learned", "rope", "none"),
@@ -203,6 +204,7 @@ def main() -> None:
         num_codes=args.num_codes,
         position_encoding=args.position_encoding,
         rope_theta=args.rope_theta,
+        archive_content_threshold=args.archive_content_threshold,
     ).to(device)
     state_dict = _load_checkpoint(args.checkpoint)
     model.load_state_dict(state_dict, strict=True)
@@ -220,6 +222,7 @@ def main() -> None:
             num_codes=args.num_codes,
             position_encoding=args.position_encoding,
             rope_theta=args.rope_theta,
+            archive_content_threshold=args.archive_content_threshold,
             use_archive=False,
         ).to(device)
         full.load_state_dict(state_dict, strict=True)

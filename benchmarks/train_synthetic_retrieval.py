@@ -73,6 +73,7 @@ def _model_kwargs(args: argparse.Namespace) -> dict[str, Any]:
         "use_archive": True,
         "use_triton": False,
         "archive_scan_block_size": args.archive_scan_block_size,
+        "archive_content_threshold": args.archive_content_threshold,
     }
 
 
@@ -195,6 +196,7 @@ def main() -> None:
     parser.add_argument("--window-size", type=int, default=16)
     parser.add_argument("--num-codes", type=int, default=16)
     parser.add_argument("--archive-scan-block-size", type=int, default=64)
+    parser.add_argument("--archive-content-threshold", type=float, default=None)
     parser.add_argument("--max-position-embeddings", type=int, default=128_001)
     parser.add_argument(
         "--position-encoding",

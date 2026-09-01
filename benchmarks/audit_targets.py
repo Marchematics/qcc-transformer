@@ -53,6 +53,7 @@ def _model_kwargs(args: argparse.Namespace, length: int, *, full: bool) -> dict[
         "max_position_embeddings": length + 1,
         "window_size": length + 1 if full else args.window_size,
         "num_codes": args.num_codes,
+        "archive_content_threshold": args.archive_content_threshold,
         "position_encoding": args.position_encoding,
         "rope_theta": args.rope_theta,
         "use_archive": not full,
@@ -210,6 +211,7 @@ def main() -> None:
     parser.add_argument("--heads", type=int, default=8)
     parser.add_argument("--window-size", type=int, default=128)
     parser.add_argument("--num-codes", type=int, default=16)
+    parser.add_argument("--archive-content-threshold", type=float, default=None)
     parser.add_argument("--archive-scan-block-size", type=int, default=256)
     parser.add_argument("--chunk-size", type=int, default=256)
     parser.add_argument("--batch", type=int, default=2)

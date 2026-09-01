@@ -23,6 +23,7 @@ try:  # pragma: no cover - exercised only on a Triton-enabled GPU runner
         codes_ptr,
         rates_ptr,
         aged_rates_ptr,
+        content_threshold,
         batch_size,
         num_heads,
         stride_nb,
@@ -69,6 +70,7 @@ try:  # pragma: no cover - exercised only on a Triton-enabled GPU runner
         ).to(tl.float32)
         score = tl.sum(key * code, axis=0) / tl.sqrt(tl.full((), HEAD_DIM, tl.float32))
         weight = tl.exp(tl.minimum(tl.maximum(score, -20.0), 10.0))
+        weight = tl.where(score >= content_threshold, weight, 0.0)
 
         for scale in range(NUM_SCALES):
             rate = tl.load(rates_ptr + scale).to(tl.float32)
@@ -206,6 +208,7 @@ try:  # pragma: no cover - exercised only on a Triton-enabled GPU runner
         rates_ptr,
         aged_rates_ptr,
         current_step,
+        content_threshold,
         num_heads,
         stride_nb,
         stride_nh,
@@ -262,6 +265,8 @@ try:  # pragma: no cover - exercised only on a Triton-enabled GPU runner
         ).to(tl.float32)
         score = tl.sum(key * code, axis=0) / tl.sqrt(tl.full((), HEAD_DIM, tl.float32))
         weight = tl.exp(tl.minimum(tl.maximum(score, -20.0), 10.0))
+        selected = score >= content_threshold
+        weight = tl.where(selected, weight, 0.0)
         value = tl.load(
             value_ptr + batch * stride_vb + head * stride_vh + offs_d * stride_vd,
             mask=mask_d,
@@ -280,7 +285,10 @@ try:  # pragma: no cover - exercised only on a Triton-enabled GPU runner
             delta = tl.maximum(current_step - old_last, 0).to(tl.float32)
             decay = tl.exp(delta * tl.log(rate))
             old_den = tl.load(denominator_ptr + den_offset).to(tl.float32)
-            tl.store(denominator_ptr + den_offset, old_den * decay + weight * aged_rate)
+            tl.store(
+                denominator_ptr + den_offset,
+                tl.where(selected, old_den * decay + weight * aged_rate, old_den),
+            )
             num_offset = (
                 batch * stride_nb
                 + head * stride_nh
@@ -291,10 +299,14 @@ try:  # pragma: no cover - exercised only on a Triton-enabled GPU runner
             old_num = tl.load(numerator_ptr + num_offset, mask=mask_d, other=0.0).to(tl.float32)
             tl.store(
                 numerator_ptr + num_offset,
-                old_num * decay + weight * aged_rate * value,
+                tl.where(
+                    selected,
+                    old_num * decay + weight * aged_rate * value,
+                    old_num,
+                ),
                 mask=mask_d,
             )
-            tl.store(last_step_ptr + last_offset, current_step)
+            tl.store(last_step_ptr + last_offset, tl.where(selected, current_step, old_last))
 
     @triton.jit
     def _qcc_sparse_read_kernel(
@@ -418,6 +430,7 @@ try:  # pragma: no cover - exercised only on a Triton-enabled GPU runner
         mix_ptr,
         numerator_ptr,
         denominator_ptr,
+        content_threshold,
         num_events,
         num_heads,
         stride_pb,
@@ -531,6 +544,7 @@ try:  # pragma: no cover - exercised only on a Triton-enabled GPU runner
                 tl.full((), HEAD_DIM, tl.float32)
             )
             weight = tl.exp(tl.minimum(tl.maximum(score, -20.0), 10.0))
+            weight = tl.where(score >= content_threshold, weight, 0.0)
             addition = weight * aged_rates
             state_den = state_den * rates + addition
             state_num = state_num * rates[:, None] + addition[:, None] * value[None, :]
@@ -661,6 +675,7 @@ try:  # pragma: no cover - exercised only on a Triton-enabled GPU runner
         denominator_ptr,
         last_step_ptr,
         base_step,
+        content_threshold,
         num_events,
         num_heads,
         stride_pb,
@@ -792,6 +807,8 @@ try:  # pragma: no cover - exercised only on a Triton-enabled GPU runner
                     + rank * stride_sr
                 ).to(tl.float32)
                 weight = tl.exp(tl.minimum(tl.maximum(score, -20.0), 10.0))
+                selected = selected & (score >= content_threshold)
+                weight = tl.where(selected, weight, 0.0)
                 key_step = tl.where(selected, event_step, last)
                 delta = tl.maximum(key_step - last, 0).to(tl.float32)
                 decay = tl.exp(delta * tl.log(rates))
@@ -927,6 +944,7 @@ def triton_update_archive(
     codes: torch.Tensor,
     rates: torch.Tensor,
     window_size: int,
+    content_threshold: float | None = None,
 ) -> None:
     """Run the fused update kernel in-place, or raise when unavailable."""
 
@@ -962,6 +980,7 @@ def triton_update_archive(
         codes,
         rates,
         aged_rates,
+        float("-inf") if content_threshold is None else float(content_threshold),
         bsz,
         heads,
         *numerator.stride(),
@@ -1035,6 +1054,7 @@ def triton_lazy_update_archive(
     rates: torch.Tensor,
     window_size: int,
     current_step: int,
+    content_threshold: float | None = None,
 ) -> None:
     """Update only selected slots with timestamp-based lazy decay."""
 
@@ -1075,6 +1095,7 @@ def triton_lazy_update_archive(
         rates,
         aged_rates,
         current_step,
+        float("-inf") if content_threshold is None else float(content_threshold),
         heads,
         *numerator.stride(),
         *denominator.stride(),
@@ -1174,6 +1195,7 @@ def triton_update_read_archive_chunk(
     *,
     block_size: int = 256,
     output: torch.Tensor | None = None,
+    content_threshold: float | None = None,
 ) -> torch.Tensor:
     """Fuse dense archive update/read for a block of evicted tokens.
 
@@ -1255,6 +1277,7 @@ def triton_update_read_archive_chunk(
             mix,
             numerator,
             denominator,
+            float("-inf") if content_threshold is None else float(content_threshold),
             count,
             heads,
             *partial.stride(),
@@ -1311,6 +1334,7 @@ def triton_sparse_update_read_archive_chunk(
     *,
     block_size: int = 256,
     output: torch.Tensor | None = None,
+    content_threshold: float | None = None,
 ) -> torch.Tensor:
     """Fuse sparse lazy archive update/read for a block of evicted tokens.
 
@@ -1413,6 +1437,7 @@ def triton_sparse_update_read_archive_chunk(
             denominator,
             last_step,
             current_step + start,
+            float("-inf") if content_threshold is None else float(content_threshold),
             count,
             heads,
             *partial.stride(),
