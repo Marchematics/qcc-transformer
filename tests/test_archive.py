@@ -2,8 +2,13 @@ import torch
 import pytest
 
 from qcc_transformer import QCCArchive, QCCForCausalLM
-from qcc_transformer.triton_kernels import TRITON_AVAILABLE, triton_update_archive
-from qcc_transformer.triton_kernels import triton_read_archive
+from qcc_transformer.triton_kernels import (
+    TRITON_AVAILABLE,
+    triton_lazy_update_archive,
+    triton_read_archive,
+    triton_sparse_read_archive,
+    triton_update_archive,
+)
 
 
 def test_archive_matches_exponential_response_for_single_code() -> None:
@@ -264,6 +269,32 @@ def test_triton_kernel_is_optional_on_cpu() -> None:
             assert "Triton CUDA runtime" in str(exc)
         else:
             raise AssertionError("CPU invocation must not execute a CUDA kernel")
+    with pytest.raises(RuntimeError, match="Triton CUDA runtime"):
+        triton_lazy_update_archive(
+            archive.state.numerator,
+            archive.state.denominator,
+            archive._last_step,
+            torch.zeros(1, 1, 2),
+            torch.zeros(1, 1, 2),
+            archive.codes,
+            torch.zeros(1, 1, 1, dtype=torch.long),
+            archive.decay_rates,
+            archive.window_size,
+            1,
+        )
+    with pytest.raises(RuntimeError, match="Triton CUDA runtime"):
+        triton_sparse_read_archive(
+            torch.zeros(1, 1, 2),
+            archive.state.numerator,
+            archive.state.denominator,
+            archive._last_step,
+            archive.codes,
+            archive.mix_logits,
+            torch.zeros(1, 1, 1, dtype=torch.long),
+            torch.zeros(1, 1, 1),
+            archive.decay_rates,
+            1,
+        )
 
 
 @pytest.mark.skipif(not torch.cuda.is_available() or not TRITON_AVAILABLE, reason="CUDA and Triton required")
@@ -284,4 +315,31 @@ def test_triton_update_and_read_match_reference() -> None:
         fused_out = fused.read(query)
     torch.testing.assert_close(fused.state.denominator, reference.state.denominator, rtol=2e-3, atol=2e-3)
     torch.testing.assert_close(fused.state.numerator, reference.state.numerator, rtol=2e-3, atol=2e-3)
+    torch.testing.assert_close(fused_out, reference_out, rtol=3e-3, atol=3e-3)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available() or not TRITON_AVAILABLE, reason="CUDA and Triton required")
+def test_triton_sparse_lazy_matches_reference() -> None:
+    torch.manual_seed(10)
+    kwargs = dict(
+        num_heads=2,
+        head_dim=16,
+        num_codes=8,
+        active_codes=4,
+        lazy_decay=True,
+        decay_rates=(0.9, 0.97),
+        window_size=3,
+    )
+    reference = QCCArchive(**kwargs, use_triton=False).cuda()
+    fused = QCCArchive(**kwargs, use_triton=True).cuda()
+    keys = torch.randn(2, 2, 7, 16, device="cuda")
+    values = torch.randn_like(keys)
+    queries = torch.randn_like(keys)
+    with torch.no_grad():
+        reference.reset_state(2, device=keys.device)
+        fused.reset_state(2, device=keys.device)
+        reference_out = reference.update_read_chunk(keys, values, queries)
+        fused_out = fused.update_read_chunk(keys, values, queries)
+    torch.testing.assert_close(fused.state.denominator, reference.state.denominator, rtol=3e-3, atol=3e-3)
+    torch.testing.assert_close(fused.state.numerator, reference.state.numerator, rtol=3e-3, atol=3e-3)
     torch.testing.assert_close(fused_out, reference_out, rtol=3e-3, atol=3e-3)

@@ -58,7 +58,7 @@ python benchmarks/benchmark_tradeoff.py --length 1024 --window-size 32 \
   --num-codes 128 --active-codes 4 --strides 1,2,4,8
 ```
 
-In one single-thread CPU run, stride 2/4/8 achieved `1.39x`/`1.38x`/`1.55x`
+In one single-thread CPU run, stride 2/4/8 achieved `1.16x`/`1.28x`/`1.33x`
 relative latency with mean logit cosine `0.999225`/`0.998860`/`0.998646`.
 The exact numbers depend on model size and hardware; stride 1 is the reference
 and produces zero drift.
@@ -189,8 +189,10 @@ The current reference implementation has three deliberate limitations: no RoPE, 
 
 On a CUDA installation with Triton available, construct the model with
 `use_triton=True` (the default) to dispatch the fused archive-update kernel
-during `no_grad()` decoding. The kernel is optional and has not been benchmarked
-in this CPU-only environment; unsupported devices automatically use PyTorch.
+during `no_grad()` decoding. Sparse lazy configurations with power-of-two
+`active_codes` additionally dispatch fused selected-slot update/read kernels;
+other shapes automatically use PyTorch. These kernels are optional and have
+not been benchmarked in this CPU-only environment.
 
 ## License
 

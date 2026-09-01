@@ -202,6 +202,28 @@ class QCCArchive(nn.Module):
         scores = torch.einsum("bhd,hmd->bhm", key.to(state_dtype), codes)
         values, indices = torch.topk(scores, self.active_codes, dim=-1)
         self._step += 1
+        if (
+            self.use_triton
+            and key.is_cuda
+            and self.active_codes & (self.active_codes - 1) == 0
+        ):
+            from .triton_kernels import TRITON_AVAILABLE, triton_lazy_update_archive
+
+            if TRITON_AVAILABLE:
+                rates = self.decay_rates.to(device=key.device, dtype=state_dtype)
+                triton_lazy_update_archive(
+                    self._numerator,
+                    self._denominator,
+                    self._last_step,
+                    key,
+                    value,
+                    codes,
+                    indices,
+                    rates,
+                    self.window_size,
+                    self._step,
+                )
+                return
         index_scales = indices.unsqueeze(-1).expand(-1, -1, -1, self.num_scales)
         old_den = self._denominator.gather(2, index_scales)
         old_num = self._numerator.gather(
@@ -366,6 +388,26 @@ class QCCArchive(nn.Module):
             "bhd,hmd->bhm", query.to(state_dtype), codes
         ) / math.sqrt(self.head_dim)
         values, indices = torch.topk(routing_logits, self.active_codes, dim=-1)
+        if (
+            self.use_triton
+            and query.is_cuda
+            and self.active_codes & (self.active_codes - 1) == 0
+        ):
+            from .triton_kernels import TRITON_AVAILABLE, triton_sparse_read_archive
+
+            if TRITON_AVAILABLE:
+                return triton_sparse_read_archive(
+                    query,
+                    self._numerator,
+                    self._denominator,
+                    self._last_step,
+                    codes,
+                    self.mix_logits,
+                    indices,
+                    values,
+                    self.decay_rates,
+                    self._step,
+                )
         index_scales = indices.unsqueeze(-1).expand(-1, -1, -1, self.num_scales)
         numerator = self._numerator.gather(
             2, index_scales.unsqueeze(-1).expand(-1, -1, -1, -1, self.head_dim)
