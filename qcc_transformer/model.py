@@ -1121,8 +1121,8 @@ class QCCSelfAttention(nn.Module):
 
         bsz, length, _ = hidden.shape
         window = min(self.window_size, length)
-        if hidden.is_cuda:
-            # On CUDA, use the backend's fused SDPA primitive on bounded
+        if hidden.is_cuda or hidden.device.type == "mps":
+            # On accelerator backends, use the fused SDPA primitive on bounded
             # blocks instead of materializing an unfolded [time, window, dim]
             # tensor and launching separate einsums for logits and values. The
             # key slice contains at most ``window + block_size - 1`` tokens;

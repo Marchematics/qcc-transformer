@@ -133,6 +133,15 @@ The benchmark exposes `--threads` so these CPU measurements can be reproduced.
 They are implementation evidence for bounded local/archive work, not a
 universal hardware-independent claim.
 
+The bounded local-SDPA path is also selected on Apple MPS; only CPU keeps the
+unfolded reference fallback. A small matched MPS smoke run (`d_model=64`, one
+layer, four heads, `window_size=128`, eight codes, chunk size 64) measured
+`9.78x` QCC/full prefill at 16,384 tokens (`0.441 s` vs `4.308 s`). At 32,768
+tokens QCC prefill completed in `0.551 s`, while the FullAttention control
+failed with a 16-GiB temporary-buffer allocation. These observations validate
+bounded execution and an OOM boundary on that machine; they are not CUDA or
+RULER results.
+
 For million-token serving, the default `position_encoding="sinusoidal"` is
 stateless: configuring `max_position_embeddings=4_000_000` does not allocate a
 four-million-row learned position table. `archive_scan_block_size` controls the
