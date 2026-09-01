@@ -40,9 +40,9 @@ fixed), the persistent decode benchmark measured:
 
 | Tokens | QCC | Full KV | Relative |
 |---:|---:|---:|---:|
-| 1,024 | 1.32 s | 2.14 s | 1.62x |
-| 2,048 | 2.51 s | 10.39 s | 4.13x |
-| 4,096 | 6.42 s | 40.09 s | 6.25x |
+| 1,024 | 2.20 s | 2.33 s | 1.06x |
+| 2,048 | 3.09 s | 9.36 s | 3.03x |
+| 4,096 | 5.88 s | 39.49 s | 6.71x |
 
 At 1,024 tokens in this configuration, the bounded QCC state contains
 164,864 elements versus 1,048,576 full-KV elements (6.36x fewer). At 2,048 and

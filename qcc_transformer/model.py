@@ -258,18 +258,11 @@ class QCCSelfAttention(nn.Module):
                 self._cache_start = (self._cache_start + 1) % self.window_size
             self._local_key_cache[:, :, write_index] = key
             self._local_value_cache[:, :, write_index] = value
-            if self._cache_start == 0:
-                local_keys = self._local_key_cache[:, :, : self._cache_length]
-                local_values = self._local_value_cache[:, :, : self._cache_length]
-            else:
-                local_keys = torch.cat(
-                    (self._local_key_cache[:, :, self._cache_start : self._cache_length],
-                     self._local_key_cache[:, :, : self._cache_start]), dim=2
-                )
-                local_values = torch.cat(
-                    (self._local_value_cache[:, :, self._cache_start : self._cache_length],
-                     self._local_value_cache[:, :, : self._cache_start]), dim=2
-                )
+            # Attention over one query is permutation-invariant over its K/V
+            # set. Keep the physical ring order and avoid copying/rotating the
+            # window on every token; ``_cache_start`` is only the eviction slot.
+            local_keys = self._local_key_cache[:, :, : self._cache_length]
+            local_values = self._local_value_cache[:, :, : self._cache_length]
         else:
             self._local_keys.append(key)
             self._local_values.append(value)
