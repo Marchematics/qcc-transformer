@@ -431,7 +431,6 @@ try:  # pragma: no cover - exercised only on a Triton-enabled GPU runner
         stride_ch,
         stride_cm,
         stride_cd,
-        stride_rb,
         stride_rh,
         stride_re,
         stride_rj,
@@ -993,7 +992,7 @@ def triton_read_archive(
     codes = codes.contiguous()
     mix = torch.softmax(mix_logits, dim=-1).to(torch.float32).contiguous()
     batch, heads, dim = query.shape
-    _, codes_count, scales, _ = numerator.shape
+    _, _, codes_count, scales, _ = numerator.shape
     block_dim = 1 << max(4, (dim - 1).bit_length())
     block_m = 1 << max(0, (codes_count - 1).bit_length())
     output = torch.empty((batch, heads, dim), device=query.device, dtype=torch.float32)
