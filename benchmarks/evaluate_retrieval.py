@@ -59,6 +59,50 @@ def _record_fields(record: dict[str, Any]) -> tuple[torch.Tensor, int, set[int]]
     return torch.tensor(raw_tokens, dtype=torch.long), position, set(answers)
 
 
+def _iter_records(dataset: Path, max_examples: int | None):
+    total = 0
+    with dataset.open("r", encoding="utf-8") as stream:
+        for line_number, line in enumerate(stream, start=1):
+            if max_examples is not None and total >= max_examples:
+                break
+            if not line.strip():
+                continue
+            try:
+                record = json.loads(line)
+                if not isinstance(record, dict):
+                    raise ValueError("record must be a JSON object")
+                fields = _record_fields(record)
+            except (json.JSONDecodeError, ValueError) as exc:
+                raise ValueError(f"invalid record on line {line_number}: {exc}") from exc
+            total += 1
+            yield line_number, fields
+
+
+@torch.no_grad()
+def _predict_logits(
+    model: QCCForCausalLM,
+    input_ids: torch.Tensor,
+    target_position: int,
+    *,
+    chunk_size: int,
+    device: torch.device,
+) -> torch.Tensor:
+    if input_ids.numel() > model.max_position_embeddings:
+        raise ValueError(
+            f"record has {input_ids.numel()} tokens, exceeds "
+            f"max_position_embeddings={model.max_position_embeddings}"
+        )
+    model.reset_cache(batch_size=1)
+    for start in range(0, input_ids.numel(), chunk_size):
+        end = min(input_ids.numel(), start + chunk_size)
+        logits = model.decode_chunk(
+            input_ids[start:end].unsqueeze(0).to(device), reset_cache=start == 0
+        )
+        if start <= target_position < end:
+            return logits[0, target_position - start].detach()
+    raise RuntimeError("target_position was not reached")
+
+
 @torch.no_grad()
 def evaluate(
     model: QCCForCausalLM,
@@ -72,39 +116,51 @@ def evaluate(
         raise ValueError("chunk_size must be positive")
     total = 0
     correct = 0
-    with dataset.open("r", encoding="utf-8") as stream:
-        for line_number, line in enumerate(stream, start=1):
-            if max_examples is not None and total >= max_examples:
-                break
-            if not line.strip():
-                continue
-            try:
-                record = json.loads(line)
-                if not isinstance(record, dict):
-                    raise ValueError("record must be a JSON object")
-                input_ids, target_position, answers = _record_fields(record)
-            except (json.JSONDecodeError, ValueError) as exc:
-                raise ValueError(f"invalid record on line {line_number}: {exc}") from exc
-            if input_ids.numel() > model.max_position_embeddings:
-                raise ValueError(
-                    f"line {line_number} has {input_ids.numel()} tokens, exceeds "
-                    f"max_position_embeddings={model.max_position_embeddings}"
-                )
-            model.reset_cache(batch_size=1)
-            prediction: int | None = None
-            for start in range(0, input_ids.numel(), chunk_size):
-                end = min(input_ids.numel(), start + chunk_size)
-                logits = model.decode_chunk(
-                    input_ids[start:end].unsqueeze(0).to(device), reset_cache=start == 0
-                )
-                if start <= target_position < end:
-                    prediction = int(logits[0, target_position - start].argmax().item())
-                    break
-            if prediction is None:
-                raise RuntimeError("target_position was not reached")
-            correct += int(prediction in answers)
-            total += 1
+    for _, (input_ids, target_position, answers) in _iter_records(dataset, max_examples):
+        logits = _predict_logits(
+            model,
+            input_ids,
+            target_position,
+            chunk_size=chunk_size,
+            device=device,
+        )
+        correct += int(int(logits.argmax().item()) in answers)
+        total += 1
     return correct, total
+
+
+@torch.no_grad()
+def evaluate_pair(
+    qcc: QCCForCausalLM,
+    full: QCCForCausalLM,
+    dataset: Path,
+    *,
+    chunk_size: int,
+    device: torch.device,
+    max_examples: int | None,
+) -> tuple[int, int, int, float]:
+    """Evaluate matched models and return accuracies plus mean logit cosine."""
+
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be positive")
+    qcc_correct = full_correct = total = 0
+    cosine_sum = 0.0
+    for _, (input_ids, target_position, answers) in _iter_records(dataset, max_examples):
+        qcc_logits = _predict_logits(
+            qcc, input_ids, target_position, chunk_size=chunk_size, device=device
+        )
+        full_logits = _predict_logits(
+            full, input_ids, target_position, chunk_size=chunk_size, device=device
+        )
+        qcc_correct += int(int(qcc_logits.argmax().item()) in answers)
+        full_correct += int(int(full_logits.argmax().item()) in answers)
+        cosine_sum += float(
+            torch.nn.functional.cosine_similarity(
+                qcc_logits.unsqueeze(0), full_logits.unsqueeze(0), dim=-1
+            ).item()
+        )
+        total += 1
+    return qcc_correct, full_correct, total, cosine_sum / total if total else 0.0
 
 
 def main() -> None:
@@ -151,19 +207,7 @@ def main() -> None:
     state_dict = _load_checkpoint(args.checkpoint)
     model.load_state_dict(state_dict, strict=True)
     model.eval()
-    correct, total = evaluate(
-        model,
-        args.dataset,
-        chunk_size=args.chunk_size,
-        device=device,
-        max_examples=args.max_examples,
-    )
-    accuracy = correct / total if total else 0.0
-    print(
-        f"device={device} examples={total} correct={correct} "
-        f"retrieval_accuracy={accuracy:.6f} target={args.target_accuracy:.6f} "
-        f"passed={accuracy >= args.target_accuracy}"
-    )
+    full: QCCForCausalLM | None = None
     if args.compare_full_kv:
         full = QCCForCausalLM(
             vocab_size=args.vocab_size,
@@ -180,20 +224,37 @@ def main() -> None:
         ).to(device)
         full.load_state_dict(state_dict, strict=True)
         full.eval()
-        full_correct, full_total = evaluate(
+        correct, full_correct, total, mean_cosine = evaluate_pair(
+            model,
             full,
             args.dataset,
             chunk_size=args.chunk_size,
             device=device,
             max_examples=args.max_examples,
         )
-        full_accuracy = full_correct / full_total if full_total else 0.0
+    else:
+        correct, total = evaluate(
+            model,
+            args.dataset,
+            chunk_size=args.chunk_size,
+            device=device,
+            max_examples=args.max_examples,
+        )
+    accuracy = correct / total if total else 0.0
+    print(
+        f"device={device} examples={total} correct={correct} "
+        f"retrieval_accuracy={accuracy:.6f} target={args.target_accuracy:.6f} "
+        f"passed={accuracy >= args.target_accuracy}"
+    )
+    if full is not None:
+        full_accuracy = full_correct / total if total else 0.0
         ratio = accuracy / full_accuracy if full_accuracy else 0.0
         print(
             f"full_kv_accuracy={full_accuracy:.6f} full_kv_correct={full_correct} "
-            f"quality_ratio={ratio:.6f} qcc_retained_fraction={accuracy / full_accuracy:.6f}"
+            f"quality_ratio={ratio:.6f} mean_logit_cosine={mean_cosine:.6f}"
             if full_accuracy
-            else f"full_kv_accuracy={full_accuracy:.6f} full_kv_correct={full_correct} quality_ratio=nan"
+            else f"full_kv_accuracy={full_accuracy:.6f} full_kv_correct={full_correct} "
+            f"quality_ratio=nan mean_logit_cosine={mean_cosine:.6f}"
         )
 
 
