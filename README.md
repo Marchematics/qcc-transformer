@@ -2,7 +2,7 @@
 
 Query-Compiled Cache (QCC) Transformer is a PyTorch research prototype for long-context decoding. It keeps an exact recent window and compiles older tokens into a constant-size set of multi-timescale softmax responses.
 
-This repository is an implementation of a falsifiable hypothesis, not a claim of a solved production system. The reference path uses Python sequence loops so that the state equations are easy to inspect. A useful next systems step is a fused Triton/CUDA update-and-read kernel.
+This repository is an implementation of a falsifiable hypothesis, not a claim of a solved production system. The reference path uses Python sequence loops so that the state equations are easy to inspect. CUDA inference already dispatches fused archive update/read kernels; a remaining systems step is fusing an entire decode chunk into one launch.
 
 ## Why this is different
 
@@ -188,11 +188,13 @@ logits = model(input_ids)
 The current reference implementation has three deliberate limitations: no RoPE, sequence-level Python loops, and a clipped exponential accumulator. These are appropriate for validating the architecture and its gradients, but not for production throughput. The archive state is accumulated in fp32 to reduce long-stream drift.
 
 On a CUDA installation with Triton available, construct the model with
-`use_triton=True` (the default) to dispatch the fused archive-update kernel
-during `no_grad()` decoding. Sparse lazy configurations with power-of-two
+`use_triton=True` (the default) to dispatch fused archive-update and archive-read
+kernels during `no_grad()` decoding. Sparse lazy configurations with power-of-two
 `active_codes` additionally dispatch fused selected-slot update/read kernels;
-other shapes automatically use PyTorch. These kernels are optional and have
-not been benchmarked in this CPU-only environment.
+other shapes automatically use PyTorch. The chunk API still performs ordered
+archive events, so a future GPU optimization is a single launch for a whole
+decode chunk. These kernels are optional and have not been benchmarked in this
+CPU-only environment.
 
 ## License
 
