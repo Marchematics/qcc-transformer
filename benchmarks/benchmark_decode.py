@@ -102,6 +102,17 @@ def main() -> None:
     parser.add_argument("--lazy-decay", action="store_true")
     parser.add_argument("--archive-read-stride", type=int, default=1)
     parser.add_argument(
+        "--archive-query-cosine-threshold",
+        type=float,
+        default=None,
+        help="reuse remote archive reads when all heads have cosine similarity above this threshold",
+    )
+    parser.add_argument(
+        "--repeat-token",
+        action="store_true",
+        help="use one repeated token (useful for measuring adaptive query reuse)",
+    )
+    parser.add_argument(
         "--threads",
         type=int,
         default=None,
@@ -128,8 +139,12 @@ def main() -> None:
         active_codes=args.active_codes,
         lazy_decay=args.lazy_decay,
         archive_read_stride=args.archive_read_stride,
+        archive_query_cosine_threshold=args.archive_query_cosine_threshold,
     )
-    tokens = torch.randint(0, common["vocab_size"], (1, args.length), device=device)
+    if args.repeat_token:
+        tokens = torch.zeros((1, args.length), dtype=torch.long, device=device)
+    else:
+        tokens = torch.randint(0, common["vocab_size"], (1, args.length), device=device)
     qcc = QCCForCausalLM(**common).to(device)
     full = FullAttentionBaseline(**common).to(device)
     if args.mode == "prefill":

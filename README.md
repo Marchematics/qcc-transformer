@@ -50,6 +50,11 @@ the cost of an explicitly approximate top-k read and a larger persistent
 state. `archive_read_stride` additionally reuses the last remote response for
 intermediate decode steps; it is an approximation knob and currently applies
 to the token-at-a-time `decode_step` path.
+An alternative adaptive knob, `archive_query_cosine_threshold`, refreshes the
+remote response only when query similarity falls below a threshold; it is
+disabled by default and is useful for workloads with repeated hidden states.
+The archive is still updated on every eviction, so this trades read freshness
+for latency and should be evaluated with a drift metric.
 
 To measure the resulting logit drift rather than only wall time, run:
 

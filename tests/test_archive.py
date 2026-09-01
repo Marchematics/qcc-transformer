@@ -1,7 +1,8 @@
 import torch
 import pytest
+from unittest.mock import patch
 
-from qcc_transformer import QCCArchive, QCCForCausalLM
+from qcc_transformer import QCCArchive, QCCForCausalLM, QCCSelfAttention
 from qcc_transformer.triton_kernels import (
     TRITON_AVAILABLE,
     triton_lazy_update_archive,
@@ -110,6 +111,33 @@ def test_persistent_decode_matches_sequence_forward() -> None:
             [model.decode_step(tokens[:, t]) for t in range(tokens.shape[1])], dim=1
         )
     torch.testing.assert_close(streamed, sequence_logits, rtol=2e-4, atol=2e-4)
+
+
+def test_query_stability_can_suppress_repeated_archive_reads() -> None:
+    torch.manual_seed(41)
+    attention = QCCSelfAttention(
+        d_model=16,
+        num_heads=4,
+        window_size=2,
+        num_codes=4,
+        archive_query_cosine_threshold=0.99,
+    ).eval()
+    calls = 0
+    original_read = attention.archive.read
+
+    def counted_read(query: torch.Tensor) -> torch.Tensor:
+        nonlocal calls
+        calls += 1
+        return original_read(query)
+
+    hidden = torch.zeros(1, 16)
+    with patch.object(attention.archive, "read", counted_read):
+        with torch.no_grad():
+            for index in range(8):
+                attention.step(hidden, reset_cache=index == 0)
+    # The first post-window query refreshes the archive; identical queries can
+    # reuse that response when the optional adaptive threshold is enabled.
+    assert calls == 1
 
 
 @pytest.mark.parametrize("use_archive", [True, False])

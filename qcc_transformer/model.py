@@ -505,6 +505,7 @@ class QCCSelfAttention(nn.Module):
         active_codes: Optional[int] = None,
         lazy_decay: bool = False,
         archive_read_stride: int = 1,
+        archive_query_cosine_threshold: Optional[float] = None,
     ) -> None:
         super().__init__()
         if d_model % num_heads:
@@ -513,6 +514,8 @@ class QCCSelfAttention(nn.Module):
             raise ValueError("num_scales must be positive")
         if archive_read_stride <= 0:
             raise ValueError("archive_read_stride must be positive")
+        if archive_query_cosine_threshold is not None and not -1.0 <= archive_query_cosine_threshold <= 1.0:
+            raise ValueError("archive_query_cosine_threshold must be in [-1, 1]")
         self.d_model = d_model
         self.num_heads = num_heads
         self.head_dim = d_model // num_heads
@@ -536,6 +539,11 @@ class QCCSelfAttention(nn.Module):
             lazy_decay=lazy_decay,
         )
         self.archive_read_stride = archive_read_stride
+        # Optional adaptive remote-read suppression. ``None`` keeps exact
+        # archive reads; otherwise a read is skipped when the new query is
+        # cosine-close to the previous refreshed query. The state is still
+        # updated every token, so this knob changes only read freshness.
+        self.archive_query_cosine_threshold = archive_query_cosine_threshold
         self._local_keys: list[Tensor] = []
         self._local_values: list[Tensor] = []
         self._local_key_cache: Optional[Tensor] = None
@@ -546,6 +554,7 @@ class QCCSelfAttention(nn.Module):
         self._cache_length = 0
         self._seen_tokens = 0
         self._archive_read_cache: Optional[Tensor] = None
+        self._archive_query_cache: Optional[Tensor] = None
 
     def _split_heads(self, x: Tensor) -> Tensor:
         bsz, length, _ = x.shape
@@ -565,6 +574,7 @@ class QCCSelfAttention(nn.Module):
         self._cache_length = 0
         self._seen_tokens = 0
         self._archive_read_cache = None
+        self._archive_query_cache = None
 
     def _ordered_ring(self) -> tuple[Tensor, Tensor]:
         """Return valid ring contents in chronological order."""
@@ -669,8 +679,21 @@ class QCCSelfAttention(nn.Module):
                 or self.archive_read_stride == 1
                 or self._seen_tokens % self.archive_read_stride == 0
             )
+            if (
+                refresh
+                and self.archive_query_cosine_threshold is not None
+                and self._archive_query_cache is not None
+            ):
+                # Archive reads are batched over heads.  Skip the whole read
+                # only when every head sees a stable query; this avoids mixing
+                # fresh and stale heads while keeping the decision scalar.
+                similarity = F.cosine_similarity(q, self._archive_query_cache, dim=-1)
+                refresh = bool(
+                    torch.any(similarity < self.archive_query_cosine_threshold).item()
+                )
             if refresh:
                 self._archive_read_cache = self.archive.read(q)
+                self._archive_query_cache = q.detach()
             assert self._archive_read_cache is not None
             archive_out = self._archive_read_cache
             gate = torch.sigmoid(self.gate(hidden)).unsqueeze(-1)
@@ -929,6 +952,7 @@ class QCCForCausalLM(nn.Module):
         active_codes: Optional[int] = None,
         lazy_decay: bool = False,
         archive_read_stride: int = 1,
+        archive_query_cosine_threshold: Optional[float] = None,
     ) -> None:
         super().__init__()
         self.token_embedding = nn.Embedding(vocab_size, d_model)
@@ -945,6 +969,7 @@ class QCCForCausalLM(nn.Module):
                 active_codes=active_codes,
                 lazy_decay=lazy_decay,
                 archive_read_stride=archive_read_stride,
+                archive_query_cosine_threshold=archive_query_cosine_threshold,
             )
             for _ in range(num_layers)
         )
