@@ -28,6 +28,24 @@ def _run(cmd: list[str]) -> None:
     subprocess.run(cmd, cwd=ROOT, check=True)
 
 
+def _run_logged(cmd: list[str], path: Path) -> int:
+    """Run a long job while preserving stdout/stderr even when it fails."""
+
+    print("$", " ".join(cmd), flush=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as stream:
+        completed = subprocess.run(
+            cmd,
+            cwd=ROOT,
+            text=True,
+            stdout=stream,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+    print(f"returncode={completed.returncode} log={path}", flush=True)
+    return completed.returncode
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--lengths", default="8192,32768")
@@ -47,6 +65,12 @@ def main() -> None:
     parser.add_argument("--retrieval-context", type=int, default=1_000_000)
     parser.add_argument("--max-examples", type=int)
     parser.add_argument("--output", type=Path, default=Path("artifacts/colab_gpu_smoke.json"))
+    parser.add_argument(
+        "--long-output-dir",
+        type=Path,
+        default=Path("artifacts/colab_long"),
+        help="directory for one stdout/stderr log per requested long length",
+    )
     args = parser.parse_args()
     if not torch.cuda.is_available():
         raise SystemExit("CUDA is unavailable. In Colab select Runtime > Change runtime type > T4 GPU.")
@@ -96,14 +120,27 @@ def main() -> None:
             audit += ["--max-examples", str(args.max_examples)]
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("w", encoding="utf-8") as stream:
-        subprocess.run(audit, cwd=ROOT, check=True, stdout=stream)
+        completed = subprocess.run(
+            audit,
+            cwd=ROOT,
+            text=True,
+            stdout=stream,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+    if completed.returncode:
+        raise SystemExit(
+            f"audit failed with returncode={completed.returncode}; see {args.output}"
+        )
     print("wrote", args.output)
+    long_results: list[dict[str, object]] = []
     if args.run_long:
         for raw in args.long_lengths.split(","):
             length = raw.strip()
             if not length:
                 continue
-            _run([
+            log_path = args.long_output_dir / f"length_{length}.log"
+            returncode = _run_logged([
                 sys.executable,
                 "benchmarks/benchmark_long_context.py",
                 "--length", length,
@@ -116,8 +153,17 @@ def main() -> None:
                 "--num-codes", str(args.num_codes),
                 "--device", "cuda",
                 "--run",
-            ])
-    print(json.dumps({"status": "complete", "audit": str(args.output), "cuda": True}, indent=2))
+            ], log_path)
+            long_results.append(
+                {"length": int(length), "returncode": returncode, "log": str(log_path)}
+            )
+    status = "complete" if all(item["returncode"] == 0 for item in long_results) else "partial"
+    print(
+        json.dumps(
+            {"status": status, "audit": str(args.output), "cuda": True, "long_runs": long_results},
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

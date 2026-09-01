@@ -322,6 +322,11 @@ Triton, preserves machine-readable `missing` gates, and never treats a
 QCC-only long stream as evidence for Full-KV quality, RULER, or a speedup
 factor.
 
+Each long run is isolated in its own subprocess and writes combined
+stdout/stderr to `artifacts/colab_long/length_<N>.log`; an OOM or timeout is
+recorded with a nonzero return code so later lengths can still be attempted.
+The wrapper reports `partial` rather than silently dropping failed lengths.
+
 ### Target-gate status
 
 The requested headline gates are intentionally tracked separately from the
