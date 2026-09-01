@@ -1245,9 +1245,18 @@ class QCCSelfAttention(nn.Module):
                 # receives a signal to become salient.  No-grad/reference and
                 # Triton paths retain the exact hard gate.
                 if torch.is_grad_enabled():
-                    content_weight = content_weight * torch.sigmoid(
+                    smooth_gate = torch.sigmoid(
                         (score - self.archive.content_threshold) / 0.1
                     )
+                    hard_gate = (score >= self.archive.content_threshold).to(
+                        content_weight.dtype
+                    )
+                    # Straight-through estimator: preserve the exact hard
+                    # threshold in the forward pass (matching inference),
+                    # while exposing a smooth derivative to train scores that
+                    # sit just below the threshold.
+                    gate = hard_gate + smooth_gate - smooth_gate.detach()
+                    content_weight = content_weight * gate
                 else:
                     content_weight = torch.where(
                         score >= self.archive.content_threshold,
