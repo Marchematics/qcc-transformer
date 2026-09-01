@@ -119,8 +119,11 @@ def test_persistent_local_cache_never_exceeds_window() -> None:
         for token in torch.randint(0, 13, (20,)):
             model.decode_step(token[None])
     cache = model.layers[0].attention
-    assert len(cache._local_keys) <= cache.window_size
-    assert len(cache._local_values) <= cache.window_size
+    assert cache._cache_length <= cache.window_size
+    assert cache._local_key_cache is not None
+    assert cache._local_key_cache.shape[2] == cache.window_size
+    assert cache._local_value_cache is not None
+    assert cache._local_value_cache.shape[2] == cache.window_size
 
 
 def test_archive_state_is_constant_in_sequence_length() -> None:

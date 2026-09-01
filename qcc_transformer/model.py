@@ -205,6 +205,10 @@ class QCCSelfAttention(nn.Module):
         )
         self._local_keys: list[Tensor] = []
         self._local_values: list[Tensor] = []
+        self._local_key_cache: Optional[Tensor] = None
+        self._local_value_cache: Optional[Tensor] = None
+        self._cache_start = 0
+        self._cache_length = 0
         self._seen_tokens = 0
 
     def _split_heads(self, x: Tensor) -> Tensor:
@@ -217,6 +221,10 @@ class QCCSelfAttention(nn.Module):
         self.archive.reset_state(batch_size, device=device)
         self._local_keys = []
         self._local_values = []
+        self._local_key_cache = None
+        self._local_value_cache = None
+        self._cache_start = 0
+        self._cache_length = 0
         self._seen_tokens = 0
 
     def step(self, hidden: Tensor, *, reset_cache: bool = False) -> Tensor:
@@ -235,13 +243,38 @@ class QCCSelfAttention(nn.Module):
         q = self._split_heads(self.q_proj(hidden[:, None]))[:, :, 0]
         key = self._split_heads(self.k_proj(hidden[:, None]))[:, :, 0]
         value = self._split_heads(self.v_proj(hidden[:, None]))[:, :, 0]
-        self._local_keys.append(key)
-        self._local_values.append(value)
-        if self.use_archive and len(self._local_keys) > self.window_size:
-            self.archive.update(self._local_keys.pop(0), self._local_values.pop(0))
-
-        local_keys = torch.stack(self._local_keys, dim=2)
-        local_values = torch.stack(self._local_values, dim=2)
+        if self.use_archive:
+            if self._local_key_cache is None:
+                shape = (bsz, self.num_heads, self.window_size, self.head_dim)
+                self._local_key_cache = torch.empty(shape, device=key.device, dtype=key.dtype)
+                self._local_value_cache = torch.empty(shape, device=value.device, dtype=value.dtype)
+            assert self._local_value_cache is not None
+            if self._cache_length < self.window_size:
+                write_index = (self._cache_start + self._cache_length) % self.window_size
+                self._cache_length += 1
+            else:
+                write_index = self._cache_start
+                self.archive.update(self._local_key_cache[:, :, write_index], self._local_value_cache[:, :, write_index])
+                self._cache_start = (self._cache_start + 1) % self.window_size
+            self._local_key_cache[:, :, write_index] = key
+            self._local_value_cache[:, :, write_index] = value
+            if self._cache_start == 0:
+                local_keys = self._local_key_cache[:, :, : self._cache_length]
+                local_values = self._local_value_cache[:, :, : self._cache_length]
+            else:
+                local_keys = torch.cat(
+                    (self._local_key_cache[:, :, self._cache_start : self._cache_length],
+                     self._local_key_cache[:, :, : self._cache_start]), dim=2
+                )
+                local_values = torch.cat(
+                    (self._local_value_cache[:, :, self._cache_start : self._cache_length],
+                     self._local_value_cache[:, :, : self._cache_start]), dim=2
+                )
+        else:
+            self._local_keys.append(key)
+            self._local_values.append(value)
+            local_keys = torch.stack(self._local_keys, dim=2)
+            local_values = torch.stack(self._local_values, dim=2)
         local_logits = torch.einsum("bhd,bhld->bhl", q, local_keys) / math.sqrt(self.head_dim)
         local_prob = F.softmax(local_logits, dim=-1)
         local_out = torch.einsum("bhl,bhld->bhd", local_prob, local_values)

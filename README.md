@@ -40,14 +40,15 @@ fixed), the persistent decode benchmark measured:
 
 | Tokens | QCC | Full KV | Relative |
 |---:|---:|---:|---:|
-| 1,024 | 1.63 s | 2.09 s | 1.28x |
-| 2,048 | 3.38 s | 9.09 s | 2.69x |
-| 4,096 | 6.87 s | 37.71 s | 5.49x |
+| 1,024 | 1.32 s | 2.14 s | 1.62x |
+| 2,048 | 2.51 s | 10.39 s | 4.13x |
+| 4,096 | 6.42 s | 40.09 s | 6.25x |
 
 At 1,024 tokens in this configuration, the bounded QCC state contains
-164,864 elements versus 1,048,576 full-KV elements (6.36x fewer). The ratio
-continues to grow linearly with context length because the QCC archive and
-local window are bounded.
+164,864 elements versus 1,048,576 full-KV elements (6.36x fewer). At 2,048 and
+4,096 tokens the reductions are 12.72x and 25.44x. The ratio continues to grow
+linearly with context length because the QCC archive and local window are
+bounded.
 
 These numbers are implementation evidence for the bounded-history trend, not
 a claim of a universal speedup. GPU results, batch scaling, kernel fusion, and
