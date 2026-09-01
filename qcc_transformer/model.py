@@ -128,14 +128,6 @@ class QCCArchive(nn.Module):
             self.reset_state(bsz, device=key.device)
 
         rates = self.decay_rates.to(device=key.device, dtype=self._numerator.dtype)
-        codes = self.codes.to(dtype=self._numerator.dtype)
-        score = torch.einsum("bhd,hmd->bhm", key.to(self._numerator.dtype), codes)
-        score = score / math.sqrt(self.head_dim)
-        # Clipping bounds the reference implementation. A fused kernel should
-        # use per-code log rescaling instead of clipping for higher fidelity.
-        content_weight = torch.exp(score.clamp(min=-20.0, max=10.0))
-        age = rates.pow(self.window_size).view(1, 1, 1, self.num_scales)
-
         if self.use_triton and not torch.is_grad_enabled() and key.is_cuda:
             from .triton_kernels import TRITON_AVAILABLE, triton_update_archive
 
@@ -150,6 +142,14 @@ class QCCArchive(nn.Module):
                     self.window_size,
                 )
                 return
+
+        codes = self.codes.to(dtype=self._numerator.dtype)
+        score = torch.einsum("bhd,hmd->bhm", key.to(self._numerator.dtype), codes)
+        score = score / math.sqrt(self.head_dim)
+        # Clipping bounds the reference implementation. A fused kernel should
+        # use per-code log rescaling instead of clipping for higher fidelity.
+        content_weight = torch.exp(score.clamp(min=-20.0, max=10.0))
+        age = rates.pow(self.window_size).view(1, 1, 1, self.num_scales)
 
         denominator_decay = rates.view(1, 1, 1, self.num_scales)
         numerator_decay = rates.view(1, 1, 1, self.num_scales, 1)

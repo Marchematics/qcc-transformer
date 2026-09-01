@@ -1,7 +1,9 @@
 import torch
+import pytest
 
 from qcc_transformer import QCCArchive, QCCForCausalLM
 from qcc_transformer.triton_kernels import TRITON_AVAILABLE, triton_update_archive
+from qcc_transformer.triton_kernels import triton_read_archive
 
 
 def test_archive_matches_exponential_response_for_single_code() -> None:
@@ -160,3 +162,24 @@ def test_triton_kernel_is_optional_on_cpu() -> None:
             assert "Triton CUDA runtime" in str(exc)
         else:
             raise AssertionError("CPU invocation must not execute a CUDA kernel")
+
+
+@pytest.mark.skipif(not torch.cuda.is_available() or not TRITON_AVAILABLE, reason="CUDA and Triton required")
+def test_triton_update_and_read_match_reference() -> None:
+    torch.manual_seed(5)
+    kwargs = dict(num_heads=2, head_dim=16, num_codes=4, decay_rates=(0.9, 0.97), window_size=3)
+    reference = QCCArchive(**kwargs, use_triton=False).cuda()
+    fused = QCCArchive(**kwargs, use_triton=True).cuda()
+    keys = torch.randn(2, 2, 16, device="cuda")
+    values = torch.randn_like(keys)
+    query = torch.randn_like(keys)
+    with torch.no_grad():
+        reference.reset_state(2, device=keys.device)
+        fused.reset_state(2, device=keys.device)
+        reference.update(keys, values)
+        fused.update(keys, values)
+        reference_out = reference.read(query)
+        fused_out = fused.read(query)
+    torch.testing.assert_close(fused.state.denominator, reference.state.denominator, rtol=2e-3, atol=2e-3)
+    torch.testing.assert_close(fused.state.numerator, reference.state.numerator, rtol=2e-3, atol=2e-3)
+    torch.testing.assert_close(fused_out, reference_out, rtol=3e-3, atol=3e-3)
