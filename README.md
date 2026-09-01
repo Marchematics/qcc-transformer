@@ -248,6 +248,18 @@ parity on a real language distribution.
 
 The benchmark reports runtime only. It is not evidence of language-model quality. For a meaningful study, train matched small models and evaluate perplexity, Needle-in-a-Haystack, RULER, PG-19, cache memory, and decode TPOT at 32k+ context.
 
+To run all available gates in one machine-readable report, use:
+
+```bash
+python benchmarks/audit_targets.py --state-only --json
+```
+
+Add `--run-latency --device cuda` for end-to-end QCC timing. Full-KV timing is
+only attempted at lengths no larger than `--full-max-length` because the
+baseline is intentionally unbounded. Supplying both `--checkpoint` and
+`--dataset` enables the real retrieval gate; absent prerequisites are reported
+as `missing`, never as a passing score.
+
 On the reference CPU environment (PyTorch 2.9.1, one thread), a persistent
 decode benchmark with the fused SDPA full-KV control measured:
 
