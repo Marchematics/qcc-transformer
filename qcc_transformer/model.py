@@ -24,6 +24,38 @@ class QCCState:
     denominator: Tensor
 
 
+class SinusoidalPositionEmbedding(nn.Module):
+    """Stateless positions that remain valid beyond a learned table limit.
+
+    A learned ``nn.Embedding`` allocates ``max_position_embeddings * d_model``
+    parameters even when serving only one token at a time.  This module builds
+    the requested positions on demand, so a model configured for million-token
+    streams does not reserve a million-row parameter table.  It is deliberately
+    kept as a normal module to make the positional policy explicit and easy to
+    swap in experiments.
+    """
+
+    def __init__(self, d_model: int, max_period: float = 10_000.0) -> None:
+        super().__init__()
+        if d_model <= 0:
+            raise ValueError("d_model must be positive")
+        if max_period <= 1.0:
+            raise ValueError("max_period must be greater than one")
+        half = (d_model + 1) // 2
+        frequencies = torch.exp(
+            -math.log(max_period) * torch.arange(half, dtype=torch.float32) / max(half, 1)
+        )
+        self.d_model = d_model
+        self.register_buffer("frequencies", frequencies, persistent=False)
+
+    def forward(self, positions: Tensor) -> Tensor:
+        if positions.dtype not in (torch.int32, torch.int64):
+            raise ValueError("positions must be an integer tensor")
+        angles = positions.to(dtype=torch.float32).unsqueeze(-1) * self.frequencies
+        values = torch.cat((angles.sin(), angles.cos()), dim=-1)
+        return values[..., : self.d_model]
+
+
 class QCCArchive(nn.Module):
     """Constant-size, multi-timescale softmax response memory.
 
@@ -51,6 +83,7 @@ class QCCArchive(nn.Module):
         use_triton: bool = True,
         active_codes: Optional[int] = None,
         lazy_decay: bool = False,
+        scan_block_size: int = 256,
     ) -> None:
         super().__init__()
         if num_heads <= 0 or head_dim <= 0 or num_codes <= 0:
@@ -64,6 +97,8 @@ class QCCArchive(nn.Module):
             raise ValueError("active_codes must be in [1, num_codes] when provided")
         if lazy_decay and active_codes is None:
             raise ValueError("lazy_decay requires active_codes to bound touched slots")
+        if scan_block_size <= 0:
+            raise ValueError("scan_block_size must be positive")
 
         self.num_heads = num_heads
         self.head_dim = head_dim
@@ -76,6 +111,7 @@ class QCCArchive(nn.Module):
         # the dense reference path.
         self.active_codes = active_codes
         self.lazy_decay = lazy_decay
+        self.scan_block_size = scan_block_size
         self.register_buffer("decay_rates", rates, persistent=True)
         self.codes = nn.Parameter(torch.randn(num_heads, num_codes, head_dim) / math.sqrt(head_dim))
         self.mix_logits = nn.Parameter(torch.zeros(num_heads, num_codes, self.num_scales))
@@ -329,23 +365,39 @@ class QCCArchive(nn.Module):
         state_dtype = self._numerator.dtype
         rates = self.decay_rates.to(device=key.device, dtype=state_dtype)
         codes = self.codes.to(device=key.device, dtype=state_dtype)
-        score = torch.einsum("bhed,hmd->bhem", key.to(state_dtype), codes)
-        content_weight = torch.exp((score / math.sqrt(dim)).clamp(min=-20.0, max=10.0))
+        # Stream the recurrence in bounded blocks.  Materializing all event
+        # states at once costs O(events * num_codes * scales * head_dim), which
+        # defeats long-context serving even though the persistent state itself
+        # is constant-size.  A block is large enough to amortize tensor launch
+        # overhead while keeping the temporary working set bounded.
+        outputs: list[Tensor] = []
+        state_den = self._denominator
+        state_num = self._numerator
         age = rates.pow(self.window_size)
-        denominator_add = content_weight.unsqueeze(-1) * age.view(1, 1, 1, 1, -1)
-        numerator_add = denominator_add.unsqueeze(-1) * value.to(state_dtype).unsqueeze(3).unsqueeze(4)
-        denominator_states, denominator_final = self._parallel_decay_scan(
-            denominator_add, self._denominator, rates
-        )
-        numerator_states, numerator_final = self._parallel_decay_scan(
-            numerator_add, self._numerator, rates
-        )
-        self._denominator = denominator_final
-        self._numerator = numerator_final
-
-        # Each event reads the state immediately after its own update. The
-        # block form keeps routing and code selection vectorized over events.
-        return self._read_states_chunk(query, numerator_states, denominator_states)
+        for start in range(0, events, self.scan_block_size):
+            end = min(events, start + self.scan_block_size)
+            block_key = key[:, :, start:end]
+            block_value = value[:, :, start:end]
+            score = torch.einsum("bhed,hmd->bhem", block_key.to(state_dtype), codes)
+            content_weight = torch.exp(
+                (score / math.sqrt(dim)).clamp(min=-20.0, max=10.0)
+            )
+            denominator_add = content_weight.unsqueeze(-1) * age.view(1, 1, 1, 1, -1)
+            numerator_add = denominator_add.unsqueeze(-1) * block_value.to(state_dtype).unsqueeze(3).unsqueeze(4)
+            denominator_states, state_den = self._parallel_decay_scan(
+                denominator_add, state_den, rates
+            )
+            numerator_states, state_num = self._parallel_decay_scan(
+                numerator_add, state_num, rates
+            )
+            outputs.append(
+                self._read_states_chunk(
+                    query[:, :, start:end], numerator_states, denominator_states
+                )
+            )
+        self._denominator = state_den
+        self._numerator = state_num
+        return torch.cat(outputs, dim=2)
 
     def _read_states(self, query: Tensor, numerator: Tensor, denominator: Tensor) -> Tensor:
         """Read one or many queries from explicit archive states."""
@@ -506,6 +558,7 @@ class QCCSelfAttention(nn.Module):
         lazy_decay: bool = False,
         archive_read_stride: int = 1,
         archive_query_cosine_threshold: Optional[float] = None,
+        archive_scan_block_size: int = 256,
     ) -> None:
         super().__init__()
         if d_model % num_heads:
@@ -537,6 +590,7 @@ class QCCSelfAttention(nn.Module):
             use_triton=use_triton,
             active_codes=active_codes,
             lazy_decay=lazy_decay,
+            scan_block_size=archive_scan_block_size,
         )
         self.archive_read_stride = archive_read_stride
         # Optional adaptive remote-read suppression. ``None`` keeps exact
@@ -947,16 +1001,24 @@ class QCCForCausalLM(nn.Module):
         window_size: int = 128,
         num_codes: int = 16,
         dropout: float = 0.0,
+        position_encoding: str = "sinusoidal",
         use_archive: bool = True,
         use_triton: bool = True,
         active_codes: Optional[int] = None,
         lazy_decay: bool = False,
         archive_read_stride: int = 1,
         archive_query_cosine_threshold: Optional[float] = None,
+        archive_scan_block_size: int = 256,
     ) -> None:
         super().__init__()
         self.token_embedding = nn.Embedding(vocab_size, d_model)
-        self.position_embedding = nn.Embedding(max_position_embeddings, d_model)
+        if position_encoding == "sinusoidal":
+            self.position_embedding = SinusoidalPositionEmbedding(d_model)
+        elif position_encoding == "learned":
+            self.position_embedding = nn.Embedding(max_position_embeddings, d_model)
+        else:
+            raise ValueError("position_encoding must be 'sinusoidal' or 'learned'")
+        self.position_encoding = position_encoding
         self.layers = nn.ModuleList(
             QCCDecoderLayer(
                 d_model,
@@ -970,6 +1032,7 @@ class QCCForCausalLM(nn.Module):
                 lazy_decay=lazy_decay,
                 archive_read_stride=archive_read_stride,
                 archive_query_cosine_threshold=archive_query_cosine_threshold,
+                archive_scan_block_size=archive_scan_block_size,
             )
             for _ in range(num_layers)
         )
@@ -986,7 +1049,8 @@ class QCCForCausalLM(nn.Module):
         if length > self.max_position_embeddings:
             raise ValueError("sequence exceeds max_position_embeddings")
         positions = torch.arange(length, device=input_ids.device).unsqueeze(0)
-        x = self.token_embedding(input_ids) + self.position_embedding(positions)
+        token = self.token_embedding(input_ids)
+        x = token + self.position_embedding(positions).to(token.dtype)
         for index, layer in enumerate(self.layers):
             x = layer(x, reset_state=reset_state or index > 0)
         return self.lm_head(self.norm(x))
@@ -1019,7 +1083,8 @@ class QCCForCausalLM(nn.Module):
         position = torch.full(
             (bsz,), self._cache_position, device=input_ids.device, dtype=torch.long
         )
-        x = self.token_embedding(input_ids) + self.position_embedding(position)
+        token = self.token_embedding(input_ids)
+        x = token + self.position_embedding(position).to(token.dtype)
         for layer in self.layers:
             x = layer.step(x)
         self._cache_position += 1
@@ -1049,7 +1114,8 @@ class QCCForCausalLM(nn.Module):
             self._cache_position + length,
             device=input_ids.device,
         ).unsqueeze(0)
-        x = self.token_embedding(input_ids) + self.position_embedding(positions)
+        token = self.token_embedding(input_ids)
+        x = token + self.position_embedding(positions).to(token.dtype)
         for layer in self.layers:
             x = layer.step_chunk(x)
         self._cache_position += length

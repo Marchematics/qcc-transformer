@@ -101,6 +101,7 @@ def main() -> None:
     parser.add_argument("--active-codes", type=int, default=None)
     parser.add_argument("--lazy-decay", action="store_true")
     parser.add_argument("--archive-read-stride", type=int, default=1)
+    parser.add_argument("--archive-scan-block-size", type=int, default=256)
     parser.add_argument(
         "--archive-query-cosine-threshold",
         type=float,
@@ -140,6 +141,7 @@ def main() -> None:
         lazy_decay=args.lazy_decay,
         archive_read_stride=args.archive_read_stride,
         archive_query_cosine_threshold=args.archive_query_cosine_threshold,
+        archive_scan_block_size=args.archive_scan_block_size,
     )
     if args.repeat_token:
         tokens = torch.zeros((1, args.length), dtype=torch.long, device=device)

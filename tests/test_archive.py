@@ -54,6 +54,56 @@ def test_model_forward_shapes_and_gradients() -> None:
     assert model.layers[0].attention.archive.codes.grad is not None
 
 
+def test_sinusoidal_positions_support_million_token_limits_without_table() -> None:
+    model = QCCForCausalLM(
+        vocab_size=11,
+        d_model=16,
+        num_layers=1,
+        num_heads=4,
+        max_position_embeddings=4_000_000,
+        window_size=8,
+    )
+    positions = torch.tensor([[0, 128_000, 1_000_000, 3_999_999]], dtype=torch.long)
+    encoding = model.position_embedding(positions)
+    assert encoding.shape == (1, 4, 16)
+    assert torch.isfinite(encoding).all()
+    # The default stateless encoding must not allocate a parameter row per
+    # supported position; the learned option remains available explicitly.
+    assert not hasattr(model.position_embedding, "weight")
+    learned = QCCForCausalLM(
+        vocab_size=11,
+        d_model=16,
+        num_layers=1,
+        num_heads=4,
+        max_position_embeddings=32,
+        position_encoding="learned",
+    )
+    assert hasattr(learned.position_embedding, "weight")
+
+
+def test_block_streaming_matches_single_scan_across_block_boundary() -> None:
+    torch.manual_seed(42)
+    kwargs = dict(
+        num_heads=2,
+        head_dim=8,
+        num_codes=16,
+        decay_rates=(0.9, 0.97),
+        window_size=7,
+        use_triton=False,
+    )
+    block = QCCArchive(**kwargs, scan_block_size=256)
+    single = QCCArchive(**kwargs, scan_block_size=2048)
+    single.load_state_dict(block.state_dict())
+    keys = torch.randn(1, 2, 513, 8)
+    values = torch.randn_like(keys)
+    queries = torch.randn_like(keys)
+    with torch.no_grad():
+        block_out = block.update_read_chunk(keys, values, queries)
+        single_out = single.update_read_chunk(keys, values, queries)
+    torch.testing.assert_close(block_out, single_out, rtol=2e-5, atol=2e-5)
+    torch.testing.assert_close(block.state.numerator, single.state.numerator, rtol=2e-5, atol=2e-5)
+
+
 def test_first_evicted_token_enters_archive_at_window_boundary() -> None:
     torch.manual_seed(2)
     model = QCCForCausalLM(

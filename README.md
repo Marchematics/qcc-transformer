@@ -128,6 +128,28 @@ The benchmark exposes `--threads` so these CPU measurements can be reproduced.
 They are implementation evidence for bounded local/archive work, not a
 universal hardware-independent claim.
 
+For million-token serving, the default `position_encoding="sinusoidal"` is
+stateless: configuring `max_position_embeddings=4_000_000` does not allocate a
+four-million-row learned position table. `archive_scan_block_size` controls the
+temporary prefill working set (256 by default); reducing it lowers peak memory,
+while increasing it can improve throughput on a larger device.
+
+Use the long-context harness to audit storage at the target context before
+launching an expensive run:
+
+```bash
+python benchmarks/benchmark_long_context.py --length 128000 --state-only
+python benchmarks/benchmark_long_context.py --length 1000000 --state-only
+python benchmarks/benchmark_long_context.py --length 4000000 --state-only
+```
+
+With the default two-layer/256-wide configuration, the reported persistent QCC
+state fractions were `0.125781%`, `0.016100%`, and `0.004025%` of hypothetical
+full-KV storage at 128K, 1M, and 4M tokens respectively. These are storage
+accounting results, not retrieval-quality or latency scores. On a CUDA device,
+add `--run --chunk-size 256` to stream a synthetic prompt and report prefill
+time plus one-token TPOT.
+
 To isolate archive learnability from language-model quality, run the synthetic
 teacher benchmark:
 
@@ -228,7 +250,12 @@ logits = model(input_ids)
 
 ## Caveats
 
-The current reference implementation has three deliberate limitations: no RoPE, sequence-level Python loops, and a clipped exponential accumulator. These are appropriate for validating the architecture and its gradients, but not for production throughput. The archive state is accumulated in fp32 to reduce long-stream drift.
+The current reference implementation has three deliberate limitations: additive
+sinusoidal positions are used by default (RoPE is not yet implemented), the
+training path retains sequence-level Python loops, and the archive uses a
+clipped exponential accumulator. These are appropriate for validating the
+architecture and its gradients, but not for production throughput. The archive
+state is accumulated in fp32 to reduce long-stream drift.
 
 On a CUDA installation with Triton available, construct the model with
 `use_triton=True` (the default) to dispatch fused archive-update and archive-read
