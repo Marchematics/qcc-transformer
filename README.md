@@ -33,6 +33,21 @@ python benchmarks/benchmark_decode.py --length 512 --mode decode --warmup 1 --st
 `decode_step` maintains a persistent local/archive state and processes one
 token at a time. Use `--mode prefill` to benchmark the sequence-level path.
 
+To isolate archive learnability from language-model quality, run the synthetic
+teacher benchmark:
+
+```bash
+python benchmarks/benchmark_archive_quality.py --steps 200
+```
+
+It compares the learned-landmark response with direct exponentially-decayed
+softmax attention. This is a mechanism test, not a perplexity or retrieval
+benchmark.
+
+Reference run (`--steps 200 --batch 8 --length 64 --dim 16 --codes 8`) reduced
+MSE from `0.056180` to `0.030020` (1.87x), while using 136 archive elements per
+head instead of 56 historical value positions per query step.
+
 The benchmark reports runtime only. It is not evidence of language-model quality. For a meaningful study, train matched small models and evaluate perplexity, Needle-in-a-Haystack, RULER, PG-19, cache memory, and decode TPOT at 32k+ context.
 
 On the reference CPU environment (PyTorch 2.9, one thread configuration not
