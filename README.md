@@ -303,6 +303,25 @@ as `missing`, never as a passing score. For a modest-context matched quality
 check on the same retrieval records, add `--compare-full-retrieval`; the full
 baseline is automatically refused beyond `--full-max-length`.
 
+### Colab GPU audit
+
+[`colab_qcc_gpu.ipynb`](colab_qcc_gpu.ipynb) is a one-click CUDA/Triton entry
+point for a Colab T4/A100 runtime. It installs Triton, runs the test suite,
+writes a JSON audit for short matched QCC/Full-KV lengths, and can then run
+explicitly requested 128K/1M/4M QCC streams. Without the notebook, run:
+
+```bash
+python benchmarks/colab_gpu_smoke.py \
+  --lengths 8192,16384 --compare-full \
+  --output artifacts/colab_smoke_short.json
+```
+
+Add `--run-long --long-lengths 128000,1000000,4000000` only on a runtime with
+enough wall time and memory. The wrapper refuses to run without CUDA and
+Triton, preserves machine-readable `missing` gates, and never treats a
+QCC-only long stream as evidence for Full-KV quality, RULER, or a speedup
+factor.
+
 ### Target-gate status
 
 The requested headline gates are intentionally tracked separately from the
