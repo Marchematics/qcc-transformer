@@ -23,6 +23,11 @@ before the responses are mixed. A separate serving knob (`archive_read_stride`)
 reuses a remote response for several consecutive queries while continuing to
 update the archive; this temporal read memoization is exposed as an
 approximation trade-off, not claimed as a new attention primitive.
+An additional optional knob (`archive_query_cosine_threshold`) makes that
+memoization adaptive: a refresh is skipped only when all heads' queries remain
+cosine-close to the last refreshed query. This is a serving-policy hypothesis
+and may overlap with generic query/result caching, so it is not counted as an
+independent novelty claim.
 
 The current assessment is **proceed with caution**. A publishable contribution
 would need a matched recall/latency/memory Pareto comparison against Infini,
