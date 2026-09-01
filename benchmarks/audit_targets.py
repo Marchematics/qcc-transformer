@@ -33,7 +33,7 @@ sys.path.insert(0, str(ROOT / "benchmarks"))
 
 from benchmark_fullkv_quality import compare as compare_quality
 from benchmark_long_context import run_stream, state_report
-from evaluate_retrieval import _load_checkpoint, evaluate
+from evaluate_retrieval import _load_checkpoint, evaluate, evaluate_pair
 from qcc_transformer import QCCForCausalLM
 
 
@@ -151,7 +151,39 @@ def _retrieval_gate(args: argparse.Namespace, device: torch.device) -> dict[str,
             "reason": "--checkpoint and --dataset are both required",
         }
     model = QCCForCausalLM(**_model_kwargs(args, args.retrieval_context, full=False)).to(device)
-    model.load_state_dict(_load_checkpoint(args.checkpoint), strict=True)
+    state_dict = _load_checkpoint(args.checkpoint)
+    model.load_state_dict(state_dict, strict=True)
+    if args.compare_full_retrieval and args.retrieval_context > args.full_max_length:
+        return {
+            "status": "missing",
+            "reason": "retrieval context exceeds --full-max-length for Full-KV comparison",
+        }
+    if args.compare_full_retrieval:
+        full = QCCForCausalLM(
+            **_model_kwargs(args, args.retrieval_context, full=True)
+        ).to(device)
+        full.load_state_dict(state_dict, strict=True)
+        qcc_correct, full_correct, total, mean_cosine = evaluate_pair(
+            model,
+            full,
+            args.dataset,
+            chunk_size=args.chunk_size,
+            device=device,
+            max_examples=args.max_examples,
+        )
+        accuracy = qcc_correct / total if total else 0.0
+        full_accuracy = full_correct / total if total else 0.0
+        ratio = accuracy / full_accuracy if full_accuracy else 0.0
+        return {
+            "correct": qcc_correct,
+            "full_correct": full_correct,
+            "total": total,
+            "accuracy": accuracy,
+            "full_accuracy": full_accuracy,
+            "quality_ratio": ratio,
+            "mean_logit_cosine": mean_cosine,
+            "gate": _gate(ratio, args.quality_target),
+        }
     correct, total = evaluate(
         model,
         args.dataset,
@@ -194,6 +226,7 @@ def main() -> None:
     parser.add_argument("--threads", type=int, default=None)
     parser.add_argument("--run-latency", action="store_true")
     parser.add_argument("--compare-full", action="store_true")
+    parser.add_argument("--compare-full-retrieval", action="store_true")
     parser.add_argument("--state-only", action="store_true", help="skip latency, quality, and retrieval")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
@@ -253,9 +286,14 @@ def main() -> None:
         )
     retrieval = result["retrieval"]
     if retrieval.get("accuracy") is not None:
+        quality_suffix = (
+            f" quality_ratio={retrieval['quality_ratio']:.6f}"
+            if retrieval.get("quality_ratio") is not None
+            else ""
+        )
         print(
             f"retrieval accuracy={retrieval['accuracy']:.6f} "
-            f"status={retrieval['gate']['status']}"
+            f"status={retrieval['gate']['status']}{quality_suffix}"
         )
     else:
         print(f"retrieval status={retrieval.get('status', 'missing')}")

@@ -258,7 +258,9 @@ Add `--run-latency --device cuda` for end-to-end QCC timing. Full-KV timing is
 only attempted at lengths no larger than `--full-max-length` because the
 baseline is intentionally unbounded. Supplying both `--checkpoint` and
 `--dataset` enables the real retrieval gate; absent prerequisites are reported
-as `missing`, never as a passing score.
+as `missing`, never as a passing score. For a modest-context matched quality
+check on the same retrieval records, add `--compare-full-retrieval`; the full
+baseline is automatically refused beyond `--full-max-length`.
 
 On the reference CPU environment (PyTorch 2.9.1, one thread), a persistent
 decode benchmark with the fused SDPA full-KV control measured:
