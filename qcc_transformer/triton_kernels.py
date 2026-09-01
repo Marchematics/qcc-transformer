@@ -182,7 +182,12 @@ try:  # pragma: no cover - exercised only on a Triton-enabled GPU runner
                 num = tl.load(numerator_ptr + num_offset, mask=mask_d, other=0.0).to(tl.float32)
                 mix = tl.load(mix_ptr + head * stride_mh + code_id * stride_mm + scale * stride_mj).to(tl.float32)
                 response += mix * num / den
-            output += routing[code_id] * response
+            # Triton does not support indexing a vector with the Python loop
+            # variable in all compiler versions.  Select the scalar through a
+            # masked reduction instead; ``code_id`` is compile-time here and
+            # this lowers to the same single-lane value.
+            route_weight = tl.sum(tl.where(offs_m == code_id, routing, 0.0), axis=0)
+            output += route_weight * response
         tl.store(
             output_ptr + batch * stride_ob + head * stride_oh + offs_d * stride_od,
             output,
