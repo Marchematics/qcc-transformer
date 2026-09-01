@@ -100,6 +100,9 @@ def train(
     started = time.perf_counter()
     final_loss = float("nan")
     final_accuracy = float("nan")
+    best_loss = float("inf")
+    best_accuracy = float("nan")
+    best_state: dict[str, torch.Tensor] | None = None
     for step in range(1, steps + 1):
         step_query_position = query_position
         if query_min is not None or query_max is not None:
@@ -124,15 +127,30 @@ def train(
         optimizer.step()
         final_loss = float(loss.item())
         final_accuracy = float((query_logits.argmax(dim=-1) == values).float().mean().item())
+        if final_loss < best_loss:
+            best_loss = final_loss
+            best_accuracy = final_accuracy
+            # Keep the best checkpoint rather than the potentially unstable
+            # final optimizer iterate; this is especially important for the
+            # tiny random-value task where a late AdamW step can collapse the
+            # archive gate back to the marker token.
+            best_state = {
+                name: parameter.detach().clone()
+                for name, parameter in model.state_dict().items()
+            }
         if step == 1 or step == steps or step % log_every == 0:
             print(
                 f"step={step} loss={final_loss:.6f} accuracy={final_accuracy:.4f}",
                 flush=True,
             )
+    if best_state is not None:
+        model.load_state_dict(best_state, strict=True)
     return {
         "steps": float(steps),
         "final_loss": final_loss,
         "final_accuracy": final_accuracy,
+        "best_loss": best_loss,
+        "best_accuracy": best_accuracy,
         "train_seconds": time.perf_counter() - started,
     }
 
