@@ -33,6 +33,21 @@ python benchmarks/benchmark_decode.py --length 512 --mode decode --warmup 1 --st
 For block serving, set `--chunk-size 16` (or another positive block length) to
 use the vectorized persistent `decode_chunk` API.
 
+For the counterintuitive sparse-memory variant, keep an overcomplete landmark
+bank but touch only the highest-scoring slots at inference:
+
+```bash
+python benchmarks/benchmark_decode.py --length 2048 --num-codes 512 \
+  --active-codes 4 --lazy-decay --warmup 1 --steps 3
+```
+
+`active_codes` changes only inference reads; training remains dense so the
+codebook receives gradients from every landmark. `lazy_decay` stores a logical
+timestamp per slot and applies elapsed decay when that slot is touched. This
+makes update cost depend on the selected slots rather than the full bank, at
+the cost of an explicitly approximate top-k read and a larger persistent
+state.
+
 `decode_step` maintains a persistent local/archive state and processes one
 token at a time. Use `--mode prefill` to benchmark the sequence-level path.
 
@@ -121,6 +136,14 @@ context length because the QCC archive and local window are bounded.
 These numbers are implementation evidence for the bounded-history trend, not
 a claim of a universal speedup. GPU results, batch scaling, kernel fusion, and
 language quality remain open experiments.
+
+As a separate CPU trade-off measurement, the sparse configuration above (512
+codes, top-4, lazy decay, one thread, three timed steps) measured `2.299 s`
+for QCC versus `4.924 s` for the full-KV control (`2.14x`). Its bounded state
+was `1,245,184` elements versus `2,097,152` full-KV elements (`1.68x` fewer),
+including the logical timestamp slots.
+The same configuration is slower at 1,024 tokens because the overcomplete
+bank has not yet amortized its fixed state cost.
 
 ## Minimal API
 

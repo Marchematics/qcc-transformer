@@ -96,6 +96,9 @@ def main() -> None:
     parser.add_argument("--steps", type=int, default=3)
     parser.add_argument("--mode", choices=("decode", "prefill"), default="decode")
     parser.add_argument("--chunk-size", type=int, default=1)
+    parser.add_argument("--num-codes", type=int, default=16)
+    parser.add_argument("--active-codes", type=int, default=None)
+    parser.add_argument("--lazy-decay", action="store_true")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
     device = torch.device(args.device)
@@ -106,7 +109,9 @@ def main() -> None:
         num_heads=8,
         max_position_embeddings=max(args.length, 512),
         window_size=min(128, args.length - 1),
-        num_codes=16,
+        num_codes=args.num_codes,
+        active_codes=args.active_codes,
+        lazy_decay=args.lazy_decay,
     )
     tokens = torch.randint(0, common["vocab_size"], (1, args.length), device=device)
     qcc = QCCForCausalLM(**common).to(device)
@@ -129,6 +134,14 @@ def main() -> None:
         * (layer.attention.archive.head_dim + 1)
         for layer in qcc.layers
     )
+    if args.lazy_decay:
+        # Lazy decay carries one int64 logical timestamp per code/scale slot.
+        archive_elements += sum(
+            layer.attention.archive.num_heads
+            * layer.attention.archive.num_codes
+            * layer.attention.archive.num_scales
+            for layer in qcc.layers
+        )
     kv_heads = common["num_heads"]
     head_dim = common["d_model"] // kv_heads
     local_elements = 2 * len(qcc.layers) * kv_heads * common["window_size"] * head_dim

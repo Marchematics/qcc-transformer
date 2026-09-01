@@ -14,13 +14,16 @@ overlap with the following families:
 The narrow technical delta tested by this repository is a fixed learned
 landmark codebook per KV head. Each landmark maintains numerator and
 denominator responses at several decay rates, and the current query performs
-soft routing over landmarks. This is best described as a
-**multi-timescale learned-landmark memory**. It should not be described as
-exact global softmax attention, since each landmark/scale is normalized before
-the responses are mixed.
+soft routing over landmarks. The optional sparse variant adds top-k routing
+and lazy per-slot decay: an overcomplete bank is kept for capacity, while only
+the selected slots are touched at inference. This is best described as a
+**sparse multi-timescale learned-landmark memory**. It should not be described
+as exact global softmax attention, since each landmark/scale is normalized
+before the responses are mixed.
 
 The current assessment is **proceed with caution**. A publishable contribution
 would need a matched recall/latency/memory Pareto comparison against Infini,
 ABC/GSA, KVM, KDA, and a strong full-KV baseline, plus fused GPU kernels. The
-repository's [review trace](.aris/traces/novelty-check/2026-09-01_run01/trace.md)
+lazy sparse update is an implementation hypothesis, not evidence of a new
+algorithmic class or a universal speedup. The repository's [review trace](.aris/traces/novelty-check/2026-09-01_run01/trace.md)
 records the search boundary.

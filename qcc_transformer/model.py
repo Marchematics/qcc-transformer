@@ -49,6 +49,8 @@ class QCCArchive(nn.Module):
         decay_rates: tuple[float, ...] = (0.995, 0.98, 0.94, 0.85),
         window_size: int = 128,
         use_triton: bool = True,
+        active_codes: Optional[int] = None,
+        lazy_decay: bool = False,
     ) -> None:
         super().__init__()
         if num_heads <= 0 or head_dim <= 0 or num_codes <= 0:
@@ -58,6 +60,10 @@ class QCCArchive(nn.Module):
             raise ValueError("decay_rates must contain values strictly between 0 and 1")
         if window_size <= 0:
             raise ValueError("window_size must be positive")
+        if active_codes is not None and not 0 < active_codes <= num_codes:
+            raise ValueError("active_codes must be in [1, num_codes] when provided")
+        if lazy_decay and active_codes is None:
+            raise ValueError("lazy_decay requires active_codes to bound touched slots")
 
         self.num_heads = num_heads
         self.head_dim = head_dim
@@ -65,6 +71,11 @@ class QCCArchive(nn.Module):
         self.num_scales = int(rates.numel())
         self.window_size = window_size
         self.use_triton = use_triton
+        # Inference may route to a small top-k subset while retaining an
+        # overcomplete codebook for representational capacity. ``None`` keeps
+        # the dense reference path.
+        self.active_codes = active_codes
+        self.lazy_decay = lazy_decay
         self.register_buffer("decay_rates", rates, persistent=True)
         self.codes = nn.Parameter(torch.randn(num_heads, num_codes, head_dim) / math.sqrt(head_dim))
         self.mix_logits = nn.Parameter(torch.zeros(num_heads, num_codes, self.num_scales))
@@ -99,6 +110,15 @@ class QCCArchive(nn.Module):
             device=device,
             dtype=state_dtype,
         )
+        self._last_step = torch.zeros(
+            batch_size,
+            self.num_heads,
+            self.num_codes,
+            self.num_scales,
+            device=device,
+            dtype=torch.long,
+        )
+        self._step = 0
 
     @property
     def state(self) -> QCCState:
@@ -126,6 +146,10 @@ class QCCArchive(nn.Module):
             raise ValueError("key shape does not match archive configuration")
         if self._numerator.shape[0] != bsz:
             self.reset_state(bsz, device=key.device)
+
+        if self.lazy_decay and not torch.is_grad_enabled():
+            self._lazy_update(key, value)
+            return
 
         rates = self.decay_rates.to(device=key.device, dtype=self._numerator.dtype)
         if self.use_triton and not torch.is_grad_enabled() and key.is_cuda:
@@ -167,6 +191,48 @@ class QCCArchive(nn.Module):
         else:
             self._denominator.mul_(denominator_decay).add_(denominator_add)
             self._numerator.mul_(numerator_decay).add_(numerator_add)
+
+    @torch.no_grad()
+    def _lazy_update(self, key: Tensor, value: Tensor) -> None:
+        """Update only top-k code slots and apply decay on first touch."""
+
+        assert self.active_codes is not None
+        state_dtype = self._numerator.dtype
+        codes = self.codes.to(device=key.device, dtype=state_dtype)
+        scores = torch.einsum("bhd,hmd->bhm", key.to(state_dtype), codes)
+        values, indices = torch.topk(scores, self.active_codes, dim=-1)
+        self._step += 1
+        index_scales = indices.unsqueeze(-1).expand(-1, -1, -1, self.num_scales)
+        old_den = self._denominator.gather(2, index_scales)
+        old_num = self._numerator.gather(
+            2, index_scales.unsqueeze(-1).expand(-1, -1, -1, -1, self.head_dim)
+        )
+        old_step = self._last_step.gather(2, index_scales)
+        delta = (self._step - old_step).clamp_min(0)
+        rates = self.decay_rates.to(device=key.device, dtype=state_dtype)
+        decay = rates.view(1, 1, 1, -1).pow(delta)
+        old_den = old_den * decay
+        old_num = old_num * decay.unsqueeze(-1)
+        content_weight = torch.exp(
+            (values / math.sqrt(self.head_dim)).clamp(min=-20.0, max=10.0)
+        )
+        age = rates.pow(self.window_size).view(1, 1, 1, -1)
+        denominator_add = content_weight.unsqueeze(-1) * age
+        numerator_add = (
+            denominator_add.unsqueeze(-1)
+            * value.to(state_dtype).unsqueeze(2).unsqueeze(3)
+        )
+        new_den = old_den + denominator_add
+        new_num = old_num + numerator_add
+        self._denominator.scatter_(2, index_scales, new_den)
+        self._numerator.scatter_(
+            2,
+            index_scales.unsqueeze(-1).expand(-1, -1, -1, -1, self.head_dim),
+            new_num,
+        )
+        self._last_step.scatter_(
+            2, index_scales, torch.full_like(old_step, self._step)
+        )
 
     def _parallel_decay_scan(
         self, additions: Tensor, initial: Tensor, rates: Tensor
@@ -222,6 +288,13 @@ class QCCArchive(nn.Module):
         if self._numerator.shape[0] != batch:
             self.reset_state(batch, device=key.device)
 
+        if self.lazy_decay:
+            outputs = []
+            for index in range(events):
+                self._lazy_update(key[:, :, index], value[:, :, index])
+                outputs.append(self._lazy_read(query[:, :, index]))
+            return torch.stack(outputs, dim=2)
+
         # Preserve the fused path on CUDA; CPU and unsupported devices use the
         # block scan to remove one Python loop iteration per token.
         if self.use_triton and key.is_cuda:
@@ -248,12 +321,84 @@ class QCCArchive(nn.Module):
         self._denominator = denominator_final
         self._numerator = numerator_final
 
-        normalized = numerator_states / denominator_states.clamp_min(1e-8).unsqueeze(-1)
-        mix = F.softmax(self.mix_logits, dim=-1).to(normalized.dtype)
-        response = torch.einsum("hmj,bhemjd->bhemd", mix, normalized)
-        routing = torch.einsum("bhed,hmd->bhem", query.to(codes.dtype), codes)
-        routing = F.softmax(routing / math.sqrt(dim), dim=-1).to(response.dtype)
-        return torch.einsum("bhem,bhemd->bhed", routing, response).to(query.dtype)
+        # Each event reads the state immediately after its own update. The
+        # block form keeps routing and code selection vectorized over events.
+        return self._read_states_chunk(query, numerator_states, denominator_states)
+
+    def _read_states(self, query: Tensor, numerator: Tensor, denominator: Tensor) -> Tensor:
+        """Read one or many queries from explicit archive states."""
+
+        denom = denominator.clamp_min(1e-8)
+        response = numerator / denom.unsqueeze(-1)
+        mix = F.softmax(self.mix_logits, dim=-1).to(response.dtype)
+        response = torch.einsum("hmj,bhmjd->bhmd", mix, response)
+        routing_logits = torch.einsum(
+            "bhd,hmd->bhm", query.to(self.codes.dtype), self.codes
+        ) / math.sqrt(self.head_dim)
+        active = self.active_codes
+        if active is None or active >= self.num_codes or torch.is_grad_enabled():
+            routing = F.softmax(routing_logits, dim=-1).to(response.dtype)
+            return torch.einsum("bhm,bhmd->bhd", routing, response).to(query.dtype)
+
+        values, indices = torch.topk(routing_logits, active, dim=-1)
+        routing = F.softmax(values, dim=-1).to(response.dtype)
+        selected = response.gather(
+            2, indices.unsqueeze(-1).expand(-1, -1, -1, self.head_dim)
+        )
+        return (routing.unsqueeze(-1) * selected).sum(dim=2).to(query.dtype)
+
+    @torch.no_grad()
+    def _lazy_read(self, query: Tensor) -> Tensor:
+        """Read top-k slots, materializing their elapsed decay on demand."""
+
+        assert self.active_codes is not None
+        state_dtype = self._numerator.dtype
+        codes = self.codes.to(device=query.device, dtype=state_dtype)
+        routing_logits = torch.einsum(
+            "bhd,hmd->bhm", query.to(state_dtype), codes
+        ) / math.sqrt(self.head_dim)
+        values, indices = torch.topk(routing_logits, self.active_codes, dim=-1)
+        index_scales = indices.unsqueeze(-1).expand(-1, -1, -1, self.num_scales)
+        numerator = self._numerator.gather(
+            2, index_scales.unsqueeze(-1).expand(-1, -1, -1, -1, self.head_dim)
+        )
+        denominator = self._denominator.gather(2, index_scales)
+        last_step = self._last_step.gather(2, index_scales)
+        rates = self.decay_rates.to(device=query.device, dtype=state_dtype)
+        delta = (self._step - last_step).clamp_min(0)
+        decay = rates.view(1, 1, 1, -1).pow(delta)
+        numerator = numerator * decay.unsqueeze(-1)
+        denominator = denominator * decay
+        response = numerator / denominator.clamp_min(1e-8).unsqueeze(-1)
+        mix_logits = self.mix_logits.unsqueeze(0).expand(query.shape[0], -1, -1, -1).gather(
+            2, index_scales
+        )
+        mix = F.softmax(mix_logits, dim=-1).to(response.dtype)
+        response = (mix.unsqueeze(-1) * response).sum(dim=3)
+        routing = F.softmax(values, dim=-1).to(response.dtype)
+        return (routing.unsqueeze(-1) * response).sum(dim=2).to(query.dtype)
+
+    def _read_states_chunk(self, query: Tensor, numerator: Tensor, denominator: Tensor) -> Tensor:
+        """Read a query block from explicit archive states."""
+
+        denom = denominator.clamp_min(1e-8)
+        response = numerator / denom.unsqueeze(-1)
+        mix = F.softmax(self.mix_logits, dim=-1).to(response.dtype)
+        response = torch.einsum("hmj,bhemjd->bhemd", mix, response)
+        routing_logits = torch.einsum(
+            "bhed,hmd->bhem", query.to(self.codes.dtype), self.codes
+        ) / math.sqrt(self.head_dim)
+        active = self.active_codes
+        if active is None or active >= self.num_codes:
+            routing = F.softmax(routing_logits, dim=-1).to(response.dtype)
+            return torch.einsum("bhem,bhemd->bhed", routing, response).to(query.dtype)
+
+        values, indices = torch.topk(routing_logits, active, dim=-1)
+        routing = F.softmax(values, dim=-1).to(response.dtype)
+        selected = response.gather(
+            3, indices.unsqueeze(-1).expand(-1, -1, -1, -1, self.head_dim)
+        )
+        return (routing.unsqueeze(-1) * selected).sum(dim=3).to(query.dtype)
 
     def read(self, query: Tensor) -> Tensor:
         """Read archive response for queries of shape ``[batch, heads, head_dim]``."""
@@ -263,7 +408,15 @@ class QCCArchive(nn.Module):
         if query.shape[0] != self._numerator.shape[0]:
             self.reset_state(query.shape[0], device=query.device)
 
-        if self.use_triton and not torch.is_grad_enabled() and query.is_cuda:
+        if self.lazy_decay and not torch.is_grad_enabled():
+            return self._lazy_read(query)
+
+        if (
+            self.active_codes is None
+            and self.use_triton
+            and not torch.is_grad_enabled()
+            and query.is_cuda
+        ):
             from .triton_kernels import TRITON_AVAILABLE, triton_read_archive
 
             if TRITON_AVAILABLE:
@@ -275,15 +428,7 @@ class QCCArchive(nn.Module):
                     self.mix_logits,
                 )
 
-        denom = self._denominator.clamp_min(1e-8)
-        response = self._numerator / denom.unsqueeze(-1)
-        mix = F.softmax(self.mix_logits, dim=-1).to(response.dtype)
-        response = torch.einsum("hmj,bhmjd->bhmd", mix, response)
-        routing = torch.einsum(
-            "bhd,hmd->bhm", query.to(self.codes.dtype), self.codes
-        ) / math.sqrt(self.head_dim)
-        routing = F.softmax(routing, dim=-1).to(response.dtype)
-        return torch.einsum("bhm,bhmd->bhd", routing, response).to(query.dtype)
+        return self._read_states(query, self._numerator, self._denominator)
 
 
 class QCCSelfAttention(nn.Module):
@@ -299,6 +444,8 @@ class QCCSelfAttention(nn.Module):
         window_size: int = 128,
         use_archive: bool = True,
         use_triton: bool = True,
+        active_codes: Optional[int] = None,
+        lazy_decay: bool = False,
     ) -> None:
         super().__init__()
         if d_model % num_heads:
@@ -318,7 +465,14 @@ class QCCSelfAttention(nn.Module):
         # Log-spaced rates cover short, medium, and long historical scales.
         rates = tuple(1.0 - 10.0 ** (-x) for x in torch.linspace(1.3, 3.5, num_scales).tolist())
         self.archive = QCCArchive(
-            num_heads, self.head_dim, num_codes, rates, window_size, use_triton=use_triton
+            num_heads,
+            self.head_dim,
+            num_codes,
+            rates,
+            window_size,
+            use_triton=use_triton,
+            active_codes=active_codes,
+            lazy_decay=lazy_decay,
         )
         self._local_keys: list[Tensor] = []
         self._local_values: list[Tensor] = []
@@ -414,9 +568,12 @@ class QCCSelfAttention(nn.Module):
             local_keys = torch.stack(self._local_keys, dim=2)
             local_values = torch.stack(self._local_values, dim=2)
         if self.use_archive:
-            local_logits = torch.einsum("bhd,bhld->bhl", q, local_keys) / math.sqrt(self.head_dim)
-            local_prob = F.softmax(local_logits, dim=-1)
-            local_out = torch.einsum("bhl,bhld->bhd", local_prob, local_values)
+            # SDPA handles the small local window with one fused primitive;
+            # this is materially cheaper than several per-token einsums on
+            # both CPU flash-attention and CUDA backends.
+            local_out = F.scaled_dot_product_attention(
+                q.unsqueeze(2), local_keys, local_values, dropout_p=0.0
+            ).squeeze(2)
         else:
             # Use the same fused SDPA primitive as the block path for an honest
             # full-KV serving baseline. All cached keys are valid for this
@@ -659,6 +816,8 @@ class QCCForCausalLM(nn.Module):
         dropout: float = 0.0,
         use_archive: bool = True,
         use_triton: bool = True,
+        active_codes: Optional[int] = None,
+        lazy_decay: bool = False,
     ) -> None:
         super().__init__()
         self.token_embedding = nn.Embedding(vocab_size, d_model)
@@ -672,6 +831,8 @@ class QCCForCausalLM(nn.Module):
                 num_codes=num_codes,
                 use_archive=use_archive,
                 use_triton=use_triton,
+                active_codes=active_codes,
+                lazy_decay=lazy_decay,
             )
             for _ in range(num_layers)
         )
@@ -766,6 +927,13 @@ def count_archive_elements(model: nn.Module) -> int:
         * layer.attention.archive.num_codes
         * layer.attention.archive.num_scales
         * (layer.attention.archive.head_dim + 1)
+        + (
+            layer.attention.archive.num_heads
+            * layer.attention.archive.num_codes
+            * layer.attention.archive.num_scales
+            if layer.attention.archive.lazy_decay
+            else 0
+        )
         for layer in model.layers
         if isinstance(layer, QCCDecoderLayer)
     )

@@ -138,6 +138,77 @@ def test_decode_chunk_matches_token_stream(use_archive: bool) -> None:
     torch.testing.assert_close(chunk_logits, token_logits, rtol=2e-4, atol=2e-4)
 
 
+def test_sparse_archive_read_matches_dense_when_all_codes_active() -> None:
+    torch.manual_seed(7)
+    kwargs = dict(num_heads=2, head_dim=8, num_codes=6, window_size=3, use_triton=False)
+    dense = QCCArchive(**kwargs)
+    sparse = QCCArchive(**kwargs, active_codes=6)
+    sparse.load_state_dict(dense.state_dict())
+    keys = torch.randn(2, 2, 9, 8)
+    values = torch.randn_like(keys)
+    queries = torch.randn_like(keys)
+    with torch.no_grad():
+        dense.reset_state(2)
+        sparse.reset_state(2)
+        dense_out = dense.update_read_chunk(keys, values, queries)
+        sparse_out = sparse.update_read_chunk(keys, values, queries)
+    torch.testing.assert_close(sparse_out, dense_out, rtol=2e-5, atol=2e-5)
+    torch.testing.assert_close(sparse.state.numerator, dense.state.numerator, rtol=2e-5, atol=2e-5)
+
+
+def test_lazy_decay_matches_dense_recurrence_when_all_codes_active() -> None:
+    torch.manual_seed(9)
+    kwargs = dict(
+        num_heads=2,
+        head_dim=8,
+        num_codes=6,
+        decay_rates=(0.8, 0.95),
+        window_size=3,
+        use_triton=False,
+    )
+    dense = QCCArchive(**kwargs)
+    lazy = QCCArchive(**kwargs, active_codes=6, lazy_decay=True)
+    lazy.load_state_dict(dense.state_dict(), strict=False)
+    keys = torch.randn(2, 2, 11, 8)
+    values = torch.randn_like(keys)
+    queries = torch.randn_like(keys)
+    with torch.no_grad():
+        dense.reset_state(2)
+        lazy.reset_state(2)
+        dense_out = dense.update_read_chunk(keys, values, queries)
+        lazy_out = lazy.update_read_chunk(keys, values, queries)
+    torch.testing.assert_close(lazy_out, dense_out, rtol=2e-5, atol=2e-5)
+    torch.testing.assert_close(lazy.state.numerator, dense.state.numerator, rtol=2e-5, atol=2e-5)
+    torch.testing.assert_close(lazy.state.denominator, dense.state.denominator, rtol=2e-5, atol=2e-5)
+
+
+def test_sparse_decode_chunk_matches_sparse_token_stream() -> None:
+    torch.manual_seed(8)
+    model = QCCForCausalLM(
+        vocab_size=23,
+        d_model=24,
+        num_layers=1,
+        num_heads=4,
+        max_position_embeddings=32,
+        window_size=3,
+        num_codes=8,
+        active_codes=2,
+        use_triton=False,
+    ).eval()
+    tokens = torch.randint(0, 23, (2, 13))
+    with torch.no_grad():
+        model.reset_cache(2)
+        token_logits = torch.stack(
+            [model.decode_step(tokens[:, t]) for t in range(tokens.shape[1])], dim=1
+        )
+        model.reset_cache(2)
+        chunk_logits = torch.cat(
+            [model.decode_chunk(tokens[:, :5], reset_cache=True), model.decode_chunk(tokens[:, 5:])],
+            dim=1,
+        )
+    torch.testing.assert_close(chunk_logits, token_logits, rtol=2e-4, atol=2e-4)
+
+
 def test_persistent_local_cache_never_exceeds_window() -> None:
     model = QCCForCausalLM(
         vocab_size=13,
