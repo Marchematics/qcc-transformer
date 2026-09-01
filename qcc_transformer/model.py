@@ -186,6 +186,14 @@ class QCCArchive(nn.Module):
                 device=device,
                 dtype=state_dtype,
             )
+            self._landmark_key = torch.zeros(
+                batch_size,
+                self.num_heads,
+                self.num_codes,
+                self.head_dim,
+                device=device,
+                dtype=state_dtype,
+            )
 
     def _landmark_scores(self, key: Tensor) -> Tensor:
         """Return per-code salience scores for landmark updates."""
@@ -212,6 +220,9 @@ class QCCArchive(nn.Module):
         self._landmark_value = torch.where(
             better.unsqueeze(-1), candidate, self._landmark_value
         )
+        self._landmark_key = torch.where(
+            better.unsqueeze(-1), key.to(self._landmark_key.dtype).unsqueeze(2), self._landmark_key
+        )
         self._landmark_score = torch.where(
             better, score, self._landmark_score
         )
@@ -236,9 +247,13 @@ class QCCArchive(nn.Module):
             -1, -1, -1, self.head_dim
         )
         best_value = value.to(self._landmark_value.dtype).gather(2, value_index)
+        best_key = key.to(self._landmark_key.dtype).gather(2, value_index)
         better = best_score > self._landmark_score
         self._landmark_value = torch.where(
             better.unsqueeze(-1), best_value, self._landmark_value
+        )
+        self._landmark_key = torch.where(
+            better.unsqueeze(-1), best_key, self._landmark_key
         )
         self._landmark_score = torch.where(
             better, best_score, self._landmark_score
@@ -251,19 +266,25 @@ class QCCArchive(nn.Module):
             return torch.zeros_like(query), torch.zeros(
                 query.shape[:-1], dtype=torch.bool, device=query.device
             )
-        codes = self.codes.to(device=query.device, dtype=self._numerator.dtype)
         if query.ndim == 3:
             routing_logits = torch.einsum(
-                "bhd,hmd->bhm", query.to(codes.dtype), codes
+                "bhd,bhmd->bhm", query.to(self._landmark_key.dtype), self._landmark_key
             ) / math.sqrt(self.head_dim)
             routing_equation = "bhm,bhmd->bhd"
         elif query.ndim == 4:
             routing_logits = torch.einsum(
-                "bhed,hmd->bhem", query.to(codes.dtype), codes
+                "bhed,bhmd->bhem", query.to(self._landmark_key.dtype), self._landmark_key
             ) / math.sqrt(self.head_dim)
             routing_equation = "bhem,bhemd->bhed"
         else:
             raise ValueError("query must have shape [batch, heads, dim] or [batch, heads, time, dim]")
+        routing_logits = torch.where(
+            torch.isfinite(self._landmark_score).unsqueeze(2)
+            if query.ndim == 4
+            else torch.isfinite(self._landmark_score),
+            routing_logits,
+            torch.full_like(routing_logits, -torch.inf),
+        )
         routing = F.softmax(routing_logits, dim=-1).to(self._landmark_value.dtype)
         values = torch.where(
             torch.isfinite(self._landmark_score).unsqueeze(-1),
@@ -1377,6 +1398,7 @@ class QCCSelfAttention(nn.Module):
         landmark_valid_outputs: list[Tensor] = []
         landmark_score_state: Optional[Tensor] = None
         landmark_value_state: Optional[Tensor] = None
+        landmark_key_state: Optional[Tensor] = None
         if self.archive.persistent_landmark:
             landmark_score_state = torch.full(
                 (bsz, self.num_heads, self.archive.num_codes),
@@ -1385,6 +1407,14 @@ class QCCSelfAttention(nn.Module):
                 dtype=state_dtype,
             )
             landmark_value_state = torch.zeros(
+                bsz,
+                self.num_heads,
+                self.archive.num_codes,
+                self.head_dim,
+                device=hidden.device,
+                dtype=state_dtype,
+            )
+            landmark_key_state = torch.zeros(
                 bsz,
                 self.num_heads,
                 self.archive.num_codes,
@@ -1447,7 +1477,11 @@ class QCCSelfAttention(nn.Module):
                 )
             )
             if self.archive.persistent_landmark:
-                assert landmark_score_state is not None and landmark_value_state is not None
+                assert (
+                    landmark_score_state is not None
+                    and landmark_value_state is not None
+                    and landmark_key_state is not None
+                )
                 landmark_scores = score
                 if self.archive.content_threshold is not None:
                     landmark_scores = torch.where(
@@ -1464,6 +1498,10 @@ class QCCSelfAttention(nn.Module):
                     bsz_, heads_, block_len, codes_, self.head_dim
                 )
                 block_values = value_expanded.gather(2, value_index)
+                key_expanded = block_key.to(state_dtype).unsqueeze(3).expand(
+                    bsz_, heads_, block_len, codes_, self.head_dim
+                )
+                block_keys = key_expanded.gather(2, value_index)
                 prior_scores = landmark_score_state.unsqueeze(2)
                 use_block = block_scores > prior_scores
                 running_scores = torch.where(use_block, block_scores, prior_scores)
@@ -1473,10 +1511,16 @@ class QCCSelfAttention(nn.Module):
                 running_values = torch.where(
                     use_block.unsqueeze(-1), block_values, prior_values
                 )
+                prior_keys = landmark_key_state.unsqueeze(2).expand(
+                    bsz_, heads_, block_len, codes_, self.head_dim
+                )
+                running_keys = torch.where(
+                    use_block.unsqueeze(-1), block_keys, prior_keys
+                )
                 query_block = q[:, :, window + start : window + end]
                 landmark_routing = F.softmax(
                     torch.einsum(
-                        "bhed,hmd->bhem", query_block.to(codes.dtype), codes
+                        "bhed,bhemd->bhem", query_block.to(state_dtype), running_keys
                     )
                     / math.sqrt(self.head_dim),
                     dim=-1,
@@ -1491,6 +1535,7 @@ class QCCSelfAttention(nn.Module):
                 )
                 landmark_score_state = running_scores[:, :, -1]
                 landmark_value_state = running_values[:, :, -1]
+                landmark_key_state = running_keys[:, :, -1]
         archive_out = torch.zeros_like(local_out)
         if archive_outputs:
             archive_out[:, :, window:] = torch.cat(archive_outputs, dim=2)
@@ -1511,6 +1556,7 @@ class QCCSelfAttention(nn.Module):
             )
             self.archive._landmark_score = landmark_score_state.detach()
             self.archive._landmark_value = landmark_value_state.detach()
+            self.archive._landmark_key = landmark_key_state.detach()
         gate = torch.sigmoid(self.gate(hidden)).transpose(1, 2).unsqueeze(-1)
         mixed_out = gate * local_out + (1.0 - gate) * archive_out
         active = (torch.arange(length, device=hidden.device) >= window).view(
