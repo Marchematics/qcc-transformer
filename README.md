@@ -338,6 +338,14 @@ These numbers are implementation evidence for the bounded-history trend, not
 a claim of a universal speedup. GPU results, batch scaling, kernel fusion, and
 language quality remain open experiments.
 
+The trainability smoke test in
+[`artifacts/local_cpu/synthetic_retrieval_2000_b4.txt`](artifacts/local_cpu/synthetic_retrieval_2000_b4.txt)
+uses a one-layer, 16-wide model with an 8-token exact window and a random value
+that must be recalled after a 40-token gap. After 2,000 optimization steps,
+QCC reached `1.000` held-out retrieval accuracy (`0.0208` loss), matching the
+Full-KV control's `1.000`. This is a small diagnostic task only; it does not
+establish RULER, 128K/1M retrieval, or pretrained-language-model quality.
+
 As a separate CPU trade-off measurement, the sparse configuration above (512
 codes, top-4, lazy decay, read stride 8, window 32, one thread) measured
 `7.018 s` for QCC versus `13.373 s` for the full-KV control at 8,192 tokens
