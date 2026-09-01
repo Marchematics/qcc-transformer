@@ -324,9 +324,11 @@ On a CUDA installation with Triton available, construct the model with
 kernels during `no_grad()` decoding. Sparse lazy configurations with power-of-two
 `active_codes` additionally dispatch fused selected-slot update/read kernels;
 other shapes automatically use PyTorch. Dense `decode_chunk` calls dispatch a
-two-kernel fused archive path per `archive_scan_block_size` block, while
-sparse/lazy chunks retain the ordered top-k reference path. These kernels are
-optional and have not been benchmarked in this CPU-only environment.
+two-kernel fused archive path per `archive_scan_block_size` block. Power-of-two
+sparse/lazy chunks now use a vectorized top-k preparation plus a fused
+timestamped update/read kernel and one routing reduction; other sparse shapes
+retain the ordered reference path. These kernels are optional and have not
+been benchmarked in this CPU-only environment.
 
 ## License
 

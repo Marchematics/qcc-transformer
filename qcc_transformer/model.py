@@ -346,6 +346,34 @@ class QCCArchive(nn.Module):
         if self._numerator.shape[0] != batch:
             self.reset_state(batch, device=key.device)
 
+        if self.lazy_decay and self.use_triton and key.is_cuda:
+            if self.active_codes is None:
+                raise RuntimeError("lazy_decay requires active_codes")
+            if self.active_codes & (self.active_codes - 1) == 0:
+                from .triton_kernels import (
+                    TRITON_AVAILABLE,
+                    triton_sparse_update_read_archive_chunk,
+                )
+
+                if TRITON_AVAILABLE:
+                    output = triton_sparse_update_read_archive_chunk(
+                        key,
+                        value,
+                        query,
+                        self._numerator,
+                        self._denominator,
+                        self._last_step,
+                        self.codes,
+                        self.mix_logits,
+                        self.decay_rates,
+                        self.window_size,
+                        self._step,
+                        self.active_codes,
+                        block_size=self.scan_block_size,
+                    )
+                    self._step += events
+                    return output
+
         if self.lazy_decay:
             outputs = []
             for index in range(events):

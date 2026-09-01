@@ -8,6 +8,7 @@ from qcc_transformer.triton_kernels import (
     triton_lazy_update_archive,
     triton_read_archive,
     triton_sparse_read_archive,
+    triton_sparse_update_read_archive_chunk,
     triton_update_archive,
     triton_update_read_archive_chunk,
 )
@@ -435,6 +436,21 @@ def test_triton_kernel_is_optional_on_cpu() -> None:
             archive.mix_logits,
             archive.decay_rates,
             archive.window_size,
+        )
+    with pytest.raises(RuntimeError, match="Triton CUDA runtime"):
+        triton_sparse_update_read_archive_chunk(
+            torch.zeros(1, 1, 2, 2),
+            torch.zeros(1, 1, 2, 2),
+            torch.zeros(1, 1, 2, 2),
+            archive.state.numerator,
+            archive.state.denominator,
+            archive._last_step,
+            archive.codes,
+            archive.mix_logits,
+            archive.decay_rates,
+            archive.window_size,
+            0,
+            1,
         )
 
 
