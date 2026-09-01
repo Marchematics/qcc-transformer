@@ -1,6 +1,7 @@
 import torch
 
 from qcc_transformer import QCCArchive, QCCForCausalLM
+from qcc_transformer.triton_kernels import TRITON_AVAILABLE, triton_update_archive
 
 
 def test_archive_matches_exponential_response_for_single_code() -> None:
@@ -139,3 +140,23 @@ def test_archive_state_is_constant_in_sequence_length() -> None:
     assert short_shape == long_shape
     assert short_shape[0] == 1
     assert short_shape[2:] == (16, 4, 4)
+
+
+def test_triton_kernel_is_optional_on_cpu() -> None:
+    assert isinstance(TRITON_AVAILABLE, bool)
+    archive = QCCArchive(num_heads=1, head_dim=2, num_codes=1, decay_rates=(0.8,), window_size=2)
+    with torch.no_grad():
+        try:
+            triton_update_archive(
+                archive.state.numerator,
+                archive.state.denominator,
+                torch.zeros(1, 1, 2),
+                torch.zeros(1, 1, 2),
+                archive.codes,
+                archive.decay_rates,
+                archive.window_size,
+            )
+        except RuntimeError as exc:
+            assert "Triton CUDA runtime" in str(exc)
+        else:
+            raise AssertionError("CPU invocation must not execute a CUDA kernel")

@@ -48,6 +48,7 @@ class QCCArchive(nn.Module):
         num_codes: int = 16,
         decay_rates: tuple[float, ...] = (0.995, 0.98, 0.94, 0.85),
         window_size: int = 128,
+        use_triton: bool = True,
     ) -> None:
         super().__init__()
         if num_heads <= 0 or head_dim <= 0 or num_codes <= 0:
@@ -63,6 +64,7 @@ class QCCArchive(nn.Module):
         self.num_codes = num_codes
         self.num_scales = int(rates.numel())
         self.window_size = window_size
+        self.use_triton = use_triton
         self.register_buffer("decay_rates", rates, persistent=True)
         self.codes = nn.Parameter(torch.randn(num_heads, num_codes, head_dim) / math.sqrt(head_dim))
         self.mix_logits = nn.Parameter(torch.zeros(num_heads, num_codes, self.num_scales))
@@ -134,6 +136,21 @@ class QCCArchive(nn.Module):
         content_weight = torch.exp(score.clamp(min=-20.0, max=10.0))
         age = rates.pow(self.window_size).view(1, 1, 1, self.num_scales)
 
+        if self.use_triton and not torch.is_grad_enabled() and key.is_cuda:
+            from .triton_kernels import TRITON_AVAILABLE, triton_update_archive
+
+            if TRITON_AVAILABLE:
+                triton_update_archive(
+                    self._numerator,
+                    self._denominator,
+                    key,
+                    value,
+                    self.codes,
+                    rates,
+                    self.window_size,
+                )
+                return
+
         denominator_decay = rates.view(1, 1, 1, self.num_scales)
         numerator_decay = rates.view(1, 1, 1, self.num_scales, 1)
         numerator_add = (
@@ -182,6 +199,7 @@ class QCCSelfAttention(nn.Module):
         num_scales: int = 4,
         window_size: int = 128,
         use_archive: bool = True,
+        use_triton: bool = True,
     ) -> None:
         super().__init__()
         if d_model % num_heads:
@@ -201,7 +219,7 @@ class QCCSelfAttention(nn.Module):
         # Log-spaced rates cover short, medium, and long historical scales.
         rates = tuple(1.0 - 10.0 ** (-x) for x in torch.linspace(1.3, 3.5, num_scales).tolist())
         self.archive = QCCArchive(
-            num_heads, self.head_dim, num_codes, rates, window_size
+            num_heads, self.head_dim, num_codes, rates, window_size, use_triton=use_triton
         )
         self._local_keys: list[Tensor] = []
         self._local_values: list[Tensor] = []
@@ -392,6 +410,7 @@ class QCCForCausalLM(nn.Module):
         num_codes: int = 16,
         dropout: float = 0.0,
         use_archive: bool = True,
+        use_triton: bool = True,
     ) -> None:
         super().__init__()
         self.token_embedding = nn.Embedding(vocab_size, d_model)
@@ -404,6 +423,7 @@ class QCCForCausalLM(nn.Module):
                 window_size=window_size,
                 num_codes=num_codes,
                 use_archive=use_archive,
+                use_triton=use_triton,
             )
             for _ in range(num_layers)
         )

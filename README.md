@@ -76,6 +76,11 @@ logits = model(input_ids)
 
 The current reference implementation has three deliberate limitations: no RoPE, sequence-level Python loops, and a clipped exponential accumulator. These are appropriate for validating the architecture and its gradients, but not for production throughput. The archive state is accumulated in fp32 to reduce long-stream drift.
 
+On a CUDA installation with Triton available, construct the model with
+`use_triton=True` (the default) to dispatch the fused archive-update kernel
+during `no_grad()` decoding. The kernel is optional and has not been benchmarked
+in this CPU-only environment; unsupported devices automatically use PyTorch.
+
 ## License
 
 MIT
