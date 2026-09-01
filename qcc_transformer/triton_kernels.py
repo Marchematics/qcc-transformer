@@ -1211,23 +1211,31 @@ def triton_update_read_archive_chunk(
     query = query.contiguous()
     codes = codes.contiguous()
     rates = rates.to(device=key.device, dtype=torch.float32).contiguous()
-    mix = torch.softmax(mix_logits, dim=-1).to(device=key.device, dtype=torch.float32).contiguous()
+    mix = torch.softmax(
+        mix_logits.to(device=key.device), dim=-1
+    ).to(dtype=torch.float32).contiguous()
     aged_rates = rates.pow(window_size).contiguous()
     block_dim = 1 << max(4, (dim - 1).bit_length())
     block_scales = 1 << max(0, (num_scales - 1).bit_length())
     block_codes = 1 << max(0, (num_codes - 1).bit_length())
-    outputs: list[torch.Tensor] = []
+    # Keep one result tensor and one bounded partial buffer for the whole
+    # call.  Allocating a partial/output pair for every block is especially
+    # expensive for million-token prefill, where it turns a bounded kernel
+    # into thousands of allocator operations followed by a full ``cat``.
+    output = torch.empty((batch, heads, events, dim), device=key.device, dtype=query.dtype)
+    scratch_size = min(block_size, events)
+    partial_scratch = torch.empty(
+        (batch, heads, scratch_size, num_codes, dim),
+        device=key.device,
+        dtype=torch.float32,
+    )
 
     for start in range(0, events, block_size):
         count = min(block_size, events - start)
         key_block = key[:, :, start : start + count]
         value_block = value[:, :, start : start + count]
         query_block = query[:, :, start : start + count]
-        partial = torch.empty(
-            (batch, heads, count, num_codes, dim),
-            device=key.device,
-            dtype=torch.float32,
-        )
+        partial = partial_scratch[:, :, :count]
         _qcc_update_read_partial_kernel[(batch * heads * num_codes,)](
             partial,
             key_block,
@@ -1253,11 +1261,9 @@ def triton_update_read_archive_chunk(
             NUM_SCALES=num_scales,
             HEAD_DIM=dim,
         )
-        output = torch.empty(
-            (batch, heads, count, dim), device=key.device, dtype=query.dtype
-        )
+        output_block = output[:, :, start : start + count]
         _qcc_route_partial_kernel[(batch * heads * count,)](
-            output,
+            output_block,
             query_block,
             partial,
             codes,
@@ -1272,13 +1278,12 @@ def triton_update_read_archive_chunk(
             NUM_CODES=num_codes,
             HEAD_DIM=dim,
         )
-        outputs.append(output)
 
     if numerator.data_ptr() != original_numerator.data_ptr():
         original_numerator.copy_(numerator)
     if denominator.data_ptr() != original_denominator.data_ptr():
         original_denominator.copy_(denominator)
-    return torch.cat(outputs, dim=2)
+    return output
 
 
 def triton_sparse_update_read_archive_chunk(
@@ -1340,12 +1345,24 @@ def triton_sparse_update_read_archive_chunk(
     value = value.contiguous()
     query = query.contiguous()
     codes = codes.contiguous()
+    codes_fp32 = codes.to(dtype=torch.float32)
     rates = rates.to(device=key.device, dtype=torch.float32).contiguous()
-    mix = torch.softmax(mix_logits, dim=-1).to(device=key.device, dtype=torch.float32).contiguous()
+    mix = torch.softmax(
+        mix_logits.to(device=key.device), dim=-1
+    ).to(dtype=torch.float32).contiguous()
     aged_rates = rates.pow(window_size).contiguous()
     block_dim = 1 << max(4, (dim - 1).bit_length())
     block_scales = 1 << max(0, (num_scales - 1).bit_length())
-    outputs: list[torch.Tensor] = []
+    # Reuse bounded temporaries across blocks.  Sparse routing used to create
+    # three large tensors per block (partial, output, and a transient list
+    # entry); reusing storage keeps allocator traffic independent of context.
+    output = torch.empty((batch, heads, events, dim), device=key.device, dtype=query.dtype)
+    scratch_size = min(block_size, events)
+    partial_scratch = torch.empty(
+        (batch, heads, scratch_size, active_codes, dim),
+        device=key.device,
+        dtype=torch.float32,
+    )
     scale = dim**-0.5
 
     for start in range(0, events, block_size):
@@ -1354,22 +1371,19 @@ def triton_sparse_update_read_archive_chunk(
         value_block = value[:, :, start : start + count]
         query_block = query[:, :, start : start + count]
         key_logits = torch.einsum(
-            "bhed,hmd->bhem", key_block.to(torch.float32), codes.to(torch.float32)
+            "bhed,hmd->bhem", key_block.to(torch.float32), codes_fp32
         ) * scale
         key_scores, key_indices = torch.topk(key_logits, active_codes, dim=-1)
         query_logits = torch.einsum(
-            "bhed,hmd->bhem", query_block.to(torch.float32), codes.to(torch.float32)
+            "bhed,hmd->bhem", query_block.to(torch.float32), codes_fp32
         ) * scale
         query_scores, query_indices = torch.topk(query_logits, active_codes, dim=-1)
         key_indices = key_indices.to(torch.int32).contiguous()
         query_indices = query_indices.to(torch.int32).contiguous()
         key_scores = key_scores.contiguous()
         query_scores = query_scores.contiguous()
-        partial = torch.zeros(
-            (batch, heads, count, active_codes, dim),
-            device=key.device,
-            dtype=torch.float32,
-        )
+        partial = partial_scratch[:, :, :count]
+        partial.zero_()
         _qcc_sparse_update_read_chunk_kernel[(batch * heads * num_codes,)](
             partial,
             key_indices,
@@ -1405,11 +1419,9 @@ def triton_sparse_update_read_archive_chunk(
             NUM_SCALES=num_scales,
             HEAD_DIM=dim,
         )
-        output = torch.empty(
-            (batch, heads, count, dim), device=key.device, dtype=query.dtype
-        )
+        output_block = output[:, :, start : start + count]
         _qcc_route_sparse_partial_kernel[(batch * heads * count,)](
-            output,
+            output_block,
             partial,
             query_scores,
             batch,
@@ -1422,7 +1434,6 @@ def triton_sparse_update_read_archive_chunk(
             ACTIVE_CODES=active_codes,
             HEAD_DIM=dim,
         )
-        outputs.append(output)
 
     if numerator.data_ptr() != original_numerator.data_ptr():
         original_numerator.copy_(numerator)
@@ -1430,4 +1441,4 @@ def triton_sparse_update_read_archive_chunk(
         original_denominator.copy_(denominator)
     if last_step.data_ptr() != original_last_step.data_ptr():
         original_last_step.copy_(last_step)
-    return torch.cat(outputs, dim=2)
+    return output
