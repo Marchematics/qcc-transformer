@@ -715,6 +715,8 @@ class QCCSelfAttention(nn.Module):
         self._local_value_cache = None
         self._full_key_cache = None
         self._full_value_cache = None
+        self._chunk_key_scratch = None
+        self._chunk_value_scratch = None
         self._cache_start = 0
         self._cache_length = 0
         self._seen_tokens = 0
@@ -747,6 +749,67 @@ class QCCSelfAttention(nn.Module):
                     self._local_value_cache[:, :, : self._cache_start],
                 ), dim=2
             ),
+        )
+
+    def _combined_local_chunk(
+        self, key: Tensor, value: Tensor
+    ) -> tuple[Tensor, Tensor, int]:
+        """Build a chronological local block in reusable scratch storage.
+
+        The persistent cache is a ring to make eviction O(1).  Attention
+        kernels need chronological keys, however, and allocating two fresh
+        ``cat`` tensors at every decode chunk adds allocator traffic and a
+        second copy at ring wrap-around.  Reusing scratch storage keeps that
+        temporary allocation out of the steady-state path.
+        """
+
+        if self._local_key_cache is None or self._local_value_cache is None:
+            raise RuntimeError("local cache must be initialized before combining a chunk")
+        bsz, _, length, _ = key.shape
+        old_length = self._cache_length
+        needed = old_length + length
+        if (
+            self._chunk_key_scratch is None
+            or self._chunk_value_scratch is None
+            or self._chunk_key_scratch.shape[0] != bsz
+            or self._chunk_key_scratch.shape[2] < needed
+            or self._chunk_key_scratch.device != key.device
+            or self._chunk_key_scratch.dtype != key.dtype
+            or self._chunk_value_scratch.device != value.device
+            or self._chunk_value_scratch.dtype != value.dtype
+        ):
+            capacity = max(needed, self.window_size + length)
+            scratch_shape = (bsz, self.num_heads, capacity, self.head_dim)
+            self._chunk_key_scratch = torch.empty(
+                scratch_shape, device=key.device, dtype=key.dtype
+            )
+            self._chunk_value_scratch = torch.empty(
+                scratch_shape, device=value.device, dtype=value.dtype
+            )
+        assert self._chunk_value_scratch is not None
+        if old_length:
+            start = self._cache_start
+            first = min(old_length, self.window_size - start)
+            self._chunk_key_scratch[:, :, :first] = self._local_key_cache[
+                :, :, start : start + first
+            ]
+            self._chunk_value_scratch[:, :, :first] = self._local_value_cache[
+                :, :, start : start + first
+            ]
+            if first < old_length:
+                remainder = old_length - first
+                self._chunk_key_scratch[:, :, first:old_length] = self._local_key_cache[
+                    :, :, :remainder
+                ]
+                self._chunk_value_scratch[:, :, first:old_length] = self._local_value_cache[
+                    :, :, :remainder
+                ]
+        self._chunk_key_scratch[:, :, old_length:needed] = key
+        self._chunk_value_scratch[:, :, old_length:needed] = value
+        return (
+            self._chunk_key_scratch[:, :, :needed],
+            self._chunk_value_scratch[:, :, :needed],
+            old_length,
         )
 
     def step(
@@ -895,7 +958,7 @@ class QCCSelfAttention(nn.Module):
                 shape = (bsz, self.num_heads, self.window_size, self.head_dim)
                 self._local_key_cache = torch.empty(shape, device=k.device, dtype=k.dtype)
                 self._local_value_cache = torch.empty(shape, device=v.device, dtype=v.dtype)
-            old_k, old_v = self._ordered_ring()
+            combined_k, combined_v, old_length = self._combined_local_chunk(k, v)
         else:
             if self._full_key_cache is None:
                 shape = (bsz, self.num_heads, self.window_size, self.head_dim)
@@ -908,10 +971,9 @@ class QCCSelfAttention(nn.Module):
             self._full_value_cache[:, :, self._seen_tokens : self._seen_tokens + length] = v
             old_k = self._full_key_cache[:, :, : self._seen_tokens]
             old_v = self._full_value_cache[:, :, : self._seen_tokens]
-
-        old_length = old_k.shape[2]
-        combined_k = torch.cat((old_k, k), dim=2)
-        combined_v = torch.cat((old_v, v), dim=2)
+            old_length = old_k.shape[2]
+            combined_k = torch.cat((old_k, k), dim=2)
+            combined_v = torch.cat((old_v, v), dim=2)
         total_length = combined_k.shape[2]
 
         if not self.use_archive:
