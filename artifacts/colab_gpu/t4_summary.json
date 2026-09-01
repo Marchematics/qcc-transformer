@@ -1,0 +1,49 @@
+{
+  "device": "Tesla T4",
+  "torch": "2.11.0+cu128",
+  "cuda": "12.8",
+  "pytest": {
+    "command": "python -m pytest -q",
+    "result": "24 passed"
+  },
+  "configuration": {
+    "vocab_size": 4096,
+    "d_model": 256,
+    "layers": 2,
+    "heads": 8,
+    "window_size": 128,
+    "num_codes": 16,
+    "chunk_size": 256,
+    "position_encoding": "sinusoidal"
+  },
+  "quality_random_weight_control": {
+    "1024_mean_logit_cosine": 0.9991672784090042,
+    "2048_mean_logit_cosine": 0.997903548181057,
+    "interpretation": "matched random-weight logit fidelity, not RULER or language quality"
+  },
+  "long_stream_qcc_only": {
+    "128000": {
+      "prefill_seconds": 3.830698,
+      "tpot_ms": 71.822,
+      "state_fraction_percent": 0.125781,
+      "reduction": 795.03
+    },
+    "1000000": {
+      "prefill_seconds": 14.312142,
+      "tpot_ms": 72.439,
+      "state_fraction_percent": 0.0161,
+      "reduction": 6211.18
+    },
+    "4000000": {
+      "prefill_seconds": 54.564267,
+      "tpot_ms": 71.665,
+      "state_fraction_percent": 0.004025,
+      "reduction": 24844.72
+    }
+  },
+  "limitations": [
+    "Long-stream measurements are QCC-only; no feasible 1M/4M Full-KV control was run.",
+    "No trained checkpoint or RULER JSONL dataset was supplied, so retrieval quality is unmeasured.",
+    "Random-weight cosine is a kernel fidelity check, not a quality claim."
+  ]
+}

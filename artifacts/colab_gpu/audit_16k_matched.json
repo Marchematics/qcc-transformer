@@ -1,0 +1,28 @@
+{
+  "device": "cuda (Tesla T4)",
+  "length": 16384,
+  "matched_random_weight_latency": {
+    "qcc_prefill_seconds": 0.2083854,
+    "full_kv_prefill_seconds": 0.284130135,
+    "ttft_speedup": 1.3634838861,
+    "qcc_tpot_ms": 2.177487,
+    "full_kv_tpot_ms": 5.868581,
+    "tpot_speedup": 2.6951164348
+  },
+  "quality_random_weight_control": {
+    "1024_mean_logit_cosine": 0.9990430027,
+    "2048_mean_logit_cosine": 0.99819161,
+    "threshold": 0.99
+  },
+  "state": {
+    "qcc_bytes": 659456,
+    "full_kv_bytes": 67108864,
+    "state_fraction_percent": 0.982666015625,
+    "reduction": 101.7639751553
+  },
+  "limitations": [
+    "Random-weight fidelity is not pretrained-LM quality.",
+    "Retrieval is missing without a checkpoint and JSONL dataset.",
+    "Triton compilation can dominate the first measurement at shorter lengths."
+  ]
+}

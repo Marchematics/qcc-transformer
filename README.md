@@ -172,6 +172,40 @@ also completed a 4M-token MPS stream in `51.57 s` with `91.70 ms` TPOT and a
 at the configured FullAttention context length; it is not a 4M FullAttention
 execution or a language-quality result.
 
+### Colab CUDA/Triton evidence (Tesla T4)
+
+The run is reproducible with the Colab CLI (after `colab auth login`):
+
+```bash
+colab new --session qcc-gpu --gpu T4
+colab install --session qcc-gpu triton
+printf '%s\n' '...' | colab exec --session qcc-gpu --timeout 1800
+colab stop --session qcc-gpu
+```
+
+The repository was cloned into a Colab T4 session and audited with
+`python -m pytest -q`; all `24` tests passed, including matched dense and sparse
+Triton-vs-reference state/output checks. The compact record is preserved in
+[`artifacts/colab_gpu/t4_summary.json`](artifacts/colab_gpu/t4_summary.json),
+with the raw long-stream lines in
+[`artifacts/colab_gpu/long_stream.log`](artifacts/colab_gpu/long_stream.log).
+
+Using the default two-layer/256-wide configuration (`chunk_size=256`), the
+QCC-only CUDA streams measured:
+
+| Context | Prefill | TPOT | QCC state / Full-KV | Reduction |
+|---:|---:|---:|---:|---:|
+| 128K | 3.831 s | 71.8 ms | 0.125781% | 795x |
+| 1M | 14.312 s | 72.4 ms | 0.016100% | 6,211x |
+| 4M | 54.564 s | 71.7 ms | 0.004025% | 24,845x |
+
+The 1M/4M runs intentionally do not fabricate a Full-KV baseline: allocating
+that control is not feasible on the T4. A matched random-weight logit-fidelity
+control reached cosine `0.99917` at 1,024 and `0.99790` at 2,048 tokens; this is
+a kernel-equivalence check, not RULER, retrieval, or pretrained-LM quality.
+The target retrieval gates remain `missing` until a trained checkpoint and
+JSONL evaluation set are supplied.
+
 For million-token serving, the default `position_encoding="sinusoidal"` is
 stateless: configuring `max_position_embeddings=4_000_000` does not allocate a
 four-million-row learned position table. `archive_scan_block_size` controls the
