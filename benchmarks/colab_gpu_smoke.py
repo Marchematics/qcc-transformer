@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -44,6 +45,30 @@ def _run_logged(cmd: list[str], path: Path) -> int:
         )
     print(f"returncode={completed.returncode} log={path}", flush=True)
     return completed.returncode
+
+
+def _parse_long_log(path: Path) -> dict[str, object]:
+    """Extract stable fields from ``benchmark_long_context`` output."""
+
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    fields: dict[str, object] = {"log": str(path)}
+    patterns = {
+        "length": r"length=(\d+)",
+        "qcc_state_bytes": r"qcc_state_bytes=(\d+)",
+        "full_kv_bytes": r"full_kv_bytes=(\d+)",
+        "state_fraction_percent": r"state_fraction=([0-9.eE+-]+)%",
+        "reduction": r"reduction=([0-9.eE+-]+)x",
+        "processed_tokens": r"processed_tokens=(\d+)",
+        "prefill_seconds": r"prefill_seconds=([0-9.eE+-]+)",
+        "tpot_ms": r"tpot_ms=([0-9.eE+-]+)",
+    }
+    for key, pattern in patterns.items():
+        match = re.search(pattern, text)
+        if match is None:
+            continue
+        raw = match.group(1)
+        fields[key] = int(raw) if key in {"length", "qcc_state_bytes", "full_kv_bytes", "processed_tokens"} else float(raw)
+    return fields
 
 
 def main() -> None:
@@ -154,13 +179,30 @@ def main() -> None:
                 "--device", "cuda",
                 "--run",
             ], log_path)
-            long_results.append(
-                {"length": int(length), "returncode": returncode, "log": str(log_path)}
-            )
+            parsed = _parse_long_log(log_path)
+            parsed.update({"length": int(length), "returncode": returncode})
+            long_results.append(parsed)
     status = "complete" if all(item["returncode"] == 0 for item in long_results) else "partial"
+    long_summary = args.long_output_dir / "summary.json"
+    if long_results:
+        long_summary.parent.mkdir(parents=True, exist_ok=True)
+        long_summary.write_text(
+            json.dumps(
+                {"status": status, "device": torch.cuda.get_device_name(0), "runs": long_results},
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
     print(
         json.dumps(
-            {"status": status, "audit": str(args.output), "cuda": True, "long_runs": long_results},
+            {
+                "status": status,
+                "audit": str(args.output),
+                "cuda": True,
+                "long_summary": str(long_summary) if long_results else None,
+                "long_runs": long_results,
+            },
             indent=2,
         )
     )
