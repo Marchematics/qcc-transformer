@@ -32,6 +32,9 @@ python benchmarks/benchmark_decode.py --length 512 --mode decode --warmup 1 --st
 
 For block serving, set `--chunk-size 16` (or another positive block length) to
 use the vectorized persistent `decode_chunk` API.
+Its finite causal window is dispatched through fused SDPA with a band mask,
+so chunked serving avoids materializing an unfolded window tensor. The archive
+events remain ordered and stateful.
 
 For the counterintuitive sparse-memory variant, keep an overcomplete landmark
 bank but touch only the highest-scoring slots at inference:

@@ -766,23 +766,23 @@ class QCCSelfAttention(nn.Module):
                 head_out.transpose(1, 2).reshape(bsz, length, self.d_model)
             )
 
-        window = self.window_size if self.use_archive else total_length
-        k_pad = F.pad(combined_k.transpose(-1, -2), (window - 1, 0))
-        v_pad = F.pad(combined_v.transpose(-1, -2), (window - 1, 0))
-        k_windows = k_pad.unfold(-1, window, 1).permute(0, 1, 3, 4, 2)
-        v_windows = v_pad.unfold(-1, window, 1).permute(0, 1, 3, 4, 2)
+        # Feed the finite causal band directly to SDPA.  Unlike materializing
+        # an unfolded [batch, head, time, window, dim] tensor, this lets the
+        # backend use its fused attention implementation while the mask keeps
+        # work bounded to the exact local window.  ``combined_k`` is already
+        # chronological (old ring contents followed by the new block).
         positions = old_length + torch.arange(length, device=hidden.device)
-        local_k = k_windows[:, :, positions]
-        local_v = v_windows[:, :, positions]
-        local_logits = torch.einsum("bhtd,bhtwd->bhtw", q, local_k) / math.sqrt(self.head_dim)
-        valid = torch.arange(window, device=hidden.device)[None, :] >= (
-            window - 1 - positions[:, None]
+        key_positions = torch.arange(total_length, device=hidden.device)
+        valid = (key_positions[None, :] <= positions[:, None]) & (
+            key_positions[None, :] >= positions[:, None] - self.window_size + 1
         )
-        local_logits = local_logits.masked_fill(
-            ~valid[None, None], torch.finfo(local_logits.dtype).min
+        local_out = F.scaled_dot_product_attention(
+            q,
+            combined_k,
+            combined_v,
+            attn_mask=valid,
+            dropout_p=0.0,
         )
-        local_prob = F.softmax(local_logits, dim=-1)
-        local_out = torch.einsum("bhtw,bhtwd->bhtd", local_prob, local_v)
 
         if self.use_archive:
             archive_out = torch.zeros_like(local_out)
