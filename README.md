@@ -38,7 +38,8 @@ bank but touch only the highest-scoring slots at inference:
 
 ```bash
 python benchmarks/benchmark_decode.py --length 2048 --num-codes 512 \
-  --active-codes 4 --lazy-decay --warmup 1 --steps 3
+  --active-codes 4 --lazy-decay --archive-read-stride 4 \
+  --warmup 1 --steps 3
 ```
 
 `active_codes` changes only inference reads; training remains dense so the
@@ -46,7 +47,9 @@ codebook receives gradients from every landmark. `lazy_decay` stores a logical
 timestamp per slot and applies elapsed decay when that slot is touched. This
 makes update cost depend on the selected slots rather than the full bank, at
 the cost of an explicitly approximate top-k read and a larger persistent
-state.
+state. `archive_read_stride` additionally reuses the last remote response for
+intermediate decode steps; it is an approximation knob and currently applies
+to the token-at-a-time `decode_step` path.
 
 `decode_step` maintains a persistent local/archive state and processes one
 token at a time. Use `--mode prefill` to benchmark the sequence-level path.
@@ -61,13 +64,14 @@ The script reports per-length timings and log-log slopes. A slope near 1 for
 QCC and near 2 for full KV is the expected bounded-state versus quadratic
 scaling signature; actual values depend on hardware and kernel implementation.
 
-Single-thread CPU reference run (`256,512,1024,2048`, warmup 1, steps 1)
-against the same fused SDPA primitive for the full-KV control gave QCC/full
-timings of `0.188/0.149`, `0.490/0.378`, `1.007/1.173`, and `2.426/5.005`
-seconds. The fitted slopes were `1.212` (QCC) and `1.686` (full KV). The fixed
-archive overhead dominates short contexts, while the bounded path becomes
-faster as history grows. These are single-run CPU measurements, not a
-hardware-independent speedup claim.
+Single-thread CPU reference run (`256,512,1024,2048,4096`, warmup 1, steps 2)
+against the same fused SDPA primitive and preallocated full-KV control gave
+QCC/full timings of `0.164/0.100`, `0.388/0.220`, `0.844/0.496`,
+`1.782/1.305`, and `3.609/3.625` seconds. The fitted slopes were `1.113`
+(QCC) and `1.292` (full KV). The fixed archive overhead dominates short
+contexts; the bounded path reaches parity around 4k tokens in this setup.
+These are single-run CPU measurements, not a hardware-independent speedup
+claim.
 
 To isolate archive learnability from language-model quality, run the synthetic
 teacher benchmark:
@@ -120,13 +124,14 @@ parity on a real language distribution.
 
 The benchmark reports runtime only. It is not evidence of language-model quality. For a meaningful study, train matched small models and evaluate perplexity, Needle-in-a-Haystack, RULER, PG-19, cache memory, and decode TPOT at 32k+ context.
 
-On the reference CPU environment (PyTorch 2.9.1, four threads), a persistent
+On the reference CPU environment (PyTorch 2.9.1, one thread), a persistent
 decode benchmark with the fused SDPA full-KV control measured:
 
 | Tokens | QCC | Full KV | Relative |
 |---:|---:|---:|---:|
-| 1,024 | 2.804 s | 2.190 s | 0.78x |
-| 2,048 | 4.264 s | 6.972 s | 1.64x |
+| 1,024 | 0.844 s | 0.496 s | 0.59x |
+| 2,048 | 1.782 s | 1.305 s | 0.73x |
+| 4,096 | 3.609 s | 3.625 s | 1.00x |
 
 At 1,024 tokens in this configuration, the bounded QCC state contains
 164,864 elements versus 1,048,576 full-KV elements (6.36x fewer). At 2,048
@@ -138,10 +143,12 @@ a claim of a universal speedup. GPU results, batch scaling, kernel fusion, and
 language quality remain open experiments.
 
 As a separate CPU trade-off measurement, the sparse configuration above (512
-codes, top-4, lazy decay, one thread, three timed steps) measured `2.299 s`
-for QCC versus `4.924 s` for the full-KV control (`2.14x`). Its bounded state
-was `1,245,184` elements versus `2,097,152` full-KV elements (`1.68x` fewer),
-including the logical timestamp slots.
+codes, top-4, lazy decay, read stride 4, one thread, two timed steps) measured
+`3.637 s` for QCC versus `3.711 s` for the full-KV control at 4,096 tokens
+(`1.02x`). Its bounded state was `1,245,184` elements versus `4,194,304`
+full-KV elements (`3.37x` fewer), including logical timestamp slots. Latency is
+workload- and seed-dependent; re-run on the target hardware before making a
+systems claim.
 The same configuration is slower at 1,024 tokens because the overcomplete
 bank has not yet amortized its fixed state cost.
 

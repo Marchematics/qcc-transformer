@@ -446,12 +446,15 @@ class QCCSelfAttention(nn.Module):
         use_triton: bool = True,
         active_codes: Optional[int] = None,
         lazy_decay: bool = False,
+        archive_read_stride: int = 1,
     ) -> None:
         super().__init__()
         if d_model % num_heads:
             raise ValueError("d_model must be divisible by num_heads")
         if num_scales <= 0:
             raise ValueError("num_scales must be positive")
+        if archive_read_stride <= 0:
+            raise ValueError("archive_read_stride must be positive")
         self.d_model = d_model
         self.num_heads = num_heads
         self.head_dim = d_model // num_heads
@@ -474,13 +477,17 @@ class QCCSelfAttention(nn.Module):
             active_codes=active_codes,
             lazy_decay=lazy_decay,
         )
+        self.archive_read_stride = archive_read_stride
         self._local_keys: list[Tensor] = []
         self._local_values: list[Tensor] = []
         self._local_key_cache: Optional[Tensor] = None
         self._local_value_cache: Optional[Tensor] = None
+        self._full_key_cache: Optional[Tensor] = None
+        self._full_value_cache: Optional[Tensor] = None
         self._cache_start = 0
         self._cache_length = 0
         self._seen_tokens = 0
+        self._archive_read_cache: Optional[Tensor] = None
 
     def _split_heads(self, x: Tensor) -> Tensor:
         bsz, length, _ = x.shape
@@ -494,9 +501,12 @@ class QCCSelfAttention(nn.Module):
         self._local_values = []
         self._local_key_cache = None
         self._local_value_cache = None
+        self._full_key_cache = None
+        self._full_value_cache = None
         self._cache_start = 0
         self._cache_length = 0
         self._seen_tokens = 0
+        self._archive_read_cache = None
 
     def _ordered_ring(self) -> tuple[Tensor, Tensor]:
         """Return valid ring contents in chronological order."""
@@ -563,10 +573,17 @@ class QCCSelfAttention(nn.Module):
             local_keys = self._local_key_cache[:, :, : self._cache_length]
             local_values = self._local_value_cache[:, :, : self._cache_length]
         else:
-            self._local_keys.append(key)
-            self._local_values.append(value)
-            local_keys = torch.stack(self._local_keys, dim=2)
-            local_values = torch.stack(self._local_values, dim=2)
+            if self._full_key_cache is None:
+                shape = (bsz, self.num_heads, self.window_size, self.head_dim)
+                self._full_key_cache = torch.empty(shape, device=key.device, dtype=key.dtype)
+                self._full_value_cache = torch.empty(shape, device=value.device, dtype=value.dtype)
+            if self._seen_tokens >= self.window_size:
+                raise ValueError("full-KV cache exceeds configured maximum length")
+            assert self._full_value_cache is not None
+            self._full_key_cache[:, :, self._seen_tokens] = key
+            self._full_value_cache[:, :, self._seen_tokens] = value
+            local_keys = self._full_key_cache[:, :, : self._seen_tokens + 1]
+            local_values = self._full_value_cache[:, :, : self._seen_tokens + 1]
         if self.use_archive:
             # SDPA handles the small local window with one fused primitive;
             # this is materially cheaper than several per-token einsums on
@@ -589,7 +606,15 @@ class QCCSelfAttention(nn.Module):
                 dropout_p=0.0,
             ).squeeze(2)
         if self.use_archive and self._seen_tokens >= self.window_size:
-            archive_out = self.archive.read(q)
+            refresh = (
+                self._archive_read_cache is None
+                or self.archive_read_stride == 1
+                or self._seen_tokens % self.archive_read_stride == 0
+            )
+            if refresh:
+                self._archive_read_cache = self.archive.read(q)
+            assert self._archive_read_cache is not None
+            archive_out = self._archive_read_cache
             gate = torch.sigmoid(self.gate(hidden)).unsqueeze(-1)
             head_out = gate * local_out + (1.0 - gate) * archive_out
         else:
@@ -624,8 +649,17 @@ class QCCSelfAttention(nn.Module):
                 self._local_value_cache = torch.empty(shape, device=v.device, dtype=v.dtype)
             old_k, old_v = self._ordered_ring()
         else:
-            old_k = torch.stack(self._local_keys, dim=2) if self._local_keys else k[:, :, :0]
-            old_v = torch.stack(self._local_values, dim=2) if self._local_values else v[:, :, :0]
+            if self._full_key_cache is None:
+                shape = (bsz, self.num_heads, self.window_size, self.head_dim)
+                self._full_key_cache = torch.empty(shape, device=k.device, dtype=k.dtype)
+                self._full_value_cache = torch.empty(shape, device=v.device, dtype=v.dtype)
+            if self._seen_tokens + length > self.window_size:
+                raise ValueError("full-KV cache exceeds configured maximum length")
+            assert self._full_value_cache is not None
+            self._full_key_cache[:, :, self._seen_tokens : self._seen_tokens + length] = k
+            self._full_value_cache[:, :, self._seen_tokens : self._seen_tokens + length] = v
+            old_k = self._full_key_cache[:, :, : self._seen_tokens]
+            old_v = self._full_value_cache[:, :, : self._seen_tokens]
 
         old_length = old_k.shape[2]
         combined_k = torch.cat((old_k, k), dim=2)
@@ -646,8 +680,6 @@ class QCCSelfAttention(nn.Module):
                 attn_mask=causal_mask,
                 dropout_p=0.0,
             )
-            self._local_keys.extend(k[:, :, t] for t in range(length))
-            self._local_values.extend(v[:, :, t] for t in range(length))
             self._seen_tokens += length
             return self.out_proj(
                 head_out.transpose(1, 2).reshape(bsz, length, self.d_model)
@@ -818,6 +850,7 @@ class QCCForCausalLM(nn.Module):
         use_triton: bool = True,
         active_codes: Optional[int] = None,
         lazy_decay: bool = False,
+        archive_read_stride: int = 1,
     ) -> None:
         super().__init__()
         self.token_embedding = nn.Embedding(vocab_size, d_model)
@@ -833,6 +866,7 @@ class QCCForCausalLM(nn.Module):
                 use_triton=use_triton,
                 active_codes=active_codes,
                 lazy_decay=lazy_decay,
+                archive_read_stride=archive_read_stride,
             )
             for _ in range(num_layers)
         )
