@@ -114,7 +114,8 @@ def main() -> None:
         d_model=args.d_model,
         num_layers=args.layers,
         num_heads=args.heads,
-        max_position_embeddings=args.length,
+        # Reserve one extra position for the post-prefill TPOT probe.
+        max_position_embeddings=args.length + 1,
         window_size=args.window_size,
         num_codes=args.num_codes,
         archive_scan_block_size=args.archive_scan_block_size,
