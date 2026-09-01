@@ -6,9 +6,11 @@ This repository is an implementation of a falsifiable hypothesis, not a claim of
 
 ## Why this is different
 
-The archive does not store one K/V pair per historical token. For each KV head, it stores responses to a learned codebook of long-range queries under several exponential decay rates. At each decode step, only the exact local window is scanned; historical state is read in constant time with respect to context length.
+The archive does not store one K/V pair per historical token. For each KV head, it stores responses to a learned codebook of long-range queries under several exponential decay rates. At each decode step, only the exact local window is scanned; historical state is read in constant time with respect to context length. The precise mechanism is best described as a *learned-landmark, multi-timescale separable-kernel memory*: code vectors are fixed during inference, while numerator/denominator response statistics are updated recurrently.
 
-The intended comparison is against full KV attention and sliding-window/GQA baselines. Related work includes linear attention, recurrent memory, KV eviction, KV quantization, MLA, and Infini-attention. The novelty boundary must be checked against those families before making a publication claim.
+The intended comparison is against full KV attention and sliding-window/GQA baselines. Related work includes linear attention, recurrent memory, KV eviction, KV quantization, MLA, and Infini-attention. Local attention plus bounded recurrent state, softmax numerator/normalizer recurrences, multi-scale decay, and gated local/remote mixing are established ingredients (for example Infini-attention, ABC/GSA, RetNet/KDA, and recent compressed-KV hybrids). The defensible QCC delta is the fixed per-head landmark codebook and its response-statistics parameterization; novelty must be demonstrated by a matched state-byte/quality/latency Pareto comparison rather than by the bounded-state structure alone.
+
+QCC does not compute an exact global softmax over all historical tokens. Each code/scale response is normalized independently before routing and scale mixing, so long-range retrieval is an approximation whose quality must be measured on trained checkpoints. The repository intentionally keeps this boundary explicit and reports missing RULER/retrieval/GPU gates as missing.
 
 ## Install
 
