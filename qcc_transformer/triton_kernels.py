@@ -1169,6 +1169,7 @@ def triton_update_read_archive_chunk(
     window_size: int,
     *,
     block_size: int = 256,
+    output: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Fuse dense archive update/read for a block of evicted tokens.
 
@@ -1190,6 +1191,9 @@ def triton_update_read_archive_chunk(
     batch, heads, events, dim = key.shape
     if events == 0:
         return query.new_empty(query.shape)
+    if output is not None:
+        if output.shape != query.shape or output.device != key.device or output.dtype != query.dtype:
+            raise ValueError("output must match query shape, dtype, and device")
     if numerator.shape[0] != batch or numerator.shape[1] != heads:
         raise ValueError("archive state batch/head shape does not match inputs")
     num_codes = numerator.shape[2]
@@ -1222,7 +1226,8 @@ def triton_update_read_archive_chunk(
     # call.  Allocating a partial/output pair for every block is especially
     # expensive for million-token prefill, where it turns a bounded kernel
     # into thousands of allocator operations followed by a full ``cat``.
-    output = torch.empty((batch, heads, events, dim), device=key.device, dtype=query.dtype)
+    if output is None:
+        output = torch.empty((batch, heads, events, dim), device=key.device, dtype=query.dtype)
     scratch_size = min(block_size, events)
     partial_scratch = torch.empty(
         (batch, heads, scratch_size, num_codes, dim),
@@ -1301,6 +1306,7 @@ def triton_sparse_update_read_archive_chunk(
     active_codes: int,
     *,
     block_size: int = 256,
+    output: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Fuse sparse lazy archive update/read for a block of evicted tokens.
 
@@ -1324,6 +1330,9 @@ def triton_sparse_update_read_archive_chunk(
     batch, heads, events, dim = key.shape
     if events == 0:
         return query.new_empty(query.shape)
+    if output is not None:
+        if output.shape != query.shape or output.device != key.device or output.dtype != query.dtype:
+            raise ValueError("output must match query shape, dtype, and device")
     num_codes = numerator.shape[2]
     num_scales = numerator.shape[3]
     if active_codes > num_codes:
@@ -1356,7 +1365,8 @@ def triton_sparse_update_read_archive_chunk(
     # Reuse bounded temporaries across blocks.  Sparse routing used to create
     # three large tensors per block (partial, output, and a transient list
     # entry); reusing storage keeps allocator traffic independent of context.
-    output = torch.empty((batch, heads, events, dim), device=key.device, dtype=query.dtype)
+    if output is None:
+        output = torch.empty((batch, heads, events, dim), device=key.device, dtype=query.dtype)
     scratch_size = min(block_size, events)
     partial_scratch = torch.empty(
         (batch, heads, scratch_size, active_codes, dim),

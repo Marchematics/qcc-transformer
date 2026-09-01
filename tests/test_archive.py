@@ -106,6 +106,30 @@ def test_block_streaming_matches_single_scan_across_block_boundary() -> None:
     torch.testing.assert_close(block.state.numerator, single.state.numerator, rtol=2e-5, atol=2e-5)
 
 
+def test_chunk_output_view_is_reused_by_reference_path() -> None:
+    torch.manual_seed(421)
+    archive = QCCArchive(
+        num_heads=2,
+        head_dim=8,
+        num_codes=8,
+        decay_rates=(0.9, 0.97),
+        window_size=3,
+        use_triton=False,
+        scan_block_size=5,
+    )
+    keys = torch.randn(1, 2, 13, 8)
+    values = torch.randn_like(keys)
+    queries = torch.randn_like(keys)
+    with torch.no_grad():
+        expected = archive.update_read_chunk(keys, values, queries)
+        archive.reset_state(1)
+        backing = torch.empty(1, 2, 17, 8)
+        target = backing[:, :, 2:15]
+        actual = archive.update_read_chunk(keys, values, queries, output=target)
+    assert actual.data_ptr() == target.data_ptr()
+    torch.testing.assert_close(actual, expected, rtol=2e-5, atol=2e-5)
+
+
 def test_rope_position_mode_matches_streaming_decode() -> None:
     torch.manual_seed(43)
     model = QCCForCausalLM(

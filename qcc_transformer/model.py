@@ -327,7 +327,14 @@ class QCCArchive(nn.Module):
         return torch.cat(states, dim=2), state
 
     @torch.no_grad()
-    def update_read_chunk(self, key: Tensor, value: Tensor, query: Tensor) -> Tensor:
+    def update_read_chunk(
+        self,
+        key: Tensor,
+        value: Tensor,
+        query: Tensor,
+        *,
+        output: Optional[Tensor] = None,
+    ) -> Tensor:
         """Update and read a sequence of evicted tokens with a block scan.
 
         Inputs are ``[batch, heads, events, head_dim]`` and the returned
@@ -338,6 +345,8 @@ class QCCArchive(nn.Module):
 
         if key.ndim != 4 or value.shape != key.shape or query.shape != key.shape:
             raise ValueError("key, value, and query must have shape [batch, heads, events, head_dim]")
+        if output is not None and (output.shape != query.shape or output.device != query.device):
+            raise ValueError("output must match query shape and device")
         batch, heads, events, dim = key.shape
         if heads != self.num_heads or dim != self.head_dim:
             raise ValueError("chunk shapes do not match archive configuration")
@@ -370,6 +379,7 @@ class QCCArchive(nn.Module):
                         self._step,
                         self.active_codes,
                         block_size=self.scan_block_size,
+                        output=output,
                     )
                     self._step += events
                     return output
@@ -401,6 +411,7 @@ class QCCArchive(nn.Module):
                     self.decay_rates,
                     self.window_size,
                     block_size=self.scan_block_size,
+                    output=output,
                 )
 
         # Sparse/lazy CUDA chunks and unsupported devices use the reference
@@ -447,7 +458,11 @@ class QCCArchive(nn.Module):
             )
         self._denominator = state_den
         self._numerator = state_num
-        return torch.cat(outputs, dim=2)
+        result = torch.cat(outputs, dim=2)
+        if output is not None:
+            output.copy_(result)
+            return output
+        return result
 
     def _read_states(self, query: Tensor, numerator: Tensor, denominator: Tensor) -> Tensor:
         """Read one or many queries from explicit archive states."""
@@ -1065,8 +1080,11 @@ class QCCSelfAttention(nn.Module):
             if event_count > 0:
                 evicted_k = combined_k[:, :, :event_count]
                 evicted_v = combined_v[:, :, :event_count]
-                archive_out[:, :, event_start:] = self.archive.update_read_chunk(
-                    evicted_k, evicted_v, q[:, :, event_start:]
+                self.archive.update_read_chunk(
+                    evicted_k,
+                    evicted_v,
+                    q[:, :, event_start:],
+                    output=archive_out[:, :, event_start:],
                 )
             gate = torch.sigmoid(self.gate(hidden)).transpose(1, 2).unsqueeze(-1)
             mixed_out = gate * local_out + (1.0 - gate) * archive_out
@@ -1159,8 +1177,11 @@ class QCCSelfAttention(nn.Module):
             # tensor blocks rather than interpreter iterations.
             event_count = length - self.window_size
             if event_count > 0:
-                archive_out[:, :, self.window_size :] = self.archive.update_read_chunk(
-                    k[:, :, :event_count], v[:, :, :event_count], q[:, :, self.window_size :]
+                self.archive.update_read_chunk(
+                    k[:, :, :event_count],
+                    v[:, :, :event_count],
+                    q[:, :, self.window_size :],
+                    output=archive_out[:, :, self.window_size :],
                 )
             gate = torch.sigmoid(self.gate(hidden)).transpose(1, 2).unsqueeze(-1)
             mixed_out = gate * local_out + (1.0 - gate) * archive_out
