@@ -14,7 +14,7 @@ from pathlib import Path
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from benchmark_decode import FullAttentionBaseline, timed_decode
+from benchmark_decode import FullAttentionBaseline, timed_decode, timed_prefill
 from qcc_transformer import QCCForCausalLM
 
 
@@ -31,9 +31,13 @@ def main() -> None:
     parser.add_argument("--lengths", default="256,512,1024,2048")
     parser.add_argument("--warmup", type=int, default=1)
     parser.add_argument("--steps", type=int, default=2)
+    parser.add_argument("--mode", choices=("decode", "prefill"), default="decode")
+    parser.add_argument("--threads", type=int, default=1)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
-    torch.set_num_threads(1)
+    if args.threads <= 0:
+        raise ValueError("threads must be positive")
+    torch.set_num_threads(args.threads)
     device = torch.device(args.device)
     lengths = [int(value) for value in args.lengths.split(",") if value.strip()]
     qcc_seconds: list[float] = []
@@ -51,9 +55,13 @@ def main() -> None:
         tokens = torch.randint(0, common["vocab_size"], (1, length), device=device)
         qcc = QCCForCausalLM(**common).to(device)
         full = FullAttentionBaseline(**common).to(device)
-        qcc_seconds.append(timed_decode(qcc, tokens, args.warmup, args.steps))
-        full_seconds.append(timed_decode(full, tokens, args.warmup, args.steps))
-    print(f"device={device} lengths={lengths} threads={torch.get_num_threads()}")
+        if args.mode == "prefill":
+            qcc_seconds.append(timed_prefill(qcc, tokens, args.warmup, args.steps))
+            full_seconds.append(timed_prefill(full, tokens, args.warmup, args.steps))
+        else:
+            qcc_seconds.append(timed_decode(qcc, tokens, args.warmup, args.steps))
+            full_seconds.append(timed_decode(full, tokens, args.warmup, args.steps))
+    print(f"device={device} mode={args.mode} lengths={lengths} threads={torch.get_num_threads()}")
     for length, qcc_time, full_time in zip(lengths, qcc_seconds, full_seconds):
         print(f"length={length} qcc_seconds={qcc_time:.6f} full_seconds={full_time:.6f} speedup={full_time / qcc_time:.2f}x")
     print(f"qcc_loglog_slope={fit_log_slope(lengths, qcc_seconds):.3f}")

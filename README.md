@@ -72,6 +72,14 @@ To measure asymptotic behavior across context lengths, run:
 python benchmarks/benchmark_scaling.py --lengths 256,512,1024,2048
 ```
 
+Use `--mode prefill` to measure sequence-level block scanning (the optimized
+archive path), and `--threads 1` to make CPU timings reproducible:
+
+```bash
+python benchmarks/benchmark_scaling.py --mode prefill \
+  --lengths 256,512,1024 --threads 1
+```
+
 The script reports per-length timings and log-log slopes. A slope near 1 for
 QCC and near 2 for full KV is the expected bounded-state versus quadratic
 scaling signature; actual values depend on hardware and kernel implementation.
