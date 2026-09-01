@@ -120,7 +120,11 @@ def train(
         )
         optimizer.zero_grad(set_to_none=True)
         logits = model(tokens)
-        query_logits = logits[:, query_position]
+        # When a query range is enabled, supervise the position sampled for
+        # this step rather than the nominal default.  Using ``query_position``
+        # here silently trained only one location and made curriculum runs
+        # appear to converge while ignoring their sampled targets.
+        query_logits = logits[:, step_query_position]
         loss = F.cross_entropy(query_logits, values)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
