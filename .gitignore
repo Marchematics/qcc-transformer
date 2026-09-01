@@ -8,3 +8,4 @@ build/
 *.pt
 *.pth
 profile_output/
+work/
