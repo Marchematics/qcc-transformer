@@ -996,19 +996,50 @@ class QCCSelfAttention(nn.Module):
 
         bsz, length, _ = hidden.shape
         window = min(self.window_size, length)
-        # [B,H,D,T+W-1] -> [B,H,T,W,D]. This avoids Python-level K/V stacks.
-        k_pad = F.pad(k.transpose(-1, -2), (window - 1, 0))
-        v_pad = F.pad(v.transpose(-1, -2), (window - 1, 0))
-        k_windows = k_pad.unfold(-1, window, 1).permute(0, 1, 3, 4, 2)
-        v_windows = v_pad.unfold(-1, window, 1).permute(0, 1, 3, 4, 2)
-        local_logits = torch.einsum("bhtd,bhtwd->bhtw", q, k_windows)
-        local_logits = local_logits / math.sqrt(self.head_dim)
-        valid = torch.arange(window, device=hidden.device)[None, :] >= (
-            window - 1 - torch.arange(length, device=hidden.device)[:, None]
-        )
-        local_logits = local_logits.masked_fill(~valid[None, None], torch.finfo(local_logits.dtype).min)
-        local_prob = F.softmax(local_logits, dim=-1)
-        local_out = torch.einsum("bhtw,bhtwd->bhtd", local_prob, v_windows)
+        if hidden.is_cuda:
+            # On CUDA, use the backend's fused SDPA primitive on bounded
+            # blocks instead of materializing an unfolded [time, window, dim]
+            # tensor and launching separate einsums for logits and values. The
+            # key slice contains at most ``window + block_size - 1`` tokens;
+            # the boolean mask keeps exact causal local-window semantics.
+            block_size = self.archive.scan_block_size
+            local_outputs: list[Tensor] = []
+            for start in range(0, length, block_size):
+                end = min(length, start + block_size)
+                key_start = max(0, start - window + 1)
+                key_positions = torch.arange(key_start, end, device=hidden.device)
+                query_positions = torch.arange(start, end, device=hidden.device)
+                valid = (key_positions[None, :] <= query_positions[:, None]) & (
+                    key_positions[None, :] >= query_positions[:, None] - window + 1
+                )
+                local_outputs.append(
+                    F.scaled_dot_product_attention(
+                        q[:, :, start:end],
+                        k[:, :, key_start:end],
+                        v[:, :, key_start:end],
+                        attn_mask=valid,
+                        dropout_p=0.0,
+                    )
+                )
+            local_out = torch.cat(local_outputs, dim=2)
+        else:
+            # The CPU SDPA backend currently pays a relatively high per-block
+            # mask setup cost. Keep the reference's single vectorized unfold
+            # there; it remains exact and avoids thousands of tiny dispatches.
+            k_pad = F.pad(k.transpose(-1, -2), (window - 1, 0))
+            v_pad = F.pad(v.transpose(-1, -2), (window - 1, 0))
+            k_windows = k_pad.unfold(-1, window, 1).permute(0, 1, 3, 4, 2)
+            v_windows = v_pad.unfold(-1, window, 1).permute(0, 1, 3, 4, 2)
+            local_logits = torch.einsum("bhtd,bhtwd->bhtw", q, k_windows)
+            local_logits = local_logits / math.sqrt(self.head_dim)
+            valid = torch.arange(window, device=hidden.device)[None, :] >= (
+                window - 1 - torch.arange(length, device=hidden.device)[:, None]
+            )
+            local_logits = local_logits.masked_fill(
+                ~valid[None, None], torch.finfo(local_logits.dtype).min
+            )
+            local_prob = F.softmax(local_logits, dim=-1)
+            local_out = torch.einsum("bhtw,bhtwd->bhtd", local_prob, v_windows)
 
         if self.use_archive:
             self.archive.reset_state(bsz, device=hidden.device)
