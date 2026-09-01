@@ -149,6 +149,12 @@ fraction. These are QCC-only long-stream measurements: no Full-KV control was
 attempted at those lengths, and they do not establish the CUDA speedup or
 retrieval-quality gates.
 
+A smaller one-layer smoke configuration (`d_model=16`, two heads, four codes)
+also completed a 4M-token MPS stream in `51.57 s` with `91.70 ms` TPOT and a
+`0.003425%` state fraction. This demonstrates the out-of-core streaming path
+at the configured FullAttention context length; it is not a 4M FullAttention
+execution or a language-quality result.
+
 For million-token serving, the default `position_encoding="sinusoidal"` is
 stateless: configuring `max_position_embeddings=4_000_000` does not allocate a
 four-million-row learned position table. `archive_scan_block_size` controls the
