@@ -42,6 +42,7 @@ try:  # pragma: no cover - exercised only on a Triton-enabled GPU runner
         stride_vd,
         stride_ch,
         stride_cm,
+        stride_cd,
         BLOCK_D: tl.constexpr,
         NUM_CODES: tl.constexpr,
         NUM_SCALES: tl.constexpr,
@@ -62,7 +63,7 @@ try:  # pragma: no cover - exercised only on a Triton-enabled GPU runner
             other=0.0,
         ).to(tl.float32)
         code = tl.load(
-            codes_ptr + head * stride_ch + code_id * stride_cm + offs_d,
+            codes_ptr + head * stride_ch + code_id * stride_cm + offs_d * stride_cd,
             mask=mask_d,
             other=0.0,
         ).to(tl.float32)
@@ -419,6 +420,12 @@ def triton_update_archive(
         raise RuntimeError("Triton CUDA runtime is unavailable")
     if key.ndim != 3 or value.shape != key.shape:
         raise ValueError("key and value must have shape [batch, heads, head_dim]")
+    if codes.ndim != 3 or codes.shape[0] != key.shape[1] or codes.shape[2] != key.shape[2]:
+        raise ValueError("codes must have shape [heads, num_codes, head_dim]")
+    if numerator.ndim != 5 or denominator.ndim != 4:
+        raise ValueError("archive state has an invalid rank")
+    if numerator.shape[:3] != denominator.shape[:3] or numerator.shape[3] != denominator.shape[3]:
+        raise ValueError("numerator and denominator shapes do not match")
     original_numerator = numerator
     original_denominator = denominator
     numerator = numerator.contiguous()
@@ -523,9 +530,14 @@ def triton_lazy_update_archive(
         raise ValueError("key and value must have shape [batch, heads, head_dim]")
     if indices.ndim != 3 or indices.shape[:2] != key.shape[:2]:
         raise ValueError("indices must have shape [batch, heads, active_codes]")
+    if codes.ndim != 3 or codes.shape[0] != key.shape[1] or codes.shape[2] != key.shape[2]:
+        raise ValueError("codes must have shape [heads, num_codes, head_dim]")
     active = indices.shape[-1]
     if active & (active - 1):
         raise RuntimeError("Triton sparse kernels require a power-of-two active_codes")
+    original_numerator = numerator
+    original_denominator = denominator
+    original_last_step = last_step
     numerator = numerator.contiguous()
     denominator = denominator.contiguous()
     last_step = last_step.contiguous()
@@ -562,6 +574,15 @@ def triton_lazy_update_archive(
         HEAD_DIM=dim,
         ACTIVE_CODES=active,
     )
+    # The archive normally owns contiguous buffers, but preserving in-place
+    # semantics here avoids silently dropping updates when callers pass a
+    # strided view (``Tensor.contiguous()`` may allocate a copy).
+    if numerator.data_ptr() != original_numerator.data_ptr():
+        original_numerator.copy_(numerator)
+    if denominator.data_ptr() != original_denominator.data_ptr():
+        original_denominator.copy_(denominator)
+    if last_step.data_ptr() != original_last_step.data_ptr():
+        original_last_step.copy_(last_step)
 
 
 def triton_sparse_read_archive(
