@@ -135,7 +135,9 @@ def main() -> None:
     )
     print(
         f"qcc_state_bytes={int(report['qcc_bytes'])} full_kv_bytes={int(report['full_kv_bytes'])} "
-        f"state_fraction={report['state_fraction_percent']:.6f}% reduction={report['reduction']:.2f}x"
+        f"state_fraction={report['state_fraction_percent']:.6f}% reduction={report['reduction']:.2f}x "
+        f"under_0.5pct={report['state_fraction_percent'] <= 0.5} "
+        f"under_0.1pct={report['state_fraction_percent'] <= 0.1}"
     )
     if args.run:
         prefill, tpot, processed = run_stream(
