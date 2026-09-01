@@ -51,6 +51,18 @@ state. `archive_read_stride` additionally reuses the last remote response for
 intermediate decode steps; it is an approximation knob and currently applies
 to the token-at-a-time `decode_step` path.
 
+To measure the resulting logit drift rather than only wall time, run:
+
+```bash
+python benchmarks/benchmark_tradeoff.py --length 1024 --window-size 32 \
+  --num-codes 128 --active-codes 4 --strides 1,2,4,8
+```
+
+In one single-thread CPU run, stride 2/4/8 achieved `1.39x`/`1.38x`/`1.55x`
+relative latency with mean logit cosine `0.999225`/`0.998860`/`0.998646`.
+The exact numbers depend on model size and hardware; stride 1 is the reference
+and produces zero drift.
+
 `decode_step` maintains a persistent local/archive state and processes one
 token at a time. Use `--mode prefill` to benchmark the sequence-level path.
 
