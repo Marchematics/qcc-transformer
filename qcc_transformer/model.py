@@ -299,7 +299,7 @@ class QCCArchive(nn.Module):
 
         Rescaling is local to each block, avoiding underflow from ``rate **
         sequence_length`` while replacing one Python operation per token with
-        one operation per 256-token block.
+        one operation per configured ``scan_block_size`` block.
         """
 
         events = additions.shape[2]
