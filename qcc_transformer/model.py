@@ -1331,8 +1331,15 @@ class QCCForCausalLM(nn.Module):
             if rope_theta <= 0:
                 raise ValueError("rope_theta must be positive")
             self.position_embedding = None
+        elif position_encoding == "none":
+            # Content-only ablation for retrieval experiments.  Keeping this
+            # explicit avoids silently treating a missing positional module as
+            # a production-ready long-context policy.
+            self.position_embedding = None
         else:
-            raise ValueError("position_encoding must be 'sinusoidal', 'learned', or 'rope'")
+            raise ValueError(
+                "position_encoding must be 'sinusoidal', 'learned', 'rope', or 'none'"
+            )
         self.position_encoding = position_encoding
         self.layers = nn.ModuleList(
             QCCDecoderLayer(

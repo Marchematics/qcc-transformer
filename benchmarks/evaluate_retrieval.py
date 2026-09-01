@@ -175,7 +175,7 @@ def main() -> None:
     parser.add_argument("--num-codes", type=int, default=16)
     parser.add_argument(
         "--position-encoding",
-        choices=("sinusoidal", "learned", "rope"),
+        choices=("sinusoidal", "learned", "rope", "none"),
         default="sinusoidal",
     )
     parser.add_argument("--rope-theta", type=float, default=1_000_000.0)

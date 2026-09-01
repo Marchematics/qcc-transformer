@@ -220,7 +220,11 @@ def main() -> None:
     parser.add_argument("--max-examples", type=int)
     parser.add_argument("--retrieval-target", type=float, default=0.98)
     parser.add_argument("--quality-target", type=float, default=0.99)
-    parser.add_argument("--position-encoding", choices=("sinusoidal", "learned", "rope"), default="sinusoidal")
+    parser.add_argument(
+        "--position-encoding",
+        choices=("sinusoidal", "learned", "rope", "none"),
+        default="sinusoidal",
+    )
     parser.add_argument("--rope-theta", type=float, default=1_000_000.0)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--threads", type=int, default=None)

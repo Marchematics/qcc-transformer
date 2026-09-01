@@ -83,6 +83,8 @@ def train(
     batch_size: int,
     length: int,
     query_position: int,
+    query_min: int | None,
+    query_max: int | None,
     vocab_size: int,
     device: torch.device,
     lr: float,
@@ -98,10 +100,17 @@ def train(
     final_loss = float("nan")
     final_accuracy = float("nan")
     for step in range(1, steps + 1):
+        step_query_position = query_position
+        if query_min is not None or query_max is not None:
+            lower = query_min if query_min is not None else 2
+            upper = query_max if query_max is not None else length - 2
+            if not 2 <= lower <= upper <= length - 2:
+                raise ValueError("query range must lie in [2, train_length - 2]")
+            step_query_position = int(torch.randint(lower, upper + 1, ()).item())
         tokens, values = make_batch(
             batch_size,
             length,
-            query_position,
+            step_query_position,
             vocab_size,
             device=device,
         )
@@ -177,6 +186,8 @@ def main() -> None:
     parser.add_argument("--batch", type=int, default=32)
     parser.add_argument("--train-length", type=int, default=128)
     parser.add_argument("--query-position", type=int, default=96)
+    parser.add_argument("--query-min", type=int, default=None)
+    parser.add_argument("--query-max", type=int, default=None)
     parser.add_argument("--vocab-size", type=int, default=32)
     parser.add_argument("--d-model", type=int, default=32)
     parser.add_argument("--layers", type=int, default=1)
@@ -185,7 +196,11 @@ def main() -> None:
     parser.add_argument("--num-codes", type=int, default=16)
     parser.add_argument("--archive-scan-block-size", type=int, default=64)
     parser.add_argument("--max-position-embeddings", type=int, default=128_001)
-    parser.add_argument("--position-encoding", choices=("sinusoidal", "rope"), default="sinusoidal")
+    parser.add_argument(
+        "--position-encoding",
+        choices=("sinusoidal", "rope", "none"),
+        default="sinusoidal",
+    )
     parser.add_argument("--rope-theta", type=float, default=1_000_000.0)
     parser.add_argument("--lr", type=float, default=3e-3)
     parser.add_argument("--log-every", type=int, default=50)
@@ -216,6 +231,8 @@ def main() -> None:
         batch_size=args.batch,
         length=args.train_length,
         query_position=args.query_position,
+        query_min=args.query_min,
+        query_max=args.query_max,
         vocab_size=args.vocab_size,
         device=device,
         lr=args.lr,
