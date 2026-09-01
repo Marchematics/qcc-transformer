@@ -19,7 +19,10 @@ and lazy per-slot decay: an overcomplete bank is kept for capacity, while only
 the selected slots are touched at inference. This is best described as a
 **sparse multi-timescale learned-landmark memory**. It should not be described
 as exact global softmax attention, since each landmark/scale is normalized
-before the responses are mixed.
+before the responses are mixed. A separate serving knob (`archive_read_stride`)
+reuses a remote response for several consecutive queries while continuing to
+update the archive; this temporal read memoization is exposed as an
+approximation trade-off, not claimed as a new attention primitive.
 
 The current assessment is **proceed with caution**. A publishable contribution
 would need a matched recall/latency/memory Pareto comparison against Infini,

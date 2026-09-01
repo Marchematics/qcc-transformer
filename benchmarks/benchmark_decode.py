@@ -92,6 +92,7 @@ def timed_decode_chunk(
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--length", type=int, default=512)
+    parser.add_argument("--window-size", type=int, default=None)
     parser.add_argument("--warmup", type=int, default=1)
     parser.add_argument("--steps", type=int, default=3)
     parser.add_argument("--mode", choices=("decode", "prefill"), default="decode")
@@ -103,13 +104,16 @@ def main() -> None:
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
     device = torch.device(args.device)
+    window_size = args.window_size or min(128, args.length - 1)
+    if window_size <= 0:
+        raise ValueError("window-size must be positive and smaller than length")
     common = dict(
         vocab_size=4096,
         d_model=256,
         num_layers=2,
         num_heads=8,
         max_position_embeddings=max(args.length, 512),
-        window_size=min(128, args.length - 1),
+        window_size=window_size,
         num_codes=args.num_codes,
         active_codes=args.active_codes,
         lazy_decay=args.lazy_decay,
