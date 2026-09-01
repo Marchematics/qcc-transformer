@@ -48,6 +48,23 @@ Reference run (`--steps 200 --batch 8 --length 64 --dim 16 --codes 8`) reduced
 MSE from `0.056180` to `0.030020` (1.87x), while using 136 archive elements per
 head instead of 56 historical value positions per query step.
 
+For a minimal learned long-range check, run:
+
+```bash
+python benchmarks/benchmark_synthetic_lm.py --steps 100
+```
+
+This trains matched QCC and full-KV toy decoders on a random key-value recall
+task and reports loss/accuracy at the delayed query. It is a diagnostic for
+long-range information retention; it is not evidence of general language
+quality.
+
+One CPU run (`--steps 200 --batch 16 --length 32 --query-position 24
+--window 6 --d-model 24 --layers 1 --heads 4 --codes 4 --vocab 24`) reached
+held-out accuracy `1.000` for both QCC and full KV. Held-out loss was `0.001903`
+for QCC and `0.000617` for full KV, so this toy result shows retention but not
+parity on a real language distribution.
+
 The benchmark reports runtime only. It is not evidence of language-model quality. For a meaningful study, train matched small models and evaluate perplexity, Needle-in-a-Haystack, RULER, PG-19, cache memory, and decode TPOT at 32k+ context.
 
 On the reference CPU environment (PyTorch 2.9, one thread configuration not
