@@ -273,6 +273,7 @@ class QCCArchive(nn.Module):
                     rates,
                     self.window_size,
                     self._step,
+                    self.content_threshold,
                 )
                 return
         index_scales = indices.unsqueeze(-1).expand(-1, -1, -1, self.num_scales)
@@ -415,6 +416,7 @@ class QCCArchive(nn.Module):
                         self.active_codes,
                         block_size=self.scan_block_size,
                         output=output,
+                        content_threshold=self.content_threshold,
                     )
                     self._step += events
                     return output
@@ -447,6 +449,7 @@ class QCCArchive(nn.Module):
                     self.window_size,
                     block_size=self.scan_block_size,
                     output=output,
+                    content_threshold=self.content_threshold,
                 )
 
         # Sparse/lazy CUDA chunks and unsupported devices use the reference
