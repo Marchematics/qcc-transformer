@@ -149,6 +149,16 @@ fraction. These are QCC-only long-stream measurements: no Full-KV control was
 attempted at those lengths, and they do not establish the CUDA speedup or
 retrieval-quality gates.
 
+A matched default-configuration MPS audit (randomly initialized weights,
+`chunk_size=256`) is preserved in
+[`artifacts/local_mps/audit_8k_16k.json`](artifacts/local_mps/audit_8k_16k.json).
+At 16K, QCC prefill was `4.116 s` versus `4.507 s` for Full-KV (`1.095x`),
+while one-token TPOT was `16.23 ms` versus `4,012.18 ms` (`247.14x`). At 8K,
+the corresponding factors were `0.770x` prefill and `2.08x` TPOT. The large
+16K decode gap is an MPS matched-control observation, not evidence for the
+128K/1M CUDA gates; the 8K prefill slowdown also shows why both TTFT and TPOT
+must be reported separately.
+
 A smaller one-layer smoke configuration (`d_model=16`, two heads, four codes)
 also completed a 4M-token MPS stream in `51.57 s` with `91.70 ms` TPOT and a
 `0.003425%` state fraction. This demonstrates the out-of-core streaming path
@@ -297,7 +307,7 @@ available smoke evidence:
 | Full-KV quality | `0.9981–0.9990` logit cosine at 512–2,048 tokens | short-context only |
 | RULER @128K | no trained checkpoint/dataset in this checkout | missing |
 | Retrieval @1M | evaluator and gate exist; no scored checkpoint | missing |
-| TTFT/TPOT speedup | CPU scaling only; CUDA fused kernels are unbenchmarked here | missing |
+| TTFT/TPOT speedup | MPS matched control reaches `247.14x` TPOT at 16K; CUDA and 128K/1M TTFT remain unbenchmarked | short-context only |
 | FullAttention context @4M | hypothetical storage accounting only | configured, not executed |
 
 No row marked `missing` or `short-context only` should be reported as a
