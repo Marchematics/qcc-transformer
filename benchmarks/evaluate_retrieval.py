@@ -37,6 +37,8 @@ def _load_checkpoint(path: Path) -> dict[str, Any]:
             break
     if not payload or not all(isinstance(key, str) for key in payload):
         raise ValueError("checkpoint does not look like a PyTorch state dict")
+    if all(key.startswith("module.") for key in payload):
+        payload = {key.removeprefix("module."): value for key, value in payload.items()}
     return payload
 
 
@@ -115,11 +117,19 @@ def main() -> None:
     parser.add_argument("--heads", type=int, default=8)
     parser.add_argument("--window-size", type=int, default=128)
     parser.add_argument("--num-codes", type=int, default=16)
+    parser.add_argument(
+        "--position-encoding", choices=("sinusoidal", "learned"), default="sinusoidal"
+    )
     parser.add_argument("--max-position-embeddings", type=int, default=1_000_001)
     parser.add_argument("--chunk-size", type=int, default=256)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--max-examples", type=int, default=None)
     parser.add_argument("--target-accuracy", type=float, default=0.98)
+    parser.add_argument(
+        "--compare-full-kv",
+        action="store_true",
+        help="also evaluate a matched full-KV model (feasible only at modest context lengths)",
+    )
     args = parser.parse_args()
     if not 0.0 <= args.target_accuracy <= 1.0:
         raise ValueError("target-accuracy must be in [0, 1]")
@@ -132,8 +142,10 @@ def main() -> None:
         max_position_embeddings=args.max_position_embeddings,
         window_size=args.window_size,
         num_codes=args.num_codes,
+        position_encoding=args.position_encoding,
     ).to(device)
-    model.load_state_dict(_load_checkpoint(args.checkpoint), strict=True)
+    state_dict = _load_checkpoint(args.checkpoint)
+    model.load_state_dict(state_dict, strict=True)
     model.eval()
     correct, total = evaluate(
         model,
@@ -148,6 +160,36 @@ def main() -> None:
         f"retrieval_accuracy={accuracy:.6f} target={args.target_accuracy:.6f} "
         f"passed={accuracy >= args.target_accuracy}"
     )
+    if args.compare_full_kv:
+        full = QCCForCausalLM(
+            vocab_size=args.vocab_size,
+            d_model=args.d_model,
+            num_layers=args.layers,
+            num_heads=args.heads,
+            max_position_embeddings=args.max_position_embeddings,
+            # The baseline retains all positions up to the configured limit.
+            window_size=args.max_position_embeddings,
+            num_codes=args.num_codes,
+            position_encoding=args.position_encoding,
+            use_archive=False,
+        ).to(device)
+        full.load_state_dict(state_dict, strict=True)
+        full.eval()
+        full_correct, full_total = evaluate(
+            full,
+            args.dataset,
+            chunk_size=args.chunk_size,
+            device=device,
+            max_examples=args.max_examples,
+        )
+        full_accuracy = full_correct / full_total if full_total else 0.0
+        ratio = accuracy / full_accuracy if full_accuracy else 0.0
+        print(
+            f"full_kv_accuracy={full_accuracy:.6f} full_kv_correct={full_correct} "
+            f"quality_ratio={ratio:.6f} qcc_retained_fraction={accuracy / full_accuracy:.6f}"
+            if full_accuracy
+            else f"full_kv_accuracy={full_accuracy:.6f} full_kv_correct={full_correct} quality_ratio=nan"
+        )
 
 
 if __name__ == "__main__":
