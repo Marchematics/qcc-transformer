@@ -328,23 +328,31 @@ class QCCArchive(nn.Module):
     def _read_states(self, query: Tensor, numerator: Tensor, denominator: Tensor) -> Tensor:
         """Read one or many queries from explicit archive states."""
 
-        denom = denominator.clamp_min(1e-8)
-        response = numerator / denom.unsqueeze(-1)
-        mix = F.softmax(self.mix_logits, dim=-1).to(response.dtype)
-        response = torch.einsum("hmj,bhmjd->bhmd", mix, response)
         routing_logits = torch.einsum(
             "bhd,hmd->bhm", query.to(self.codes.dtype), self.codes
         ) / math.sqrt(self.head_dim)
         active = self.active_codes
         if active is None or active >= self.num_codes or torch.is_grad_enabled():
+            denom = denominator.clamp_min(1e-8)
+            response = numerator / denom.unsqueeze(-1)
+            mix = F.softmax(self.mix_logits, dim=-1).to(response.dtype)
+            response = torch.einsum("hmj,bhmjd->bhmd", mix, response)
             routing = F.softmax(routing_logits, dim=-1).to(response.dtype)
             return torch.einsum("bhm,bhmd->bhd", routing, response).to(query.dtype)
 
         values, indices = torch.topk(routing_logits, active, dim=-1)
-        routing = F.softmax(values, dim=-1).to(response.dtype)
-        selected = response.gather(
-            2, indices.unsqueeze(-1).expand(-1, -1, -1, self.head_dim)
+        index_scales = indices.unsqueeze(-1).expand(-1, -1, -1, self.num_scales)
+        selected_num = numerator.gather(
+            2, index_scales.unsqueeze(-1).expand(-1, -1, -1, -1, self.head_dim)
         )
+        selected_den = denominator.gather(2, index_scales)
+        selected = selected_num / selected_den.clamp_min(1e-8).unsqueeze(-1)
+        mix_logits = self.mix_logits.unsqueeze(0).expand(query.shape[0], -1, -1, -1).gather(
+            2, index_scales
+        )
+        mix = F.softmax(mix_logits, dim=-1).to(selected.dtype)
+        selected = (mix.unsqueeze(-1) * selected).sum(dim=3)
+        routing = F.softmax(values, dim=-1).to(selected.dtype)
         return (routing.unsqueeze(-1) * selected).sum(dim=2).to(query.dtype)
 
     @torch.no_grad()
@@ -381,23 +389,31 @@ class QCCArchive(nn.Module):
     def _read_states_chunk(self, query: Tensor, numerator: Tensor, denominator: Tensor) -> Tensor:
         """Read a query block from explicit archive states."""
 
-        denom = denominator.clamp_min(1e-8)
-        response = numerator / denom.unsqueeze(-1)
-        mix = F.softmax(self.mix_logits, dim=-1).to(response.dtype)
-        response = torch.einsum("hmj,bhemjd->bhemd", mix, response)
         routing_logits = torch.einsum(
             "bhed,hmd->bhem", query.to(self.codes.dtype), self.codes
         ) / math.sqrt(self.head_dim)
         active = self.active_codes
         if active is None or active >= self.num_codes:
+            denom = denominator.clamp_min(1e-8)
+            response = numerator / denom.unsqueeze(-1)
+            mix = F.softmax(self.mix_logits, dim=-1).to(response.dtype)
+            response = torch.einsum("hmj,bhemjd->bhemd", mix, response)
             routing = F.softmax(routing_logits, dim=-1).to(response.dtype)
             return torch.einsum("bhem,bhemd->bhed", routing, response).to(query.dtype)
 
         values, indices = torch.topk(routing_logits, active, dim=-1)
-        routing = F.softmax(values, dim=-1).to(response.dtype)
-        selected = response.gather(
-            3, indices.unsqueeze(-1).expand(-1, -1, -1, -1, self.head_dim)
+        index_scales = indices.unsqueeze(-1).expand(-1, -1, -1, -1, self.num_scales)
+        selected_num = numerator.gather(
+            3, index_scales.unsqueeze(-1).expand(-1, -1, -1, -1, -1, self.head_dim)
         )
+        selected_den = denominator.gather(3, index_scales)
+        selected = selected_num / selected_den.clamp_min(1e-8).unsqueeze(-1)
+        mix_logits = self.mix_logits.unsqueeze(0).unsqueeze(2).expand(
+            query.shape[0], -1, query.shape[2], -1, -1
+        ).gather(3, index_scales)
+        mix = F.softmax(mix_logits, dim=-1).to(selected.dtype)
+        selected = (mix.unsqueeze(-1) * selected).sum(dim=4)
+        routing = F.softmax(values, dim=-1).to(selected.dtype)
         return (routing.unsqueeze(-1) * selected).sum(dim=3).to(query.dtype)
 
     def read(self, query: Tensor) -> Tensor:

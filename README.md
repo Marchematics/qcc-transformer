@@ -156,8 +156,8 @@ language quality remain open experiments.
 
 As a separate CPU trade-off measurement, the sparse configuration above (512
 codes, top-4, lazy decay, read stride 8, window 32, one thread) measured
-`7.177 s` for QCC versus `11.907 s` for the full-KV control at 8,192 tokens
-(`1.66x`). Its bounded state was `1,146,880` elements versus `8,388,608`
+`7.018 s` for QCC versus `13.373 s` for the full-KV control at 8,192 tokens
+(`1.91x`). Its bounded state was `1,146,880` elements versus `8,388,608`
 full-KV elements (`7.31x` fewer), including logical timestamp slots. At 4,096
 tokens the same sparse family reached parity (`1.01x` in a two-step run), so
 the crossover is strongly context-length dependent. Latency is workload- and
