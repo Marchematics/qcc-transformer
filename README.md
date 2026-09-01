@@ -142,6 +142,13 @@ failed with a 16-GiB temporary-buffer allocation. These observations validate
 bounded execution and an OOM boundary on that machine; they are not CUDA or
 RULER results.
 
+With the default two-layer/256-wide configuration, the same MPS stream harness
+processed 128K tokens in `41.14 s` (`190.24 ms` TPOT) and 1M tokens in
+`324.96 s` (`134.61 ms` TPOT), while retaining the `0.016100%` 1M state
+fraction. These are QCC-only long-stream measurements: no Full-KV control was
+attempted at those lengths, and they do not establish the CUDA speedup or
+retrieval-quality gates.
+
 For million-token serving, the default `position_encoding="sinusoidal"` is
 stateless: configuring `max_position_embeddings=4_000_000` does not allocate a
 four-million-row learned position table. `archive_scan_block_size` controls the
