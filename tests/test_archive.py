@@ -484,6 +484,10 @@ def test_triton_update_and_read_match_reference() -> None:
     kwargs = dict(num_heads=2, head_dim=16, num_codes=4, decay_rates=(0.9, 0.97), window_size=3)
     reference = QCCArchive(**kwargs, use_triton=False).cuda()
     fused = QCCArchive(**kwargs, use_triton=True).cuda()
+    # Compare implementations under the same learned codebook/mix weights;
+    # constructing two archives after one seed otherwise gives independent
+    # random parameters and makes a valid kernel look numerically wrong.
+    fused.load_state_dict(reference.state_dict())
     keys = torch.randn(2, 2, 16, device="cuda")
     values = torch.randn_like(keys)
     query = torch.randn_like(keys)
@@ -513,6 +517,7 @@ def test_triton_sparse_lazy_matches_reference() -> None:
     )
     reference = QCCArchive(**kwargs, use_triton=False).cuda()
     fused = QCCArchive(**kwargs, use_triton=True).cuda()
+    fused.load_state_dict(reference.state_dict())
     keys = torch.randn(2, 2, 7, 16, device="cuda")
     values = torch.randn_like(keys)
     queries = torch.randn_like(keys)
@@ -539,6 +544,7 @@ def test_triton_fused_chunk_matches_reference() -> None:
     )
     reference = QCCArchive(**kwargs, use_triton=False).cuda()
     fused = QCCArchive(**kwargs, use_triton=True).cuda()
+    fused.load_state_dict(reference.state_dict())
     keys = torch.randn(2, 2, 13, 16, device="cuda")
     values = torch.randn_like(keys)
     queries = torch.randn_like(keys)
