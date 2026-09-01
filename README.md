@@ -175,6 +175,18 @@ The evaluator streams each record and reports whether the requested retrieval
 threshold was met. It requires a checkpoint and cannot silently turn an
 untrained model into a claimed RULER score.
 
+For a matched quality smoke test without a checkpoint, use the deterministic
+random-weight control (this measures logit fidelity, not language quality):
+
+```bash
+python benchmarks/benchmark_fullkv_quality.py \
+  --lengths 64,128,256 --chunk-size 32 --threads 1
+```
+
+One CPU run reported mean logit cosine `0.999338`, `0.998819`, and `0.998802`
+at 64/128/256 tokens (target `0.99`). Longer-context quality must be measured
+with trained weights and the retrieval evaluator above.
+
 To isolate archive learnability from language-model quality, run the synthetic
 teacher benchmark:
 
