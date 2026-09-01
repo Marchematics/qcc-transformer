@@ -481,6 +481,12 @@ class QCCArchive(nn.Module):
             content_weight = torch.exp(
                 (score / math.sqrt(dim)).clamp(min=-20.0, max=10.0)
             )
+            if self.content_threshold is not None:
+                content_weight = torch.where(
+                    score / math.sqrt(dim) >= self.content_threshold,
+                    content_weight,
+                    torch.zeros_like(content_weight),
+                )
             denominator_add = content_weight.unsqueeze(-1) * age.view(1, 1, 1, 1, -1)
             numerator_add = denominator_add.unsqueeze(-1) * block_value.to(state_dtype).unsqueeze(3).unsqueeze(4)
             denominator_states, state_den = self._parallel_decay_scan(
