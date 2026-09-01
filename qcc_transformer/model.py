@@ -176,6 +176,18 @@ class QCCArchive(nn.Module):
         if query.shape[0] != self._numerator.shape[0]:
             self.reset_state(query.shape[0], device=query.device)
 
+        if self.use_triton and not torch.is_grad_enabled() and query.is_cuda:
+            from .triton_kernels import TRITON_AVAILABLE, triton_read_archive
+
+            if TRITON_AVAILABLE:
+                return triton_read_archive(
+                    query,
+                    self._numerator,
+                    self._denominator,
+                    self.codes,
+                    self.mix_logits,
+                )
+
         denom = self._denominator.clamp_min(1e-8)
         response = self._numerator / denom.unsqueeze(-1)
         mix = F.softmax(self.mix_logits, dim=-1).to(response.dtype)
@@ -184,7 +196,7 @@ class QCCArchive(nn.Module):
             "bhd,hmd->bhm", query.to(self.codes.dtype), self.codes
         ) / math.sqrt(self.head_dim)
         routing = F.softmax(routing, dim=-1).to(response.dtype)
-        return torch.einsum("bhm,bhmd->bhd", routing, response)
+        return torch.einsum("bhm,bhmd->bhd", routing, response).to(query.dtype)
 
 
 class QCCSelfAttention(nn.Module):
