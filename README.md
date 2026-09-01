@@ -150,6 +150,20 @@ accounting results, not retrieval-quality or latency scores. On a CUDA device,
 add `--run --chunk-size 256` to stream a synthetic prompt and report prefill
 time plus one-token TPOT.
 
+For an actual retrieval-quality gate, use a trained checkpoint and JSONL
+records of the form `{"input_ids": [...], "target_position": 12345,
+"answers": [token_id]}`:
+
+```bash
+python benchmarks/evaluate_retrieval.py --dataset ruler_export.jsonl \
+  --checkpoint qcc.pt --vocab-size 32000 --max-position-embeddings 1000001 \
+  --chunk-size 256 --target-accuracy 0.98 --device cuda
+```
+
+The evaluator streams each record and reports whether the requested retrieval
+threshold was met. It requires a checkpoint and cannot silently turn an
+untrained model into a claimed RULER score.
+
 To isolate archive learnability from language-model quality, run the synthetic
 teacher benchmark:
 
