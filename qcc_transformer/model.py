@@ -85,6 +85,7 @@ class QCCArchive(nn.Module):
         lazy_decay: bool = False,
         scan_block_size: int = 256,
         content_threshold: Optional[float] = None,
+        persistent_landmark: bool = False,
     ) -> None:
         super().__init__()
         if num_heads <= 0 or head_dim <= 0 or num_codes <= 0:
@@ -120,6 +121,13 @@ class QCCArchive(nn.Module):
         # diluting a sparse retrieval signal.  ``None`` preserves the original
         # dense recurrence exactly.
         self.content_threshold = content_threshold
+        # Optional max-retained landmark slots.  Unlike the exponentially
+        # decayed response state, these slots keep the highest-salience value
+        # seen for each code indefinitely.  The mechanism is disabled by
+        # default so existing kernels/checkpoints retain their exact state.
+        self.persistent_landmark = persistent_landmark
+        if persistent_landmark:
+            self.landmark_mix_logits = nn.Parameter(torch.zeros(num_heads))
         self.register_buffer("decay_rates", rates, persistent=True)
         self.codes = nn.Parameter(torch.randn(num_heads, num_codes, head_dim) / math.sqrt(head_dim))
         self.mix_logits = nn.Parameter(torch.zeros(num_heads, num_codes, self.num_scales))
@@ -163,6 +171,122 @@ class QCCArchive(nn.Module):
             dtype=torch.long,
         )
         self._step = 0
+        if self.persistent_landmark:
+            self._landmark_score = torch.full(
+                (batch_size, self.num_heads, self.num_codes),
+                -torch.inf,
+                device=device,
+                dtype=state_dtype,
+            )
+            self._landmark_value = torch.zeros(
+                batch_size,
+                self.num_heads,
+                self.num_codes,
+                self.head_dim,
+                device=device,
+                dtype=state_dtype,
+            )
+
+    def _landmark_scores(self, key: Tensor) -> Tensor:
+        """Return per-code salience scores for landmark updates."""
+
+        codes = self.codes.to(device=key.device, dtype=self._numerator.dtype)
+        return torch.einsum(
+            "bhd,hmd->bhm", key.to(self._numerator.dtype), codes
+        ) / math.sqrt(self.head_dim)
+
+    def _update_landmark(self, key: Tensor, value: Tensor) -> None:
+        """Retain the highest-scoring value for every code."""
+
+        if not self.persistent_landmark:
+            return
+        score = self._landmark_scores(key)
+        if self.content_threshold is not None:
+            score = torch.where(
+                score >= self.content_threshold,
+                score,
+                torch.full_like(score, -torch.inf),
+            )
+        better = score > self._landmark_score
+        candidate = value.to(self._landmark_value.dtype).unsqueeze(2)
+        self._landmark_value = torch.where(
+            better.unsqueeze(-1), candidate, self._landmark_value
+        )
+        self._landmark_score = torch.where(
+            better, score, self._landmark_score
+        )
+
+    def _update_landmark_chunk(self, key: Tensor, value: Tensor) -> None:
+        """Vectorized landmark update for an evicted token block."""
+
+        if not self.persistent_landmark or key.shape[2] == 0:
+            return
+        scores = torch.einsum(
+            "bhed,hmd->bhem", key.to(self._numerator.dtype),
+            self.codes.to(device=key.device, dtype=self._numerator.dtype),
+        ) / math.sqrt(self.head_dim)
+        if self.content_threshold is not None:
+            scores = torch.where(
+                scores >= self.content_threshold,
+                scores,
+                torch.full_like(scores, -torch.inf),
+            )
+        best_score, best_index = scores.max(dim=2)
+        value_index = best_index.unsqueeze(-1).expand(
+            -1, -1, -1, self.head_dim
+        )
+        best_value = value.to(self._landmark_value.dtype).gather(2, value_index)
+        better = best_score > self._landmark_score
+        self._landmark_value = torch.where(
+            better.unsqueeze(-1), best_value, self._landmark_value
+        )
+        self._landmark_score = torch.where(
+            better, best_score, self._landmark_score
+        )
+
+    def _landmark_read(self, query: Tensor) -> tuple[Tensor, Tensor]:
+        """Read persistent landmarks and return output plus validity mask."""
+
+        if not self.persistent_landmark:
+            return torch.zeros_like(query), torch.zeros(
+                query.shape[:-1], dtype=torch.bool, device=query.device
+            )
+        codes = self.codes.to(device=query.device, dtype=self._numerator.dtype)
+        if query.ndim == 3:
+            routing_logits = torch.einsum(
+                "bhd,hmd->bhm", query.to(codes.dtype), codes
+            ) / math.sqrt(self.head_dim)
+            routing_equation = "bhm,bhmd->bhd"
+        elif query.ndim == 4:
+            routing_logits = torch.einsum(
+                "bhed,hmd->bhem", query.to(codes.dtype), codes
+            ) / math.sqrt(self.head_dim)
+            routing_equation = "bhem,bhemd->bhed"
+        else:
+            raise ValueError("query must have shape [batch, heads, dim] or [batch, heads, time, dim]")
+        routing = F.softmax(routing_logits, dim=-1).to(self._landmark_value.dtype)
+        values = torch.where(
+            torch.isfinite(self._landmark_score).unsqueeze(-1),
+            self._landmark_value,
+            torch.zeros_like(self._landmark_value),
+        )
+        response = torch.einsum(routing_equation, routing, values.unsqueeze(2) if query.ndim == 4 else values)
+        valid = torch.isfinite(self._landmark_score).any(dim=-1)
+        if query.ndim == 4:
+            valid = valid.unsqueeze(-1).expand(query.shape[:-1])
+        return response.to(query.dtype), valid
+
+    def _combine_landmark(self, query: Tensor, response: Tensor) -> Tensor:
+        """Blend sticky and exponentially decayed responses when enabled."""
+
+        if not self.persistent_landmark:
+            return response
+        landmark, valid = self._landmark_read(query)
+        mix = torch.sigmoid(self.landmark_mix_logits).to(response.dtype)
+        mix_shape = (1, -1, 1) if response.ndim == 3 else (1, -1, 1, 1)
+        mix = mix.view(*mix_shape)
+        mixed = (1.0 - mix) * response + mix * landmark
+        return torch.where(valid.unsqueeze(-1), mixed, response)
 
     @property
     def state(self) -> QCCState:
@@ -215,6 +339,7 @@ class QCCArchive(nn.Module):
         codes = self.codes.to(device=key.device, dtype=self._numerator.dtype)
         score = torch.einsum("bhd,hmd->bhm", key.to(self._numerator.dtype), codes)
         score = score / math.sqrt(self.head_dim)
+        self._update_landmark(key, value)
         # Clipping bounds the reference implementation. A fused kernel should
         # use per-code log rescaling instead of clipping for higher fidelity.
         content_weight = torch.exp(score.clamp(min=-20.0, max=10.0))
@@ -251,6 +376,7 @@ class QCCArchive(nn.Module):
         state_dtype = self._numerator.dtype
         codes = self.codes.to(device=key.device, dtype=state_dtype)
         scores = torch.einsum("bhd,hmd->bhm", key.to(state_dtype), codes)
+        self._update_landmark(key, value)
         values, indices = torch.topk(scores, self.active_codes, dim=-1)
         self._step += 1
         if (
@@ -391,6 +517,11 @@ class QCCArchive(nn.Module):
         if self._numerator.shape[0] != batch or self._numerator.device != key.device:
             self.reset_state(batch, device=key.device)
 
+        # Update sticky landmarks once per block before dispatching to the
+        # dense/sparse archive kernel.  This side state is tiny (one value per
+        # code) and therefore does not alter the O(1) memory bound.
+        self._update_landmark_chunk(key, value)
+
         if self.lazy_decay and self.use_triton and key.is_cuda:
             if self.active_codes is None:
                 raise RuntimeError("lazy_decay requires active_codes")
@@ -419,7 +550,7 @@ class QCCArchive(nn.Module):
                         content_threshold=self.content_threshold,
                     )
                     self._step += events
-                    return output
+                    return self._combine_landmark(query, output)
 
         if self.lazy_decay:
             outputs = []
@@ -437,7 +568,7 @@ class QCCArchive(nn.Module):
             from .triton_kernels import TRITON_AVAILABLE, triton_update_read_archive_chunk
 
             if TRITON_AVAILABLE:
-                return triton_update_read_archive_chunk(
+                result = triton_update_read_archive_chunk(
                     key,
                     value,
                     query,
@@ -451,6 +582,7 @@ class QCCArchive(nn.Module):
                     output=output,
                     content_threshold=self.content_threshold,
                 )
+                return self._combine_landmark(query, result)
 
         # Sparse/lazy CUDA chunks and unsupported devices use the reference
         # event path or block scan below.
@@ -524,7 +656,8 @@ class QCCArchive(nn.Module):
             )
             response = torch.einsum("hmj,bhmjd->bhmd", mix, response)
             routing = F.softmax(routing_logits, dim=-1).to(response.dtype)
-            return torch.einsum("bhm,bhmd->bhd", routing, response).to(query.dtype)
+            response = torch.einsum("bhm,bhmd->bhd", routing, response).to(query.dtype)
+            return self._combine_landmark(query, response)
 
         values, indices = torch.topk(routing_logits, active, dim=-1)
         index_scales = indices.unsqueeze(-1).expand(-1, -1, -1, self.num_scales)
@@ -539,7 +672,8 @@ class QCCArchive(nn.Module):
         mix = F.softmax(mix_logits, dim=-1).to(selected.dtype)
         selected = (mix.unsqueeze(-1) * selected).sum(dim=3)
         routing = F.softmax(values, dim=-1).to(selected.dtype)
-        return (routing.unsqueeze(-1) * selected).sum(dim=2).to(query.dtype)
+        response = (routing.unsqueeze(-1) * selected).sum(dim=2).to(query.dtype)
+        return self._combine_landmark(query, response)
 
     @torch.no_grad()
     def _lazy_read(self, query: Tensor) -> Tensor:
@@ -560,7 +694,7 @@ class QCCArchive(nn.Module):
             from .triton_kernels import TRITON_AVAILABLE, triton_sparse_read_archive
 
             if TRITON_AVAILABLE:
-                return triton_sparse_read_archive(
+                result = triton_sparse_read_archive(
                     query,
                     self._numerator,
                     self._denominator,
@@ -571,6 +705,14 @@ class QCCArchive(nn.Module):
                     values,
                     self.decay_rates,
                     self._step,
+                )
+                landmark, valid = self._landmark_read(query)
+                mix = torch.sigmoid(self.landmark_mix_logits).to(result.dtype)
+                return torch.where(
+                    valid.unsqueeze(-1),
+                    (1.0 - mix.view(1, -1, 1)) * result
+                    + mix.view(1, -1, 1) * landmark,
+                    result,
                 )
         index_scales = indices.unsqueeze(-1).expand(-1, -1, -1, self.num_scales)
         numerator = self._numerator.gather(
@@ -608,7 +750,8 @@ class QCCArchive(nn.Module):
             )
             response = torch.einsum("hmj,bhemjd->bhemd", mix, response)
             routing = F.softmax(routing_logits, dim=-1).to(response.dtype)
-            return torch.einsum("bhem,bhemd->bhed", routing, response).to(query.dtype)
+            response = torch.einsum("bhem,bhemd->bhed", routing, response).to(query.dtype)
+            return self._combine_landmark(query, response)
 
         values, indices = torch.topk(routing_logits, active, dim=-1)
         index_scales = indices.unsqueeze(-1).expand(-1, -1, -1, -1, self.num_scales)
@@ -623,7 +766,8 @@ class QCCArchive(nn.Module):
         mix = F.softmax(mix_logits, dim=-1).to(selected.dtype)
         selected = (mix.unsqueeze(-1) * selected).sum(dim=4)
         routing = F.softmax(values, dim=-1).to(selected.dtype)
-        return (routing.unsqueeze(-1) * selected).sum(dim=3).to(query.dtype)
+        response = (routing.unsqueeze(-1) * selected).sum(dim=3).to(query.dtype)
+        return self._combine_landmark(query, response)
 
     def read(self, query: Tensor) -> Tensor:
         """Read archive response for queries of shape ``[batch, heads, head_dim]``."""
@@ -648,13 +792,14 @@ class QCCArchive(nn.Module):
             from .triton_kernels import TRITON_AVAILABLE, triton_read_archive
 
             if TRITON_AVAILABLE:
-                return triton_read_archive(
+                result = triton_read_archive(
                     query,
                     self._numerator,
                     self._denominator,
                     self.codes,
                     self.mix_logits,
                 )
+                return self._combine_landmark(query, result)
 
         return self._read_states(query, self._numerator, self._denominator)
 
@@ -678,6 +823,7 @@ class QCCSelfAttention(nn.Module):
         archive_query_cosine_threshold: Optional[float] = None,
         archive_scan_block_size: int = 256,
         archive_content_threshold: Optional[float] = None,
+        archive_persistent_landmark: bool = False,
         rope_theta: Optional[float] = None,
         max_position_embeddings: int = 4096,
         decay_rates: Optional[tuple[float, ...]] = None,
@@ -739,6 +885,7 @@ class QCCSelfAttention(nn.Module):
             lazy_decay=lazy_decay,
             scan_block_size=archive_scan_block_size,
             content_threshold=archive_content_threshold,
+            persistent_landmark=archive_persistent_landmark,
         )
         self.archive_read_stride = archive_read_stride
         # Optional adaptive remote-read suppression. ``None`` keeps exact
@@ -1226,6 +1373,25 @@ class QCCSelfAttention(nn.Module):
             dtype=state_dtype,
         )
         archive_outputs: list[Tensor] = []
+        landmark_outputs: list[Tensor] = []
+        landmark_valid_outputs: list[Tensor] = []
+        landmark_score_state: Optional[Tensor] = None
+        landmark_value_state: Optional[Tensor] = None
+        if self.archive.persistent_landmark:
+            landmark_score_state = torch.full(
+                (bsz, self.num_heads, self.archive.num_codes),
+                -torch.inf,
+                device=hidden.device,
+                dtype=state_dtype,
+            )
+            landmark_value_state = torch.zeros(
+                bsz,
+                self.num_heads,
+                self.archive.num_codes,
+                self.head_dim,
+                device=hidden.device,
+                dtype=state_dtype,
+            )
         event_count = max(0, length - window)
         # The first ``window`` tokens are still in exact local KV and must not
         # enter the historical archive.  The inference path begins its archive
@@ -1280,9 +1446,71 @@ class QCCSelfAttention(nn.Module):
                     denominator_states,
                 )
             )
+            if self.archive.persistent_landmark:
+                assert landmark_score_state is not None and landmark_value_state is not None
+                landmark_scores = score
+                if self.archive.content_threshold is not None:
+                    landmark_scores = torch.where(
+                        landmark_scores >= self.archive.content_threshold,
+                        landmark_scores,
+                        torch.full_like(landmark_scores, -torch.inf),
+                    )
+                block_scores, block_indices = torch.cummax(landmark_scores, dim=2)
+                bsz_, heads_, block_len, codes_ = block_scores.shape
+                value_index = block_indices.unsqueeze(-1).expand(
+                    bsz_, heads_, block_len, codes_, self.head_dim
+                )
+                value_expanded = block_value.to(state_dtype).unsqueeze(3).expand(
+                    bsz_, heads_, block_len, codes_, self.head_dim
+                )
+                block_values = value_expanded.gather(2, value_index)
+                prior_scores = landmark_score_state.unsqueeze(2)
+                use_block = block_scores > prior_scores
+                running_scores = torch.where(use_block, block_scores, prior_scores)
+                prior_values = landmark_value_state.unsqueeze(2).expand(
+                    bsz_, heads_, block_len, codes_, self.head_dim
+                )
+                running_values = torch.where(
+                    use_block.unsqueeze(-1), block_values, prior_values
+                )
+                query_block = q[:, :, window + start : window + end]
+                landmark_routing = F.softmax(
+                    torch.einsum(
+                        "bhed,hmd->bhem", query_block.to(codes.dtype), codes
+                    )
+                    / math.sqrt(self.head_dim),
+                    dim=-1,
+                ).to(state_dtype)
+                landmark_outputs.append(
+                    torch.einsum(
+                        "bhem,bhemd->bhed", landmark_routing, running_values
+                    ).to(query_block.dtype)
+                )
+                landmark_valid_outputs.append(
+                    torch.isfinite(running_scores).any(dim=-1)
+                )
+                landmark_score_state = running_scores[:, :, -1]
+                landmark_value_state = running_values[:, :, -1]
         archive_out = torch.zeros_like(local_out)
         if archive_outputs:
             archive_out[:, :, window:] = torch.cat(archive_outputs, dim=2)
+        if landmark_outputs:
+            landmark_out = torch.zeros_like(local_out)
+            landmark_out[:, :, window:] = torch.cat(landmark_outputs, dim=2)
+            landmark_valid = torch.zeros(
+                (bsz, self.num_heads, length), device=hidden.device, dtype=torch.bool
+            )
+            landmark_valid[:, :, window:] = torch.cat(landmark_valid_outputs, dim=2)
+            landmark_mix = torch.sigmoid(self.archive.landmark_mix_logits).to(
+                archive_out.dtype
+            ).view(1, self.num_heads, 1, 1)
+            archive_out = torch.where(
+                landmark_valid.unsqueeze(-1),
+                (1.0 - landmark_mix) * archive_out + landmark_mix * landmark_out,
+                archive_out,
+            )
+            self.archive._landmark_score = landmark_score_state.detach()
+            self.archive._landmark_value = landmark_value_state.detach()
         gate = torch.sigmoid(self.gate(hidden)).transpose(1, 2).unsqueeze(-1)
         mixed_out = gate * local_out + (1.0 - gate) * archive_out
         active = (torch.arange(length, device=hidden.device) >= window).view(
@@ -1511,6 +1739,7 @@ class QCCForCausalLM(nn.Module):
         archive_query_cosine_threshold: Optional[float] = None,
         archive_scan_block_size: int = 256,
         archive_content_threshold: Optional[float] = None,
+        archive_persistent_landmark: bool = False,
         archive_decay_rates: Optional[tuple[float, ...]] = None,
     ) -> None:
         super().__init__()
@@ -1548,6 +1777,7 @@ class QCCForCausalLM(nn.Module):
                 archive_query_cosine_threshold=archive_query_cosine_threshold,
                 archive_scan_block_size=archive_scan_block_size,
                 archive_content_threshold=archive_content_threshold,
+                archive_persistent_landmark=archive_persistent_landmark,
                 rope_theta=rope_theta if position_encoding == "rope" else None,
                 max_position_embeddings=max_position_embeddings,
                 decay_rates=archive_decay_rates,

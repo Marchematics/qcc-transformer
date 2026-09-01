@@ -38,6 +38,32 @@ def test_archive_matches_exponential_response_for_single_code() -> None:
     torch.testing.assert_close(out, expected, rtol=1e-5, atol=1e-5)
 
 
+def test_persistent_landmark_survives_long_filler_updates() -> None:
+    archive = QCCArchive(
+        num_heads=1,
+        head_dim=2,
+        num_codes=1,
+        decay_rates=(0.8,),
+        window_size=2,
+        use_triton=False,
+        persistent_landmark=True,
+        content_threshold=0.5,
+    )
+    with torch.no_grad():
+        archive.codes.fill_(0.0)
+        archive.codes[..., 0] = 1.0
+        archive.landmark_mix_logits.fill_(20.0)
+    key = torch.tensor([[[1.0, 0.0]]])
+    value = torch.tensor([[[3.0, 4.0]]])
+    archive.update(key, value)
+    filler_key = torch.tensor([[[-1.0, 0.0]]])
+    filler_value = torch.tensor([[[-7.0, -8.0]]])
+    for _ in range(100):
+        archive.update(filler_key, filler_value)
+    out = archive.read(key)[0, 0]
+    torch.testing.assert_close(out, value[0, 0], rtol=1e-5, atol=1e-5)
+
+
 def test_model_forward_shapes_and_gradients() -> None:
     torch.manual_seed(1)
     model = QCCForCausalLM(

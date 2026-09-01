@@ -174,6 +174,7 @@ def main() -> None:
     parser.add_argument("--window-size", type=int, default=128)
     parser.add_argument("--num-codes", type=int, default=16)
     parser.add_argument("--archive-content-threshold", type=float, default=None)
+    parser.add_argument("--archive-persistent-landmark", action="store_true")
     parser.add_argument(
         "--position-encoding",
         choices=("sinusoidal", "learned", "rope", "none"),
@@ -205,6 +206,7 @@ def main() -> None:
         position_encoding=args.position_encoding,
         rope_theta=args.rope_theta,
         archive_content_threshold=args.archive_content_threshold,
+        archive_persistent_landmark=args.archive_persistent_landmark,
     ).to(device)
     state_dict = _load_checkpoint(args.checkpoint)
     model.load_state_dict(state_dict, strict=True)
