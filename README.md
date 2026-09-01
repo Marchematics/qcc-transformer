@@ -149,6 +149,13 @@ fraction. These are QCC-only long-stream measurements: no Full-KV control was
 attempted at those lengths, and they do not establish the CUDA speedup or
 retrieval-quality gates.
 
+A fresh default-configuration 128K audit is preserved in
+[`artifacts/local_mps/audit_128k_qcc_only.json`](artifacts/local_mps/audit_128k_qcc_only.json):
+the QCC-only prefill took `31.032 s` and the post-prefill one-token TPOT was
+`79.88 ms`. The artifact explicitly marks the Full-KV, retrieval, and quality
+fields as missing; it is an execution/state record rather than a long-context
+quality or speedup claim.
+
 A matched default-configuration MPS audit (randomly initialized weights,
 `chunk_size=256`) is preserved in
 [`artifacts/local_mps/audit_8k_16k.json`](artifacts/local_mps/audit_8k_16k.json).

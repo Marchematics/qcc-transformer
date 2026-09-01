@@ -1,0 +1,41 @@
+{
+  "config": {
+    "compare_full": false,
+    "device": "mps",
+    "lengths": [
+      128000
+    ],
+    "quality_lengths": [],
+    "run_latency": true
+  },
+  "elapsed_seconds": 31.247171958999388,
+  "latency": {
+    "128000": {
+      "full": {
+        "reason": "full-KV limit or --compare-full not set",
+        "status": "missing"
+      },
+      "qcc_prefill_seconds": 31.03155549999792,
+      "qcc_tpot_ms": 79.87833300285274
+    }
+  },
+  "quality": {},
+  "retrieval": {
+    "reason": "--checkpoint and --dataset are both required",
+    "status": "missing"
+  },
+  "state": {
+    "128000": {
+      "report": {
+        "full_kv_bytes": 524288000.0,
+        "full_kv_elements": 131072000.0,
+        "qcc_bytes": 659456.0,
+        "qcc_elements": 164864.0,
+        "reduction": 795.0310559006211,
+        "state_fraction_percent": 0.12578125
+      },
+      "under_0.1pct": false,
+      "under_0.5pct": true
+    }
+  }
+}
