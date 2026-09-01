@@ -180,7 +180,7 @@ class QCCArchive(nn.Module):
         bsz, heads, dim = key.shape
         if heads != self.num_heads or dim != self.head_dim:
             raise ValueError("key shape does not match archive configuration")
-        if self._numerator.shape[0] != bsz:
+        if self._numerator.shape[0] != bsz or self._numerator.device != key.device:
             self.reset_state(bsz, device=key.device)
 
         if self.lazy_decay and not torch.is_grad_enabled():
@@ -305,7 +305,7 @@ class QCCArchive(nn.Module):
         events = additions.shape[2]
         if events == 0:
             return additions, initial
-        block_size = 256
+        block_size = self.scan_block_size
         states: list[Tensor] = []
         state = initial
         for start in range(0, events, block_size):
@@ -343,7 +343,7 @@ class QCCArchive(nn.Module):
             raise ValueError("chunk shapes do not match archive configuration")
         if events == 0:
             return query.new_empty(query.shape)
-        if self._numerator.shape[0] != batch:
+        if self._numerator.shape[0] != batch or self._numerator.device != key.device:
             self.reset_state(batch, device=key.device)
 
         if self.lazy_decay and self.use_triton and key.is_cuda:
@@ -565,7 +565,10 @@ class QCCArchive(nn.Module):
 
         if query.ndim != 3 or query.shape[1:] != (self.num_heads, self.head_dim):
             raise ValueError("query must have shape [batch, heads, head_dim]")
-        if query.shape[0] != self._numerator.shape[0]:
+        if (
+            query.shape[0] != self._numerator.shape[0]
+            or query.device != self._numerator.device
+        ):
             self.reset_state(query.shape[0], device=query.device)
 
         if self.lazy_decay and not torch.is_grad_enabled():
@@ -857,7 +860,11 @@ class QCCSelfAttention(nn.Module):
         if hidden.ndim != 2 or hidden.shape[-1] != self.d_model:
             raise ValueError("hidden must have shape [batch, d_model]")
         bsz = hidden.shape[0]
-        if reset_cache or self.archive._numerator.shape[0] != bsz:
+        if (
+            reset_cache
+            or self.archive._numerator.shape[0] != bsz
+            or self.archive._numerator.device != hidden.device
+        ):
             self.reset_cache(bsz, device=hidden.device)
         q = self._split_heads(self.q_proj(hidden[:, None]))[:, :, 0]
         key = self._split_heads(self.k_proj(hidden[:, None]))[:, :, 0]
@@ -970,7 +977,11 @@ class QCCSelfAttention(nn.Module):
         bsz, length, _ = hidden.shape
         if length == 0:
             return hidden
-        if reset_cache or self.archive._numerator.shape[0] != bsz:
+        if (
+            reset_cache
+            or self.archive._numerator.shape[0] != bsz
+            or self.archive._numerator.device != hidden.device
+        ):
             self.reset_cache(bsz, device=hidden.device)
         q = self._split_heads(self.q_proj(hidden))
         k = self._split_heads(self.k_proj(hidden))
@@ -1172,7 +1183,11 @@ class QCCSelfAttention(nn.Module):
         q, k = self._apply_rope(q, k, position_ids)
         if not torch.is_grad_enabled():
             return self._forward_inference(hidden, q, k, v)
-        if reset_state or self.archive._numerator.shape[0] != bsz:
+        if (
+            reset_state
+            or self.archive._numerator.shape[0] != bsz
+            or self.archive._numerator.device != hidden.device
+        ):
             self.archive.reset_state(bsz, device=hidden.device)
 
         local_keys: list[Tensor] = []
