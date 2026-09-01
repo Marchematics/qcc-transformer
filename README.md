@@ -160,6 +160,11 @@ python benchmarks/evaluate_retrieval.py --dataset ruler_export.jsonl \
   --chunk-size 256 --target-accuracy 0.98 --device cuda
 ```
 
+For a feasible shorter-context quality control, append
+`--compare-full-kv`; it evaluates the same checkpoint with the full-KV control
+and reports the QCC/full accuracy ratio. Do not enable that option at 1M/4M
+unless the device can hold the deliberately unbounded baseline.
+
 The evaluator streams each record and reports whether the requested retrieval
 threshold was met. It requires a checkpoint and cannot silently turn an
 untrained model into a claimed RULER score.
