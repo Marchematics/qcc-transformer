@@ -1162,6 +1162,112 @@ class QCCSelfAttention(nn.Module):
         self._seen_tokens += length
         return self.out_proj(head_out.transpose(1, 2).reshape(bsz, length, self.d_model))
 
+    def _forward_train_chunked(self, hidden: Tensor, q: Tensor, k: Tensor, v: Tensor) -> Tensor:
+        """Differentiable bounded-memory path for long training sequences.
+
+        The original teacher path intentionally spells out one token at a time
+        so the recurrence is easy to inspect, but that makes a 128K training
+        example both launch-bound and prohibitively expensive to backpropagate
+        through.  This path keeps the same equations while scanning bounded
+        blocks: local attention uses a causal band mask and archive states use
+        :meth:`QCCArchive._parallel_decay_scan`, which is fully differentiable.
+        It is selected only on CUDA; the short CPU reference remains the
+        pedagogical implementation.
+        """
+
+        if not self.use_archive:
+            return self.out_proj(
+                F.scaled_dot_product_attention(q, k, v, is_causal=True)
+                .transpose(1, 2)
+                .reshape(hidden.shape[0], hidden.shape[1], self.d_model)
+            )
+        bsz, length, _ = hidden.shape
+        window = min(self.window_size, length)
+        block_size = self.archive.scan_block_size
+        local_outputs: list[Tensor] = []
+        for start in range(0, length, block_size):
+            end = min(length, start + block_size)
+            key_start = max(0, start - window + 1)
+            key_positions = torch.arange(key_start, end, device=hidden.device)
+            query_positions = torch.arange(start, end, device=hidden.device)
+            valid = (key_positions[None, :] <= query_positions[:, None]) & (
+                key_positions[None, :] >= query_positions[:, None] - window + 1
+            )
+            local_outputs.append(
+                F.scaled_dot_product_attention(
+                    q[:, :, start:end],
+                    k[:, :, key_start:end],
+                    v[:, :, key_start:end],
+                    attn_mask=valid,
+                    dropout_p=0.0,
+                )
+            )
+        local_out = torch.cat(local_outputs, dim=2)
+
+        state_dtype = self.archive._numerator.dtype
+        rates = self.archive.decay_rates.to(device=hidden.device, dtype=state_dtype)
+        codes = self.archive.codes.to(device=hidden.device, dtype=state_dtype)
+        age = rates.pow(self.window_size)
+        state_den = torch.zeros(
+            bsz,
+            self.num_heads,
+            self.archive.num_codes,
+            self.archive.num_scales,
+            device=hidden.device,
+            dtype=state_dtype,
+        )
+        state_num = torch.zeros(
+            bsz,
+            self.num_heads,
+            self.archive.num_codes,
+            self.archive.num_scales,
+            self.head_dim,
+            device=hidden.device,
+            dtype=state_dtype,
+        )
+        archive_outputs: list[Tensor] = []
+        for start in range(0, length, block_size):
+            end = min(length, start + block_size)
+            block_key = k[:, :, start:end]
+            block_value = v[:, :, start:end]
+            score = torch.einsum(
+                "bhed,hmd->bhem", block_key.to(state_dtype), codes
+            ) / math.sqrt(self.head_dim)
+            content_weight = torch.exp(score.clamp(min=-20.0, max=10.0))
+            if self.archive.content_threshold is not None:
+                content_weight = torch.where(
+                    score >= self.archive.content_threshold,
+                    content_weight,
+                    torch.zeros_like(content_weight),
+                )
+            denominator_add = content_weight.unsqueeze(-1) * age.view(1, 1, 1, 1, -1)
+            numerator_add = denominator_add.unsqueeze(-1) * block_value.to(
+                state_dtype
+            ).unsqueeze(3).unsqueeze(4)
+            denominator_states, state_den = self.archive._parallel_decay_scan(
+                denominator_add, state_den, rates
+            )
+            numerator_states, state_num = self.archive._parallel_decay_scan(
+                numerator_add, state_num, rates
+            )
+            archive_outputs.append(
+                self.archive._read_states_chunk(
+                    q[:, :, start:end], numerator_states, denominator_states
+                )
+            )
+        archive_out = torch.cat(archive_outputs, dim=2)
+        gate = torch.sigmoid(self.gate(hidden)).transpose(1, 2).unsqueeze(-1)
+        mixed_out = gate * local_out + (1.0 - gate) * archive_out
+        active = (torch.arange(length, device=hidden.device) >= window).view(
+            1, 1, length, 1
+        )
+        head_out = torch.where(active, mixed_out, local_out)
+        # Keep a detached snapshot for inspection without retaining the full
+        # sequence graph in the mutable streaming state.
+        self.archive._numerator = state_num.detach()
+        self.archive._denominator = state_den.detach()
+        return self.out_proj(head_out.transpose(1, 2).reshape(bsz, length, self.d_model))
+
     def _forward_inference(self, hidden: Tensor, q: Tensor, k: Tensor, v: Tensor) -> Tensor:
         """Vectorized local path used by evaluation/decode (no autograd)."""
 
@@ -1256,6 +1362,18 @@ class QCCSelfAttention(nn.Module):
         q, k = self._apply_rope(q, k, position_ids)
         if not torch.is_grad_enabled():
             return self._forward_inference(hidden, q, k, v)
+        if hidden.is_cuda and length > self.window_size:
+            # CUDA training uses the same bounded block equations as
+            # inference, but keeps the scan differentiable.  This avoids the
+            # O(sequence-length) Python/autograd loop for long retrieval
+            # curriculum examples.
+            if (
+                reset_state
+                or self.archive._numerator.shape[0] != bsz
+                or self.archive._numerator.device != hidden.device
+            ):
+                self.archive.reset_state(bsz, device=hidden.device)
+            return self._forward_train_chunked(hidden, q, k, v)
         if (
             reset_state
             or self.archive._numerator.shape[0] != bsz
