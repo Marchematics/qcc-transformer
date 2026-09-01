@@ -25,9 +25,6 @@ try:  # pragma: no cover - exercised only on a Triton-enabled GPU runner
         aged_rates_ptr,
         batch_size,
         num_heads,
-        num_codes,
-        num_scales,
-        head_dim,
         stride_nb,
         stride_nh,
         stride_nm,
@@ -46,15 +43,18 @@ try:  # pragma: no cover - exercised only on a Triton-enabled GPU runner
         stride_ch,
         stride_cm,
         BLOCK_D: tl.constexpr,
+        NUM_CODES: tl.constexpr,
+        NUM_SCALES: tl.constexpr,
+        HEAD_DIM: tl.constexpr,
     ):
         pid = tl.program_id(0)
-        codes_per_batch = num_heads * num_codes
+        codes_per_batch = num_heads * NUM_CODES
         batch = pid // codes_per_batch
         rem = pid % codes_per_batch
-        head = rem // num_codes
-        code_id = rem % num_codes
+        head = rem // NUM_CODES
+        code_id = rem % NUM_CODES
         offs_d = tl.arange(0, BLOCK_D)
-        mask_d = offs_d < head_dim
+        mask_d = offs_d < HEAD_DIM
 
         key = tl.load(
             key_ptr + batch * stride_kb + head * stride_kh + offs_d * stride_kd,
@@ -66,10 +66,10 @@ try:  # pragma: no cover - exercised only on a Triton-enabled GPU runner
             mask=mask_d,
             other=0.0,
         ).to(tl.float32)
-        score = tl.sum(key * code, axis=0) / tl.sqrt(tl.full((), head_dim, tl.float32))
+        score = tl.sum(key * code, axis=0) / tl.sqrt(tl.full((), HEAD_DIM, tl.float32))
         weight = tl.exp(tl.minimum(tl.maximum(score, -20.0), 10.0))
 
-        for scale in range(num_scales):
+        for scale in range(NUM_SCALES):
             rate = tl.load(rates_ptr + scale).to(tl.float32)
             aged_rate = tl.load(aged_rates_ptr + scale).to(tl.float32)
             den_offset = (
@@ -151,6 +151,9 @@ def triton_update_archive(
         *value.stride(),
         *codes.stride(),
         BLOCK_D=block_dim,
+        NUM_CODES=codes_count,
+        NUM_SCALES=scales,
+        HEAD_DIM=dim,
     )
     if numerator.data_ptr() != original_numerator.data_ptr():
         original_numerator.copy_(numerator)
