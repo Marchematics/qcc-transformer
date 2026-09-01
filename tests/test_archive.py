@@ -107,6 +107,37 @@ def test_persistent_decode_matches_sequence_forward() -> None:
     torch.testing.assert_close(streamed, sequence_logits, rtol=2e-4, atol=2e-4)
 
 
+@pytest.mark.parametrize("use_archive", [True, False])
+def test_decode_chunk_matches_token_stream(use_archive: bool) -> None:
+    torch.manual_seed(6)
+    model = QCCForCausalLM(
+        vocab_size=29,
+        d_model=24,
+        num_layers=2,
+        num_heads=4,
+        max_position_embeddings=32,
+        window_size=3 if use_archive else 32,
+        num_codes=4,
+        use_archive=use_archive,
+    ).eval()
+    tokens = torch.randint(0, 29, (2, 13))
+    with torch.no_grad():
+        model.reset_cache(tokens.shape[0])
+        token_logits = torch.stack(
+            [model.decode_step(tokens[:, t]) for t in range(tokens.shape[1])], dim=1
+        )
+        model.reset_cache(tokens.shape[0])
+        chunk_logits = torch.cat(
+            [
+                model.decode_chunk(tokens[:, :5], reset_cache=True),
+                model.decode_chunk(tokens[:, 5:9]),
+                model.decode_chunk(tokens[:, 9:]),
+            ],
+            dim=1,
+        )
+    torch.testing.assert_close(chunk_logits, token_logits, rtol=2e-4, atol=2e-4)
+
+
 def test_persistent_local_cache_never_exceeds_window() -> None:
     model = QCCForCausalLM(
         vocab_size=13,

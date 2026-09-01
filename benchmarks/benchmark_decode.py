@@ -62,12 +62,40 @@ def timed_decode(model: QCCForCausalLM, tokens: torch.Tensor, warmup: int, steps
     return (time.perf_counter() - start) / steps
 
 
+def timed_decode_chunk(
+    model: QCCForCausalLM,
+    tokens: torch.Tensor,
+    warmup: int,
+    steps: int,
+    chunk_size: int,
+) -> float:
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be positive")
+    model.eval()
+    with torch.no_grad():
+        for _ in range(warmup):
+            model.reset_cache(tokens.shape[0])
+            for start in range(0, tokens.shape[1], chunk_size):
+                model.decode_chunk(tokens[:, start : start + chunk_size])
+        if tokens.is_cuda:
+            torch.cuda.synchronize()
+        start_time = time.perf_counter()
+        for _ in range(steps):
+            model.reset_cache(tokens.shape[0])
+            for start in range(0, tokens.shape[1], chunk_size):
+                model.decode_chunk(tokens[:, start : start + chunk_size])
+        if tokens.is_cuda:
+            torch.cuda.synchronize()
+    return (time.perf_counter() - start_time) / steps
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--length", type=int, default=512)
     parser.add_argument("--warmup", type=int, default=1)
     parser.add_argument("--steps", type=int, default=3)
     parser.add_argument("--mode", choices=("decode", "prefill"), default="decode")
+    parser.add_argument("--chunk-size", type=int, default=1)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
     device = torch.device(args.device)
@@ -83,11 +111,17 @@ def main() -> None:
     tokens = torch.randint(0, common["vocab_size"], (1, args.length), device=device)
     qcc = QCCForCausalLM(**common).to(device)
     full = FullAttentionBaseline(**common).to(device)
-    timer = timed_decode if args.mode == "decode" else timed_prefill
-    qcc_time = timer(qcc, tokens, args.warmup, args.steps)
-    full_time = timer(full, tokens, args.warmup, args.steps)
+    if args.mode == "prefill":
+        qcc_time = timed_prefill(qcc, tokens, args.warmup, args.steps)
+        full_time = timed_prefill(full, tokens, args.warmup, args.steps)
+    elif args.chunk_size == 1:
+        qcc_time = timed_decode(qcc, tokens, args.warmup, args.steps)
+        full_time = timed_decode(full, tokens, args.warmup, args.steps)
+    else:
+        qcc_time = timed_decode_chunk(qcc, tokens, args.warmup, args.steps, args.chunk_size)
+        full_time = timed_decode_chunk(full, tokens, args.warmup, args.steps, args.chunk_size)
     print(f"device={device} length={args.length}")
-    print(f"mode={args.mode} qcc_seconds={qcc_time:.4f} full_seconds={full_time:.4f} speedup={full_time / qcc_time:.2f}x")
+    print(f"mode={args.mode} chunk_size={args.chunk_size} qcc_seconds={qcc_time:.4f} full_seconds={full_time:.4f} speedup={full_time / qcc_time:.2f}x")
     archive_elements = sum(
         layer.attention.archive.num_heads
         * layer.attention.archive.num_codes

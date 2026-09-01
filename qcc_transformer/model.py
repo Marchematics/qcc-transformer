@@ -168,6 +168,93 @@ class QCCArchive(nn.Module):
             self._denominator.mul_(denominator_decay).add_(denominator_add)
             self._numerator.mul_(numerator_decay).add_(numerator_add)
 
+    def _parallel_decay_scan(
+        self, additions: Tensor, initial: Tensor, rates: Tensor
+    ) -> tuple[Tensor, Tensor]:
+        """Scan ``state[t] = rates * state[t-1] + additions[t]`` in blocks.
+
+        Rescaling is local to each block, avoiding underflow from ``rate **
+        sequence_length`` while replacing one Python operation per token with
+        one operation per 256-token block.
+        """
+
+        events = additions.shape[2]
+        if events == 0:
+            return additions, initial
+        block_size = 256
+        states: list[Tensor] = []
+        state = initial
+        for start in range(0, events, block_size):
+            block = additions[:, :, start : start + block_size]
+            block_length = block.shape[2]
+            powers = rates.view(1, -1).pow(
+                torch.arange(1, block_length + 1, device=additions.device).view(-1, 1)
+            )
+            if additions.ndim == 5:
+                powers_view = powers.view(1, 1, block_length, 1, -1)
+            else:
+                powers_view = powers.view(1, 1, block_length, 1, -1, 1)
+            scaled = block / powers_view
+            cumulative = torch.cumsum(scaled, dim=2)
+            state_view = state.unsqueeze(2)
+            block_states = powers_view * (state_view + cumulative)
+            states.append(block_states)
+            state = block_states[:, :, -1]
+        return torch.cat(states, dim=2), state
+
+    @torch.no_grad()
+    def update_read_chunk(self, key: Tensor, value: Tensor, query: Tensor) -> Tensor:
+        """Update and read a sequence of evicted tokens with a block scan.
+
+        Inputs are ``[batch, heads, events, head_dim]`` and the returned
+        archive responses have the same leading dimensions as ``query``.
+        ``step_chunk`` calls this only in inference mode; the differentiable
+        reference remains the single-token ``update``/``read`` pair.
+        """
+
+        if key.ndim != 4 or value.shape != key.shape or query.shape != key.shape:
+            raise ValueError("key, value, and query must have shape [batch, heads, events, head_dim]")
+        batch, heads, events, dim = key.shape
+        if heads != self.num_heads or dim != self.head_dim:
+            raise ValueError("chunk shapes do not match archive configuration")
+        if events == 0:
+            return query.new_empty(query.shape)
+        if self._numerator.shape[0] != batch:
+            self.reset_state(batch, device=key.device)
+
+        # Preserve the fused path on CUDA; CPU and unsupported devices use the
+        # block scan to remove one Python loop iteration per token.
+        if self.use_triton and key.is_cuda:
+            for index in range(events):
+                self.update(key[:, :, index], value[:, :, index])
+            return torch.stack(
+                [self.read(query[:, :, index]) for index in range(events)], dim=2
+            )
+
+        state_dtype = self._numerator.dtype
+        rates = self.decay_rates.to(device=key.device, dtype=state_dtype)
+        codes = self.codes.to(device=key.device, dtype=state_dtype)
+        score = torch.einsum("bhed,hmd->bhem", key.to(state_dtype), codes)
+        content_weight = torch.exp((score / math.sqrt(dim)).clamp(min=-20.0, max=10.0))
+        age = rates.pow(self.window_size)
+        denominator_add = content_weight.unsqueeze(-1) * age.view(1, 1, 1, 1, -1)
+        numerator_add = denominator_add.unsqueeze(-1) * value.to(state_dtype).unsqueeze(3).unsqueeze(4)
+        denominator_states, denominator_final = self._parallel_decay_scan(
+            denominator_add, self._denominator, rates
+        )
+        numerator_states, numerator_final = self._parallel_decay_scan(
+            numerator_add, self._numerator, rates
+        )
+        self._denominator = denominator_final
+        self._numerator = numerator_final
+
+        normalized = numerator_states / denominator_states.clamp_min(1e-8).unsqueeze(-1)
+        mix = F.softmax(self.mix_logits, dim=-1).to(normalized.dtype)
+        response = torch.einsum("hmj,bhemjd->bhemd", mix, normalized)
+        routing = torch.einsum("bhed,hmd->bhem", query.to(codes.dtype), codes)
+        routing = F.softmax(routing / math.sqrt(dim), dim=-1).to(response.dtype)
+        return torch.einsum("bhem,bhemd->bhed", routing, response).to(query.dtype)
+
     def read(self, query: Tensor) -> Tensor:
         """Read archive response for queries of shape ``[batch, heads, head_dim]``."""
 
@@ -257,6 +344,34 @@ class QCCSelfAttention(nn.Module):
         self._cache_length = 0
         self._seen_tokens = 0
 
+    def _ordered_ring(self) -> tuple[Tensor, Tensor]:
+        """Return valid ring contents in chronological order."""
+
+        if self._local_key_cache is None:
+            raise RuntimeError("local cache is not initialized")
+        assert self._local_value_cache is not None
+        if self._cache_length == 0:
+            return self._local_key_cache[:, :, :0], self._local_value_cache[:, :, :0]
+        if self._cache_start == 0:
+            return (
+                self._local_key_cache[:, :, : self._cache_length],
+                self._local_value_cache[:, :, : self._cache_length],
+            )
+        return (
+            torch.cat(
+                (
+                    self._local_key_cache[:, :, self._cache_start : self._cache_length],
+                    self._local_key_cache[:, :, : self._cache_start],
+                ), dim=2
+            ),
+            torch.cat(
+                (
+                    self._local_value_cache[:, :, self._cache_start : self._cache_length],
+                    self._local_value_cache[:, :, : self._cache_start],
+                ), dim=2
+            ),
+        )
+
     def step(self, hidden: Tensor, *, reset_cache: bool = False) -> Tensor:
         """Decode one token with bounded local KV plus recurrent archive state.
 
@@ -298,9 +413,24 @@ class QCCSelfAttention(nn.Module):
             self._local_values.append(value)
             local_keys = torch.stack(self._local_keys, dim=2)
             local_values = torch.stack(self._local_values, dim=2)
-        local_logits = torch.einsum("bhd,bhld->bhl", q, local_keys) / math.sqrt(self.head_dim)
-        local_prob = F.softmax(local_logits, dim=-1)
-        local_out = torch.einsum("bhl,bhld->bhd", local_prob, local_values)
+        if self.use_archive:
+            local_logits = torch.einsum("bhd,bhld->bhl", q, local_keys) / math.sqrt(self.head_dim)
+            local_prob = F.softmax(local_logits, dim=-1)
+            local_out = torch.einsum("bhl,bhld->bhd", local_prob, local_values)
+        else:
+            # Use the same fused SDPA primitive as the block path for an honest
+            # full-KV serving baseline. All cached keys are valid for this
+            # single query because they precede (or equal) the current token.
+            valid = torch.ones(
+                (1, local_keys.shape[2]), device=hidden.device, dtype=torch.bool
+            )
+            local_out = F.scaled_dot_product_attention(
+                q.unsqueeze(2),
+                local_keys,
+                local_values,
+                attn_mask=valid,
+                dropout_p=0.0,
+            ).squeeze(2)
         if self.use_archive and self._seen_tokens >= self.window_size:
             archive_out = self.archive.read(q)
             gate = torch.sigmoid(self.gate(hidden)).unsqueeze(-1)
@@ -309,6 +439,108 @@ class QCCSelfAttention(nn.Module):
             head_out = local_out
         self._seen_tokens += 1
         return self.out_proj(head_out.reshape(bsz, self.d_model))
+
+    @torch.no_grad()
+    def step_chunk(self, hidden: Tensor, *, reset_cache: bool = False) -> Tensor:
+        """Decode a causal block while preserving the persistent cache.
+
+        Projections and local attention are vectorized over the block. Archive
+        writes/reads remain ordered because each position may evict a different
+        historical slot.
+        """
+
+        if hidden.ndim != 3 or hidden.shape[-1] != self.d_model:
+            raise ValueError("hidden must have shape [batch, sequence, d_model]")
+        bsz, length, _ = hidden.shape
+        if length == 0:
+            return hidden
+        if reset_cache or self.archive._numerator.shape[0] != bsz:
+            self.reset_cache(bsz, device=hidden.device)
+        q = self._split_heads(self.q_proj(hidden))
+        k = self._split_heads(self.k_proj(hidden))
+        v = self._split_heads(self.v_proj(hidden))
+
+        if self.use_archive:
+            if self._local_key_cache is None:
+                shape = (bsz, self.num_heads, self.window_size, self.head_dim)
+                self._local_key_cache = torch.empty(shape, device=k.device, dtype=k.dtype)
+                self._local_value_cache = torch.empty(shape, device=v.device, dtype=v.dtype)
+            old_k, old_v = self._ordered_ring()
+        else:
+            old_k = torch.stack(self._local_keys, dim=2) if self._local_keys else k[:, :, :0]
+            old_v = torch.stack(self._local_values, dim=2) if self._local_values else v[:, :, :0]
+
+        old_length = old_k.shape[2]
+        combined_k = torch.cat((old_k, k), dim=2)
+        combined_v = torch.cat((old_v, v), dim=2)
+        total_length = combined_k.shape[2]
+
+        if not self.use_archive:
+            # The full-KV control uses PyTorch's fused SDPA with a causal mask
+            # offset by the already-cached prefix. This avoids materializing a
+            # quadratic [query, key, head_dim] window in the control itself.
+            key_positions = torch.arange(total_length, device=hidden.device)
+            query_positions = old_length + torch.arange(length, device=hidden.device)
+            causal_mask = key_positions[None, :] <= query_positions[:, None]
+            head_out = F.scaled_dot_product_attention(
+                q,
+                combined_k,
+                combined_v,
+                attn_mask=causal_mask,
+                dropout_p=0.0,
+            )
+            self._local_keys.extend(k[:, :, t] for t in range(length))
+            self._local_values.extend(v[:, :, t] for t in range(length))
+            self._seen_tokens += length
+            return self.out_proj(
+                head_out.transpose(1, 2).reshape(bsz, length, self.d_model)
+            )
+
+        window = self.window_size if self.use_archive else total_length
+        k_pad = F.pad(combined_k.transpose(-1, -2), (window - 1, 0))
+        v_pad = F.pad(combined_v.transpose(-1, -2), (window - 1, 0))
+        k_windows = k_pad.unfold(-1, window, 1).permute(0, 1, 3, 4, 2)
+        v_windows = v_pad.unfold(-1, window, 1).permute(0, 1, 3, 4, 2)
+        positions = old_length + torch.arange(length, device=hidden.device)
+        local_k = k_windows[:, :, positions]
+        local_v = v_windows[:, :, positions]
+        local_logits = torch.einsum("bhtd,bhtwd->bhtw", q, local_k) / math.sqrt(self.head_dim)
+        valid = torch.arange(window, device=hidden.device)[None, :] >= (
+            window - 1 - positions[:, None]
+        )
+        local_logits = local_logits.masked_fill(
+            ~valid[None, None], torch.finfo(local_logits.dtype).min
+        )
+        local_prob = F.softmax(local_logits, dim=-1)
+        local_out = torch.einsum("bhtw,bhtwd->bhtd", local_prob, local_v)
+
+        if self.use_archive:
+            archive_out = torch.zeros_like(local_out)
+            event_start = max(0, self.window_size - old_length)
+            event_count = length - event_start
+            if event_count > 0:
+                evicted_k = combined_k[:, :, :event_count]
+                evicted_v = combined_v[:, :, :event_count]
+                archive_out[:, :, event_start:] = self.archive.update_read_chunk(
+                    evicted_k, evicted_v, q[:, :, event_start:]
+                )
+            gate = torch.sigmoid(self.gate(hidden)).transpose(1, 2).unsqueeze(-1)
+            mixed_out = gate * local_out + (1.0 - gate) * archive_out
+            active = (
+                self._seen_tokens + torch.arange(length, device=hidden.device)
+                >= self.window_size
+            ).view(1, 1, length, 1)
+            head_out = torch.where(active, mixed_out, local_out)
+            keep = min(self.window_size, total_length)
+            assert self._local_key_cache is not None and self._local_value_cache is not None
+            self._local_key_cache.zero_()
+            self._local_value_cache.zero_()
+            self._local_key_cache[:, :, :keep] = combined_k[:, :, -keep:]
+            self._local_value_cache[:, :, :keep] = combined_v[:, :, -keep:]
+            self._cache_start = 0
+            self._cache_length = keep
+        self._seen_tokens += length
+        return self.out_proj(head_out.transpose(1, 2).reshape(bsz, length, self.d_model))
 
     def _forward_inference(self, hidden: Tensor, q: Tensor, k: Tensor, v: Tensor) -> Tensor:
         """Vectorized local path used by evaluation/decode (no autograd)."""
@@ -403,6 +635,10 @@ class QCCDecoderLayer(nn.Module):
         x = x + self.attention(self.norm1(x), reset_state=reset_state)
         return x + self.mlp(self.norm2(x))
 
+    def step_chunk(self, x: Tensor, *, reset_cache: bool = False) -> Tensor:
+        x = x + self.attention.step_chunk(self.norm1(x), reset_cache=reset_cache)
+        return x + self.mlp(self.norm2(x))
+
     def step(self, x: Tensor, *, reset_cache: bool = False) -> Tensor:
         x = x + self.attention.step(self.norm1(x), reset_cache=reset_cache)
         return x + self.mlp(self.norm2(x))
@@ -463,6 +699,7 @@ class QCCForCausalLM(nn.Module):
         for layer in self.layers:
             layer.attention.reset_cache(batch_size, device=self.token_embedding.weight.device)
         self._cache_position = 0
+        self._cache_batch_size = batch_size
 
     @torch.no_grad()
     def decode_step(self, input_ids: Tensor, *, reset_cache: bool = False) -> Tensor:
@@ -488,6 +725,36 @@ class QCCForCausalLM(nn.Module):
         for layer in self.layers:
             x = layer.step(x)
         self._cache_position += 1
+        return self.lm_head(self.norm(x))
+
+    @torch.no_grad()
+    def decode_chunk(self, input_ids: Tensor, *, reset_cache: bool = False) -> Tensor:
+        """Return logits for a token block using persistent bounded caches."""
+
+        if input_ids.ndim != 2:
+            raise ValueError("decode_chunk input_ids must have shape [batch, sequence]")
+        bsz, length = input_ids.shape
+        if length == 0:
+            return input_ids.new_empty(
+                (bsz, 0, self.lm_head.out_features), dtype=self.lm_head.weight.dtype
+            )
+        if self._cache_position + length > self.max_position_embeddings:
+            raise ValueError("decode positions exceed max_position_embeddings")
+        cache_batch = getattr(self, "_cache_batch_size", None)
+        if reset_cache or self._cache_position == 0 or cache_batch != bsz:
+            for layer in self.layers:
+                layer.attention.reset_cache(bsz, device=input_ids.device)
+            self._cache_position = 0
+            self._cache_batch_size = bsz
+        positions = torch.arange(
+            self._cache_position,
+            self._cache_position + length,
+            device=input_ids.device,
+        ).unsqueeze(0)
+        x = self.token_embedding(input_ids) + self.position_embedding(positions)
+        for layer in self.layers:
+            x = layer.step_chunk(x)
+        self._cache_position += length
         return self.lm_head(self.norm(x))
 
 

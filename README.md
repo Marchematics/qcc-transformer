@@ -30,6 +30,9 @@ pytest
 python benchmarks/benchmark_decode.py --length 512 --mode decode --warmup 1 --steps 3
 ```
 
+For block serving, set `--chunk-size 16` (or another positive block length) to
+use the vectorized persistent `decode_chunk` API.
+
 `decode_step` maintains a persistent local/archive state and processes one
 token at a time. Use `--mode prefill` to benchmark the sequence-level path.
 
@@ -43,11 +46,13 @@ The script reports per-length timings and log-log slopes. A slope near 1 for
 QCC and near 2 for full KV is the expected bounded-state versus quadratic
 scaling signature; actual values depend on hardware and kernel implementation.
 
-Single-thread CPU reference run (`256,512,1024,2048`, warmup 1, steps 2) gave
-QCC/full timings of `0.194/0.151`, `0.465/0.403`, `0.972/1.237`, and
-`2.007/6.383` seconds. The fitted slopes were `1.118` (QCC) and `1.781` (full
-KV). The fixed archive overhead dominates short contexts, while the bounded
-path becomes faster as history grows.
+Single-thread CPU reference run (`256,512,1024,2048`, warmup 1, steps 1)
+against the same fused SDPA primitive for the full-KV control gave QCC/full
+timings of `0.188/0.149`, `0.490/0.378`, `1.007/1.173`, and `2.426/5.005`
+seconds. The fitted slopes were `1.212` (QCC) and `1.686` (full KV). The fixed
+archive overhead dominates short contexts, while the bounded path becomes
+faster as history grows. These are single-run CPU measurements, not a
+hardware-independent speedup claim.
 
 To isolate archive learnability from language-model quality, run the synthetic
 teacher benchmark:
@@ -100,20 +105,18 @@ parity on a real language distribution.
 
 The benchmark reports runtime only. It is not evidence of language-model quality. For a meaningful study, train matched small models and evaluate perplexity, Needle-in-a-Haystack, RULER, PG-19, cache memory, and decode TPOT at 32k+ context.
 
-On the reference CPU environment (PyTorch 2.9, one thread configuration not
-fixed), the persistent decode benchmark measured:
+On the reference CPU environment (PyTorch 2.9.1, four threads), a persistent
+decode benchmark with the fused SDPA full-KV control measured:
 
 | Tokens | QCC | Full KV | Relative |
 |---:|---:|---:|---:|
-| 1,024 | 2.20 s | 2.33 s | 1.06x |
-| 2,048 | 3.09 s | 9.36 s | 3.03x |
-| 4,096 | 5.88 s | 39.49 s | 6.71x |
+| 1,024 | 2.804 s | 2.190 s | 0.78x |
+| 2,048 | 4.264 s | 6.972 s | 1.64x |
 
 At 1,024 tokens in this configuration, the bounded QCC state contains
-164,864 elements versus 1,048,576 full-KV elements (6.36x fewer). At 2,048 and
-4,096 tokens the reductions are 12.72x and 25.44x. The ratio continues to grow
-linearly with context length because the QCC archive and local window are
-bounded.
+164,864 elements versus 1,048,576 full-KV elements (6.36x fewer). At 2,048
+tokens the reduction is 12.72x. The ratio continues to grow linearly with
+context length because the QCC archive and local window are bounded.
 
 These numbers are implementation evidence for the bounded-history trend, not
 a claim of a universal speedup. GPU results, batch scaling, kernel fusion, and
