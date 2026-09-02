@@ -235,7 +235,16 @@ def main() -> None:
             archive_content_threshold=args.archive_content_threshold,
             use_archive=False,
         ).to(device)
-        full.load_state_dict(state_dict, strict=True)
+        # Full-KV attention keeps the same projection/LM weights but does not
+        # instantiate the optional persistent-landmark blend parameter.  Drop
+        # only that archive-only key; strict loading remains enabled for every
+        # parameter shared by both models.
+        full_state_dict = {
+            key: value
+            for key, value in state_dict.items()
+            if not key.endswith("archive.landmark_mix_logits")
+        }
+        full.load_state_dict(full_state_dict, strict=True)
         full.eval()
         correct, full_correct, total, mean_cosine = evaluate_pair(
             model,
