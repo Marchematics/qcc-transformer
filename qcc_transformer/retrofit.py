@@ -27,6 +27,43 @@ from torch import Tensor, nn
 from .model import QCCSelfAttention
 
 
+def _hf_rope_kwargs(config: Any, max_position_embeddings: int) -> dict[str, Any]:
+    """Extract HF RoPE frequencies, including Phi3/Phi4 LongRoPE.
+
+    The optional transformers utility is used only at retrofit time; the core
+    QCC package remains dependency-free.  If a model/version does not expose
+    the utility, the caller safely falls back to the scalar ``rope_theta``
+    path used by Llama/Qwen.
+    """
+    result: dict[str, Any] = {}
+    scaling = getattr(config, "rope_scaling", None)
+    if not isinstance(scaling, dict):
+        return result
+    try:
+        from transformers.modeling_rope_utils import ROPE_INIT_FUNCTIONS
+
+        rope_type = scaling.get("rope_type", scaling.get("type", "default"))
+        init_fn = ROPE_INIT_FUNCTIONS.get(rope_type)
+        if init_fn is None:
+            return result
+        cpu = torch.device("cpu")
+        short_freq, attention_scaling = init_fn(config, device=cpu, seq_len=None)
+        long_freq, _ = init_fn(config, device=cpu, seq_len=max_position_embeddings)
+        result["rope_inv_freq"] = short_freq
+        if rope_type == "longrope":
+            result["rope_inv_freq_long"] = long_freq
+            result["rope_original_max_position_embeddings"] = int(
+                getattr(config, "original_max_position_embeddings", max_position_embeddings)
+            )
+        result["rope_attention_scaling"] = float(attention_scaling)
+        partial = float(getattr(config, "partial_rotary_factor", 1.0))
+        head_dim = int(getattr(config, "head_dim", config.hidden_size // config.num_attention_heads))
+        result["rotary_dim"] = int(head_dim * partial) // 2 * 2
+    except (ImportError, AttributeError, KeyError, TypeError, ValueError):
+        return {}
+    return result
+
+
 @dataclass(frozen=True)
 class FidelityReport:
     """Matched Full-KV-vs-retrofit quality metrics and gate decision."""
@@ -102,6 +139,51 @@ class _RepeatKVProjection(nn.Module):
         return projected.reshape(*projected.shape[:-2], self.out_features)
 
 
+class _FusedQKVProjection(nn.Module):
+    """View one Phi3/Phi4 fused QKV linear as a selected projection.
+
+    The underlying module is deliberately kept as a non-registered Python
+    reference.  It is already owned by the HF attention block; registering it
+    three times would duplicate state-dict entries and confuse checkpoint
+    accounting.  ``project_qkv`` lets QCCSelfAttention execute the fused GEMM
+    once when all three views belong to the same source module.
+    """
+
+    def __init__(self, base: nn.Module, query_width: int, kv_width: int, kind: str, *, query_heads: int, kv_heads: int) -> None:
+        super().__init__()
+        if kind not in {"q", "k", "v"}:
+            raise ValueError("fused projection kind must be q, k, or v")
+        self._base = base
+        self._query_width = int(query_width)
+        self._kv_width = int(kv_width)
+        self._kind = kind
+        self._query_heads = int(query_heads)
+        self._kv_heads = int(kv_heads)
+        self.in_features = int(getattr(base, "in_features"))
+        self.out_features = self._query_width if kind == "q" else self._kv_width
+
+    @property
+    def weight(self) -> Tensor:
+        # Used only for device/dtype discovery; the source weight is shared.
+        return self._base.weight
+
+    @property
+    def bias(self) -> Optional[Tensor]:
+        return getattr(self._base, "bias", None)
+
+    def _slices(self, projected: Tensor) -> tuple[Tensor, Tensor, Tensor]:
+        q_end = self._query_width
+        k_end = q_end + self._kv_width
+        return projected[..., :q_end], projected[..., q_end:k_end], projected[..., k_end:]
+
+    def project_qkv(self, hidden: Tensor) -> tuple[Tensor, Tensor, Tensor]:
+        q, k, v = self._slices(self._base(hidden))
+        return q, k, v
+
+    def forward(self, hidden: Tensor) -> Tensor:
+        return self._slices(self._base(hidden))[{"q": 0, "k": 1, "v": 2}[self._kind]]
+
+
 @dataclass
 class QCCCacheHandle:
     """Minimal cache protocol used by common HF generation loops.
@@ -149,21 +231,27 @@ class HFQCCAttention(nn.Module):
         archive_read_stride: int = 1,
     archive_query_cosine_threshold: Optional[float] = None,
     archive_lexical_landmark: bool = False,
-    archive_position_invariant: bool = True,
-    kv_head_policy: str = "reject",
-    gate_bias_init: float = 2.0,
+        archive_position_invariant: bool = True,
+        kv_head_policy: str = "reject",
+        gate_bias_init: float = 2.0,
         kv_heads: Optional[int] = None,
+        q_proj_override: Optional[nn.Module] = None,
+        k_proj_override: Optional[nn.Module] = None,
+        v_proj_override: Optional[nn.Module] = None,
+        rope_kwargs: Optional[dict[str, Any]] = None,
     ) -> None:
         super().__init__()
-        required = ("q_proj", "k_proj", "v_proj", "o_proj")
+        required = ("o_proj",)
         missing = [name for name in required if not hasattr(base_attention, name)]
         if missing:
             raise TypeError(f"attention module is missing projections: {missing}")
-        q_proj = getattr(base_attention, "q_proj")
-        k_proj = getattr(base_attention, "k_proj")
-        v_proj = getattr(base_attention, "v_proj")
-        if not all(isinstance(proj, nn.Linear) for proj in (q_proj, k_proj, v_proj)):
-            raise TypeError("QCC retrofit currently requires nn.Linear q/k/v projections")
+        q_proj = q_proj_override or getattr(base_attention, "q_proj", None)
+        k_proj = k_proj_override or getattr(base_attention, "k_proj", None)
+        v_proj = v_proj_override or getattr(base_attention, "v_proj", None)
+        if q_proj is None or k_proj is None or v_proj is None:
+            raise TypeError("attention module must expose q_proj/k_proj/v_proj or a fused qkv_proj")
+        if not all(hasattr(proj, "in_features") and hasattr(proj, "out_features") for proj in (q_proj, k_proj, v_proj)):
+            raise TypeError("QCC retrofit projections must expose in_features/out_features")
         if q_proj.in_features != q_proj.out_features:
             raise ValueError("QCC retrofit requires square q projection")
         d_model = int(q_proj.in_features)
@@ -185,8 +273,14 @@ class HFQCCAttention(nn.Module):
             head_dim = d_model // num_heads
             if k_proj.out_features != kv_heads * head_dim or v_proj.out_features != kv_heads * head_dim:
                 raise ValueError("K/V projection width is inconsistent with head counts")
-            k_proj_for_qcc: nn.Module = _RepeatKVProjection(k_proj, num_heads, kv_heads, head_dim)
-            v_proj_for_qcc: nn.Module = _RepeatKVProjection(v_proj, num_heads, kv_heads, head_dim)
+            if isinstance(k_proj, _FusedQKVProjection):
+                # QCCSelfAttention expands these views inside its single
+                # fused-QKV projection path, preserving one source GEMM.
+                k_proj_for_qcc = k_proj
+                v_proj_for_qcc = v_proj
+            else:
+                k_proj_for_qcc = _RepeatKVProjection(k_proj, num_heads, kv_heads, head_dim)
+                v_proj_for_qcc = _RepeatKVProjection(v_proj, num_heads, kv_heads, head_dim)
         else:
             k_proj_for_qcc = k_proj
             v_proj_for_qcc = v_proj
@@ -205,6 +299,7 @@ class HFQCCAttention(nn.Module):
             archive_lexical_landmark=archive_lexical_landmark,
             archive_position_invariant=archive_position_invariant,
             gate_bias_init=gate_bias_init,
+            **(rope_kwargs or {}),
         )
         # Share the loaded HF projections/output projection; no second copy of
         # the large model weights is created.  The archive/gate are new trainable
@@ -229,6 +324,7 @@ class HFQCCAttention(nn.Module):
         # loaded HF projections; otherwise a CUDA retrofit fails on its first
         # long-context forward with a CPU/CUDA device mismatch.
         self.qcc.rope_inv_freq = self.qcc.rope_inv_freq.to(device=q_proj.weight.device)
+        self.qcc.rope_inv_freq_long = self.qcc.rope_inv_freq_long.to(device=q_proj.weight.device)
         self.num_heads = num_heads
         self.d_model = d_model
         self.kv_head_policy = kv_head_policy
@@ -365,9 +461,12 @@ def patch_hf_model(
             rope_parameters = getattr(config, "rope_parameters", None)
             if isinstance(rope_parameters, dict):
                 rope_theta = rope_parameters.get("rope_theta")
+    rope_kwargs = _hf_rope_kwargs(config, max_position_embeddings)
     candidates: list[tuple[str, nn.Module]] = []
     for name, module in model.named_modules():
-        if all(hasattr(module, field) for field in ("q_proj", "k_proj", "v_proj", "o_proj")):
+        has_split = all(hasattr(module, field) for field in ("q_proj", "k_proj", "v_proj", "o_proj"))
+        has_fused = hasattr(module, "qkv_proj") and hasattr(module, "o_proj")
+        if has_split or has_fused:
             candidates.append((name, module))
     if not candidates:
         raise ValueError(
@@ -390,6 +489,21 @@ def patch_hf_model(
                 f"{name} uses GQA/MQA ({q_heads} query vs {kv_heads} KV heads); "
                 "QCC retrofit requires kv_head_policy='repeat'"
             )
+        q_proj_override = k_proj_override = v_proj_override = None
+        if not hasattr(module, "q_proj"):
+            fused = getattr(module, "qkv_proj")
+            head_dim = int(getattr(module, "head_dim", fused.out_features // (q_heads + 2 * kv_heads)))
+            query_width = q_heads * head_dim
+            kv_width = kv_heads * head_dim
+            expected_width = query_width + 2 * kv_width
+            if int(fused.out_features) != expected_width:
+                raise ValueError(
+                    f"{name}.qkv_proj width {fused.out_features} does not match "
+                    f"head counts ({expected_width})"
+                )
+            q_proj_override = _FusedQKVProjection(fused, query_width, kv_width, "q", query_heads=q_heads, kv_heads=kv_heads)
+            k_proj_override = _FusedQKVProjection(fused, query_width, kv_width, "k", query_heads=q_heads, kv_heads=kv_heads)
+            v_proj_override = _FusedQKVProjection(fused, query_width, kv_width, "v", query_heads=q_heads, kv_heads=kv_heads)
         wrapper = HFQCCAttention(
             module,
             num_heads=q_heads,
@@ -405,6 +519,10 @@ def patch_hf_model(
             kv_head_policy=kv_head_policy,
             gate_bias_init=gate_bias_init,
             kv_heads=kv_heads,
+            q_proj_override=q_proj_override,
+            k_proj_override=k_proj_override,
+            v_proj_override=v_proj_override,
+            rope_kwargs=rope_kwargs,
         )
         # Track layer index for selective calibration
         wrapper.qcc._qcc_layer_index = layer_index

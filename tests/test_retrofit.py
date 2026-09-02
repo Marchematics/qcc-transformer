@@ -49,6 +49,27 @@ class _TwoLayerModel(nn.Module):
         self.layers = nn.ModuleList([_Attention(), _Attention()])
 
 
+class _FusedAttention(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.qkv_proj = nn.Linear(16, 32, bias=False)  # Q=16, K=V=8
+        self.o_proj = nn.Linear(16, 16, bias=False)
+        self.num_key_value_heads = 1
+        self.head_dim = 8
+
+
+class _FusedModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.config = SimpleNamespace(
+            max_position_embeddings=64,
+            rope_theta=None,
+            num_attention_heads=2,
+            num_key_value_heads=1,
+        )
+        self.attn = _FusedAttention()
+
+
 def test_patch_hf_reads_transformers5_rope_parameters():
     model = _Model()
     model.config.rope_theta = None
@@ -74,6 +95,25 @@ def test_patch_hf_gate_bias_ablation_is_explicit():
     model = _Model()
     patch_hf_model(model, window_size=4, num_codes=4, use_triton=False, gate_bias_init=0.0)
     assert torch.allclose(model.attn.qcc.gate.bias, torch.zeros_like(model.attn.qcc.gate.bias))
+
+
+def test_patch_hf_supports_fused_qkv_attention():
+    model = _FusedModel()
+    assert patch_hf_model(model, window_size=4, num_codes=4, use_triton=False, kv_head_policy="repeat") == ["attn"]
+    output, _, _ = model.attn(torch.randn(1, 6, 16), use_cache=True)
+    assert output.shape == (1, 6, 16)
+
+
+def test_fused_qkv_projection_uses_one_source_and_repeats_gqa():
+    model = _FusedModel()
+    patch_hf_model(model, window_size=4, num_codes=4, use_triton=False, kv_head_policy="repeat")
+    qcc = model.attn.qcc
+    hidden = torch.randn(1, 3, 16)
+    q, k, v, _ = qcc._project_qkv_gate(hidden)
+    assert q.shape == k.shape == v.shape == (1, 3, 16)
+    # One KV head is repeated across both query heads, so the two head slices
+    # must be identical before any attention/position transform.
+    assert torch.equal(k.view(1, 3, 2, 8)[:, :, 0], k.view(1, 3, 2, 8)[:, :, 1])
 
 
 def test_patch_hf_attention_preserves_prefill_and_decode_shapes():

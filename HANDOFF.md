@@ -98,7 +98,8 @@ cd /home/frankwang122222/zjh/zjh/*/qcc-transformer-next
 - CPU teacher logits + 分块损失修复后，单卡 3-step smoke 可完成且不 OOM；全层 20-step smoke 也可完成；
 - 10 卡 `layerwise10_20260903_021353`：9/10 配置完成，最佳 held-out cosine `0.8414`，`codes=64` 配置 OOM；所有配置均未通过 `0.99` fidelity gate；
 - 新增 gate-bias smoke（全层、3 steps、bias=2.0）：held-out cosine `0.8406`，仅作初始化诊断；
-- 远程当前仅有 Qwen2.5-0.5B/1.5B（原生 `max_position_embeddings=32768`）；已通过 HF Hub 元数据确认 `microsoft/Phi-4-mini-instruct` 为真实 3.8B、`131072` context，但它使用 Phi3 fused `qkv_proj` 和 partial/long RoPE，尚未接入 QCC retrofit。
+- 远程当前已有 Qwen2.5-0.5B/1.5B（原生 `max_position_embeddings=32768`）和已下载的 `microsoft/Phi-4-mini-instruct`（真实 3.8B、`131072` context）；Phi-4 使用 Phi3 fused `qkv_proj` 和 partial/long RoPE，兼容实现见下一条。
+- 已接入 Phi3/Phi4 fused `qkv_proj` 视图、单源 GEMM、GQA repeat 和 partial/LongRoPE 频率提取；真实 Phi-4-mini 81-token matched smoke：cosine `0.9999655`、top-1 `100%`，32/32 层成功 patch。该结果只证明短上下文路径对齐，不证明 128K archive 质量。
 
 ## 4. 已验证结果（严格区分证据等级）
 

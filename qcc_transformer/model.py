@@ -956,6 +956,11 @@ class QCCSelfAttention(nn.Module):
         max_position_embeddings: int = 4096,
         decay_rates: Optional[tuple[float, ...]] = None,
         gate_bias_init: float = 0.0,
+        rotary_dim: Optional[int] = None,
+        rope_inv_freq: Optional[Tensor] = None,
+        rope_inv_freq_long: Optional[Tensor] = None,
+        rope_original_max_position_embeddings: Optional[int] = None,
+        rope_attention_scaling: float = 1.0,
     ) -> None:
         super().__init__()
         if d_model % num_heads:
@@ -972,11 +977,17 @@ class QCCSelfAttention(nn.Module):
             raise ValueError("max_position_embeddings must be positive")
         if not math.isfinite(gate_bias_init):
             raise ValueError("gate_bias_init must be finite")
+        if rotary_dim is not None and rotary_dim <= 0:
+            raise ValueError("rotary_dim must be positive")
+        if not math.isfinite(rope_attention_scaling) or rope_attention_scaling <= 0:
+            raise ValueError("rope_attention_scaling must be positive and finite")
         if decay_rates is not None and len(decay_rates) != num_scales:
             raise ValueError("decay_rates must contain exactly num_scales values")
         self.d_model = d_model
         self.num_heads = num_heads
         self.head_dim = d_model // num_heads
+        if rotary_dim is not None and rotary_dim > self.head_dim:
+            raise ValueError("rotary_dim must be no larger than head_dim")
         self.window_size = window_size
         self.use_archive = use_archive
         # Retain the dispatch policy on the attention module so optional
@@ -984,14 +995,26 @@ class QCCSelfAttention(nn.Module):
         # changing the public constructor or consulting child modules.
         self.use_triton = use_triton
         self.rope_theta = rope_theta
-        rotary_dim = 2 * (self.head_dim // 2)
-        half_dim = rotary_dim // 2
-        rope_inv_freq = (
-            rope_theta ** (-torch.arange(half_dim, dtype=torch.float32) / max(half_dim, 1))
-            if rope_theta is not None
-            else torch.empty(0, dtype=torch.float32)
-        )
-        self.register_buffer("rope_inv_freq", rope_inv_freq, persistent=False)
+        configured_rotary_dim = rotary_dim or (2 * (self.head_dim // 2))
+        half_dim = configured_rotary_dim // 2
+        if rope_inv_freq is None:
+            rope_inv_freq = (
+                rope_theta ** (-torch.arange(half_dim, dtype=torch.float32) / max(half_dim, 1))
+                if rope_theta is not None
+                else torch.empty(0, dtype=torch.float32)
+            )
+        if rope_inv_freq.numel() and int(rope_inv_freq.numel()) * 2 != configured_rotary_dim:
+            raise ValueError("rope_inv_freq length does not match rotary_dim")
+        self._rotary_dim = configured_rotary_dim
+        self._rope_original_max_position_embeddings = rope_original_max_position_embeddings
+        self._rope_attention_scaling = float(rope_attention_scaling)
+        self.register_buffer("rope_inv_freq", rope_inv_freq.detach().float(), persistent=False)
+        long_freq = rope_inv_freq_long
+        if long_freq is None:
+            long_freq = torch.empty(0, dtype=torch.float32)
+        if long_freq.numel() and long_freq.numel() != rope_inv_freq.numel():
+            raise ValueError("long RoPE frequency length must match short RoPE frequency length")
+        self.register_buffer("rope_inv_freq_long", long_freq.detach().float(), persistent=False)
         self.q_proj = nn.Linear(d_model, d_model)
         self.k_proj = nn.Linear(d_model, d_model)
         self.v_proj = nn.Linear(d_model, d_model)
@@ -1077,6 +1100,27 @@ class QCCSelfAttention(nn.Module):
         dispatcher round trips that otherwise dominate the bounded-memory
         archive work.
         """
+        # Phi3/Phi4-style attention keeps Q/K/V in one fused projection. The
+        # retrofit exposes three lightweight views, but calls the source GEMM
+        # once so this compatibility path does not triple projection cost.
+        fused_qkv = getattr(self.q_proj, "project_qkv", None)
+        if (
+            callable(fused_qkv)
+            and getattr(self.k_proj, "_base", None) is getattr(self.q_proj, "_base", None)
+            and getattr(self.v_proj, "_base", None) is getattr(self.q_proj, "_base", None)
+        ):
+            q, k, v = fused_qkv(hidden)
+            kv_heads = int(getattr(self.k_proj, "_kv_heads", self.num_heads))
+            if k.shape[-1] != self.d_model:
+                head_dim = self.d_model // self.num_heads
+                k = k.view(*k.shape[:-1], kv_heads, head_dim).repeat_interleave(
+                    self.num_heads // kv_heads, dim=-2
+                ).reshape(*k.shape[:-1], self.d_model)
+                v = v.view(*v.shape[:-1], kv_heads, head_dim).repeat_interleave(
+                    self.num_heads // kv_heads, dim=-2
+                ).reshape(*v.shape[:-1], self.d_model)
+            return q, k, v, self.gate(hidden)
+
         # Retrofit adapters may expose an explicit GQA/MQA expansion module
         # for K/V.  That module is intentionally not folded into the fused
         # GEMM: the fallback below projects and expands it without silently
@@ -1224,7 +1268,7 @@ class QCCSelfAttention(nn.Module):
     ) -> tuple[Tensor, Tensor]:
         """Apply rotary phases to q/k for an optional relative-position path."""
 
-        if self.rope_theta is None or query.shape[-1] < 2:
+        if self.rope_theta is None or query.shape[-1] < 2 or self.rope_inv_freq.numel() == 0:
             return query, key
         if positions is None:
             if query.ndim == 4:
@@ -1232,21 +1276,28 @@ class QCCSelfAttention(nn.Module):
             else:
                 positions = torch.arange(query.shape[0], device=query.device)
         positions = positions.to(device=query.device)
+        inv_freq = self.rope_inv_freq
+        if (
+            self.rope_inv_freq_long.numel()
+            and self._rope_original_max_position_embeddings is not None
+            and int(positions.max().item()) + 1 > self._rope_original_max_position_embeddings
+        ):
+            inv_freq = self.rope_inv_freq_long
         if query.ndim == 4:
             if positions.ndim == 1:
                 positions = positions.unsqueeze(0)
-            angles = positions.to(torch.float32).unsqueeze(-1) * self.rope_inv_freq
+            angles = positions.to(torch.float32).unsqueeze(-1) * inv_freq
             cos = angles.cos().unsqueeze(1).to(query.dtype)
             sin = angles.sin().unsqueeze(1).to(query.dtype)
         elif query.ndim == 3:
             if positions.ndim == 0:
                 positions = positions.expand(query.shape[0])
-            angles = positions.to(torch.float32).unsqueeze(-1) * self.rope_inv_freq
+            angles = positions.to(torch.float32).unsqueeze(-1) * inv_freq
             cos = angles.cos().unsqueeze(1).to(query.dtype)
             sin = angles.sin().unsqueeze(1).to(query.dtype)
         else:
             raise ValueError("q/k tensors must have rank 3 or 4")
-        rotary_dim = self.rope_inv_freq.numel() * 2
+        rotary_dim = inv_freq.numel() * 2
 
         # Hugging Face Llama/Qwen checkpoints use the ``rotate_half``
         # convention (the first half of each rotary vector is paired with the
@@ -1255,8 +1306,8 @@ class QCCSelfAttention(nn.Module):
         # model but is catastrophic for a retrofit because every attention
         # score changes.  Expand the per-frequency cos/sin values to the full
         # rotary width before applying the checkpoint-compatible transform.
-        cos_full = torch.cat((cos, cos), dim=-1)
-        sin_full = torch.cat((sin, sin), dim=-1)
+        cos_full = torch.cat((cos, cos), dim=-1) * self._rope_attention_scaling
+        sin_full = torch.cat((sin, sin), dim=-1) * self._rope_attention_scaling
 
         def rotate(tensor: Tensor) -> Tensor:
             prefix = tensor[..., :rotary_dim]
