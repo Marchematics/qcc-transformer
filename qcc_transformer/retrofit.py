@@ -147,9 +147,10 @@ class HFQCCAttention(nn.Module):
         rope_theta: Optional[float] = None,
         use_triton: bool = True,
         archive_read_stride: int = 1,
-        archive_query_cosine_threshold: Optional[float] = None,
-        archive_lexical_landmark: bool = False,
-        kv_head_policy: str = "reject",
+    archive_query_cosine_threshold: Optional[float] = None,
+    archive_lexical_landmark: bool = False,
+    archive_position_invariant: bool = True,
+    kv_head_policy: str = "reject",
         kv_heads: Optional[int] = None,
     ) -> None:
         super().__init__()
@@ -201,6 +202,7 @@ class HFQCCAttention(nn.Module):
             archive_read_stride=archive_read_stride,
             archive_query_cosine_threshold=archive_query_cosine_threshold,
             archive_lexical_landmark=archive_lexical_landmark,
+            archive_position_invariant=archive_position_invariant,
         )
         # Share the loaded HF projections/output projection; no second copy of
         # the large model weights is created.  The archive/gate are new trainable
@@ -220,6 +222,11 @@ class HFQCCAttention(nn.Module):
         # explicitly; otherwise Triton receives CPU codebook pointers while
         # projected Q/K/V tensors live on CUDA.
         self.qcc.archive.to(device=q_proj.weight.device)
+        # RoPE frequencies are a non-persistent buffer and therefore are not
+        # moved by the archive-only call above.  Keep them colocated with the
+        # loaded HF projections; otherwise a CUDA retrofit fails on its first
+        # long-context forward with a CPU/CUDA device mismatch.
+        self.qcc.rope_inv_freq = self.qcc.rope_inv_freq.to(device=q_proj.weight.device)
         self.num_heads = num_heads
         self.d_model = d_model
         self.kv_head_policy = kv_head_policy
@@ -326,9 +333,10 @@ def patch_hf_model(
     rope_theta: Optional[float] = None,
     use_triton: bool = True,
     archive_read_stride: int = 1,
-    archive_query_cosine_threshold: Optional[float] = None,
-    archive_lexical_landmark: bool = False,
-    kv_head_policy: str = "reject",
+        archive_query_cosine_threshold: Optional[float] = None,
+        archive_lexical_landmark: bool = False,
+        archive_position_invariant: bool = True,
+        kv_head_policy: str = "reject",
 ) -> list[str]:
     """Replace compatible HF attention modules and return their module paths.
 
@@ -345,6 +353,15 @@ def patch_hf_model(
         )
     if rope_theta is None:
         rope_theta = getattr(config, "rope_theta", None)
+        # Transformers 5.x moved RoPE settings under ``rope_parameters``;
+        # Qwen2.5 checkpoints loaded by that API otherwise silently disable
+        # rotary phases in the retrofit and produce completely unrelated
+        # logits.  Support both layouts without depending on a transformers
+        # version at import time.
+        if rope_theta is None:
+            rope_parameters = getattr(config, "rope_parameters", None)
+            if isinstance(rope_parameters, dict):
+                rope_theta = rope_parameters.get("rope_theta")
     candidates: list[tuple[str, nn.Module]] = []
     for name, module in model.named_modules():
         if all(hasattr(module, field) for field in ("q_proj", "k_proj", "v_proj", "o_proj")):
@@ -381,6 +398,7 @@ def patch_hf_model(
             archive_read_stride=archive_read_stride,
             archive_query_cosine_threshold=archive_query_cosine_threshold,
             archive_lexical_landmark=archive_lexical_landmark,
+            archive_position_invariant=archive_position_invariant,
             kv_head_policy=kv_head_policy,
             kv_heads=kv_heads,
         )

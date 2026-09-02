@@ -86,6 +86,12 @@ def main() -> None:
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--window-size", type=int, default=128)
     parser.add_argument("--num-codes", type=int, default=64)
+    parser.add_argument(
+        "--archive-position-invariant",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="use raw Q/K for archive addressing while local attention keeps RoPE",
+    )
     parser.add_argument("--kv-head-policy", choices=("reject", "repeat"), default="reject")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--trust-remote-code", action="store_true")
@@ -113,6 +119,7 @@ def main() -> None:
         patched,
         window_size=args.window_size,
         num_codes=args.num_codes,
+        archive_position_invariant=args.archive_position_invariant,
         kv_head_policy=args.kv_head_policy,
     )
     reset_hf_qcc_cache(patched, batch_size=1)

@@ -52,6 +52,13 @@ calibration.  Adapter-only checkpoints can be written with
 `save_retrofit_adapter(model, "qcc_adapter.pt", base_model="...", revision="...")`;
 the file contains no copy of the pretrained backbone.
 
+HF retrofit enables `archive_position_invariant=True` by default.  Local
+attention keeps the checkpoint's rotary Q/K phases, while long-range archive
+addressing uses the unrotated projections so keys from different absolute
+positions remain comparable.  The adapter also reads both legacy
+`config.rope_theta` and Transformers 5.x `config.rope_parameters` layouts;
+use `--no-archive-position-invariant` only for an explicit legacy ablation.
+
 Install the optional dependency with `pip install -e '.[hf]'`.  GQA/MQA
 models are rejected until an explicit KV-head policy is supplied; silently
 replicating heads would invalidate a 99% Full-KV quality gate.  The adapter
@@ -93,6 +100,11 @@ patched student; this keeps the comparison usable on a single GPU.  It reports
 per-record and aggregate logit cosine/top-1 agreement.  Passing this gate is
 necessary for the retrofit claim, but is not a substitute for held-out RULER,
 LongBench, or perplexity measurements.
+
+`calibrate_hf_retrofit.py` emits the adapter's exact trainable-parameter count
+and fraction, together with a shared `run_id` and HF/vLLM zero-code integration
+flags, so the result can be audited by `gate_99.py` rather than inferred from
+the adapter file size.
 
 For a real-model latency smoke (Full-KV teacher vs retrofit student), run:
 

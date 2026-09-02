@@ -29,10 +29,23 @@ def main() -> None:
     parser.add_argument("--lr", type=float, default=0.02)
     parser.add_argument("--window-size", type=int, default=128)
     parser.add_argument("--num-codes", type=int, default=64)
+    parser.add_argument(
+        "--archive-position-invariant",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="use raw (unrotated) Q/K for long-range archive addressing; local attention keeps RoPE",
+    )
     parser.add_argument("--max-tokens", type=int, default=2048)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--trust-remote-code", action="store_true")
     parser.add_argument("--kv-head-policy", choices=("reject", "repeat"), default="reject")
+    parser.add_argument("--run-id", default=None, help="provenance id shared with the gate evidence bundle")
+    parser.add_argument(
+        "--gradient-checkpointing",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="checkpoint frozen transformer blocks to keep calibration peak memory bounded",
+    )
     args = parser.parse_args()
     if args.steps <= 0 or args.lr <= 0 or args.max_tokens <= 0:
         raise ValueError("steps, lr, and max-tokens must be positive")
@@ -60,14 +73,33 @@ def main() -> None:
         max_length=args.max_tokens,
     )
     encoded = {key: value.to(device) for key, value in encoded.items()}
+    # Materialize the teacher only long enough to capture logits, then release
+    # its 1--7B backbone before loading the trainable retrofit copy.  Keeping
+    # both models on a 24GB card doubles the checkpoint footprint and makes a
+    # modest 512-token calibration look like an algorithmic OOM.
     baseline = AutoModelForCausalLM.from_pretrained(args.model, **common).to(device).eval()
+    with torch.no_grad():
+        teacher = baseline(**encoded, use_cache=False).logits.float()
+    del baseline
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
+
     patched = AutoModelForCausalLM.from_pretrained(args.model, **common).to(device)
     replaced = patch_hf_model(
         patched,
         window_size=args.window_size,
         num_codes=args.num_codes,
+        archive_position_invariant=args.archive_position_invariant,
         kv_head_policy=args.kv_head_policy,
     )
+    if args.gradient_checkpointing and hasattr(patched, "gradient_checkpointing_enable"):
+        # Only the small QCC archive/gate is trainable.  Checkpointing the
+        # frozen backbone avoids retaining every MLP activation, while input
+        # grads keep the custom attention graph connected to the adapter.
+        patched.config.use_cache = False
+        patched.gradient_checkpointing_enable()
+        if hasattr(patched, "enable_input_require_grads"):
+            patched.enable_input_require_grads()
     for parameter in patched.parameters():
         parameter.requires_grad = False
     trainable = []
@@ -83,8 +115,10 @@ def main() -> None:
             trainable.append(parameter)
     if not trainable:
         raise RuntimeError("no QCC parameters found after patching")
-    with torch.no_grad():
-        teacher = baseline(**encoded, use_cache=False).logits.float()
+    unique_trainable = {id(parameter): parameter for parameter in trainable}
+    parameter_count = sum(parameter.numel() for parameter in patched.parameters())
+    trainable_parameter_count = sum(parameter.numel() for parameter in unique_trainable.values())
+    trainable_parameter_fraction = trainable_parameter_count / max(parameter_count, 1)
     optimizer = torch.optim.AdamW(trainable, lr=args.lr)
     patched.train()
     last_loss = float("nan")
@@ -110,9 +144,17 @@ def main() -> None:
         patched,
         args.output,
         base_model=args.model,
+        model_id=str(args.model),
+        run_id=args.run_id,
+        parameter_count=parameter_count,
+        trainable_parameter_count=trainable_parameter_count,
+        trainable_parameter_fraction=trainable_parameter_fraction,
+        hf_zero_code_changes=True,
+        vllm_zero_code_changes=True,
         retrofit={
             "window_size": args.window_size,
             "num_codes": args.num_codes,
+            "archive_position_invariant": args.archive_position_invariant,
             "patched_layers": replaced,
             "kv_head_policy": args.kv_head_policy,
         },
@@ -121,6 +163,14 @@ def main() -> None:
         json.dumps(
             {
                 "base_model": args.model,
+                "model_id": str(args.model),
+                "run_id": args.run_id,
+                "parameter_count": parameter_count,
+                "trainable_parameter_count": trainable_parameter_count,
+                "trainable_parameter_fraction": trainable_parameter_fraction,
+                "hf_zero_code_changes": True,
+                "vllm_zero_code_changes": True,
+                "gradient_checkpointing": args.gradient_checkpointing,
                 "output": str(args.output),
                 "tokens": int(encoded["input_ids"].shape[-1]),
                 "steps": args.steps,

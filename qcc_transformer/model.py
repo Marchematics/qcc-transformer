@@ -951,6 +951,7 @@ class QCCSelfAttention(nn.Module):
         archive_prefix_pair_landmark: bool = False,
         archive_landmark_temperature: float = 1.0,
         archive_lexical_landmark: bool = False,
+        archive_position_invariant: bool = False,
         rope_theta: Optional[float] = None,
         max_position_embeddings: int = 4096,
         decay_rates: Optional[tuple[float, ...]] = None,
@@ -1023,6 +1024,11 @@ class QCCSelfAttention(nn.Module):
         )
         self.archive_read_stride = archive_read_stride
         self.archive_lexical_landmark = archive_lexical_landmark
+        # RoPE is required for exact local attention, but an archive response
+        # that mixes keys carrying different absolute phases is not a stable
+        # content address.  This opt-in path keeps local q/k rotary while
+        # feeding unrotated projections to the long-range archive.
+        self.archive_position_invariant = archive_position_invariant
         # Optional adaptive remote-read suppression. ``None`` keeps exact
         # archive reads; otherwise a read is skipped when the new query is
         # cosine-close to the previous refreshed query. The state is still
@@ -1038,10 +1044,12 @@ class QCCSelfAttention(nn.Module):
         # stable object surface before the first decode call.
         self._lexical_key_cache: Optional[Tensor] = None
         self._lexical_value_cache: Optional[Tensor] = None
+        self._archive_key_cache: Optional[Tensor] = None
         self._chunk_key_scratch: Optional[Tensor] = None
         self._chunk_value_scratch: Optional[Tensor] = None
         self._chunk_lexical_key_scratch: Optional[Tensor] = None
         self._chunk_lexical_value_scratch: Optional[Tensor] = None
+        self._chunk_archive_key_scratch: Optional[Tensor] = None
         self._full_key_cache: Optional[Tensor] = None
         self._full_value_cache: Optional[Tensor] = None
         self._cache_start = 0
@@ -1234,14 +1242,23 @@ class QCCSelfAttention(nn.Module):
             raise ValueError("q/k tensors must have rank 3 or 4")
         rotary_dim = self.rope_inv_freq.numel() * 2
 
+        # Hugging Face Llama/Qwen checkpoints use the ``rotate_half``
+        # convention (the first half of each rotary vector is paired with the
+        # second half), rather than interleaving adjacent dimensions.  The
+        # distinction is invisible in a self-contained randomly initialized
+        # model but is catastrophic for a retrofit because every attention
+        # score changes.  Expand the per-frequency cos/sin values to the full
+        # rotary width before applying the checkpoint-compatible transform.
+        cos_full = torch.cat((cos, cos), dim=-1)
+        sin_full = torch.cat((sin, sin), dim=-1)
+
         def rotate(tensor: Tensor) -> Tensor:
             prefix = tensor[..., :rotary_dim]
             suffix = tensor[..., rotary_dim:]
-            pairs = prefix.reshape(*prefix.shape[:-1], -1, 2)
-            first, second = pairs.unbind(dim=-1)
-            rotated = torch.stack(
-                (first * cos - second * sin, first * sin + second * cos), dim=-1
-            ).flatten(-2)
+            half = prefix.shape[-1] // 2
+            first, second = prefix[..., :half], prefix[..., half:]
+            rotate_half = torch.cat((-second, first), dim=-1)
+            rotated = prefix * cos_full + rotate_half * sin_full
             return torch.cat((rotated, suffix), dim=-1)
 
         return rotate(query), rotate(key)
@@ -1260,12 +1277,14 @@ class QCCSelfAttention(nn.Module):
         self._local_value_cache = None
         self._lexical_key_cache = None
         self._lexical_value_cache = None
+        self._archive_key_cache = None
         self._full_key_cache = None
         self._full_value_cache = None
         self._chunk_key_scratch = None
         self._chunk_value_scratch = None
         self._chunk_lexical_key_scratch = None
         self._chunk_lexical_value_scratch = None
+        self._chunk_archive_key_scratch = None
         self._cache_start = 0
         self._cache_length = 0
         self._seen_tokens = 0
@@ -1395,6 +1414,38 @@ class QCCSelfAttention(nn.Module):
         scratch_v[:, :, old_length:needed] = value
         return scratch_k[:, :, :needed], scratch_v[:, :, :needed], old_length
 
+    def _combined_archive_key_chunk(self, key: Tensor) -> Tensor:
+        """Build chronological unrotated keys for the position-free archive."""
+
+        if self._archive_key_cache is None:
+            raise RuntimeError("archive key cache must be initialized before combining a chunk")
+        bsz, _, length, _ = key.shape
+        old_length = self._cache_length
+        needed = old_length + length
+        if (
+            self._chunk_archive_key_scratch is None
+            or self._chunk_archive_key_scratch.shape[0] != bsz
+            or self._chunk_archive_key_scratch.shape[2] < needed
+            or self._chunk_archive_key_scratch.device != key.device
+            or self._chunk_archive_key_scratch.dtype != key.dtype
+        ):
+            capacity = max(needed, self.window_size + length)
+            self._chunk_archive_key_scratch = torch.empty(
+                (bsz, self.num_heads, capacity, self.head_dim),
+                device=key.device,
+                dtype=key.dtype,
+            )
+        scratch = self._chunk_archive_key_scratch
+        if old_length:
+            start = self._cache_start
+            first = min(old_length, self.window_size - start)
+            scratch[:, :, :first] = self._archive_key_cache[:, :, start : start + first]
+            if first < old_length:
+                remainder = old_length - first
+                scratch[:, :, first:old_length] = self._archive_key_cache[:, :, :remainder]
+        scratch[:, :, old_length:needed] = key
+        return scratch[:, :, :needed]
+
     def step(
         self,
         hidden: Tensor,
@@ -1420,8 +1471,8 @@ class QCCSelfAttention(nn.Module):
         ):
             self.reset_cache(bsz, device=hidden.device)
         q_proj, k_proj, v_proj, gate_proj = self._project_qkv_gate(hidden[:, None])
-        q = self._split_heads(q_proj)[:, :, 0]
-        key = self._split_heads(k_proj)[:, :, 0]
+        q_raw = self._split_heads(q_proj)[:, :, 0]
+        key_raw = self._split_heads(k_proj)[:, :, 0]
         value = self._split_heads(v_proj)[:, :, 0]
         lexical_q, lexical_k, lexical_v = self._lexical_archive_triplet(archive_hint)
         if lexical_q is not None:
@@ -1430,12 +1481,18 @@ class QCCSelfAttention(nn.Module):
             position_ids = torch.full(
                 (bsz,), self._seen_tokens, device=hidden.device, dtype=torch.long
             )
-        q, key = self._apply_rope(q, key, position_ids)
+        q, key = self._apply_rope(q_raw, key_raw, position_ids)
+        archive_query = q_raw if self.archive_position_invariant else q
+        archive_key_current = key_raw if self.archive_position_invariant else key
         if self.use_archive:
             if self._local_key_cache is None:
                 shape = (bsz, self.num_heads, self.window_size, self.head_dim)
                 self._local_key_cache = torch.empty(shape, device=key.device, dtype=key.dtype)
                 self._local_value_cache = torch.empty(shape, device=value.device, dtype=value.dtype)
+                if self.archive_position_invariant and lexical_k is None:
+                    self._archive_key_cache = torch.empty(
+                        shape, device=key_raw.device, dtype=key_raw.dtype
+                    )
                 if lexical_k is not None:
                     self._lexical_key_cache = torch.empty(
                         shape, device=lexical_k.device, dtype=lexical_k.dtype
@@ -1455,10 +1512,16 @@ class QCCSelfAttention(nn.Module):
                     assert self._lexical_key_cache is not None and self._lexical_value_cache is not None
                     archive_key = self._lexical_key_cache[:, :, write_index]
                     archive_value = self._lexical_value_cache[:, :, write_index]
+                elif self.archive_position_invariant:
+                    assert self._archive_key_cache is not None
+                    archive_key = self._archive_key_cache[:, :, write_index]
                 self.archive.update(archive_key, archive_value)
                 self._cache_start = (self._cache_start + 1) % self.window_size
             self._local_key_cache[:, :, write_index] = key
             self._local_value_cache[:, :, write_index] = value
+            if self.archive_position_invariant and lexical_k is None:
+                assert self._archive_key_cache is not None
+                self._archive_key_cache[:, :, write_index] = archive_key_current
             if lexical_k is not None:
                 assert self._lexical_key_cache is not None and self._lexical_value_cache is not None
                 self._lexical_key_cache[:, :, write_index] = lexical_k
@@ -1527,14 +1590,14 @@ class QCCSelfAttention(nn.Module):
                 # Archive reads are batched over heads.  Skip the whole read
                 # only when every head sees a stable query; this avoids mixing
                 # fresh and stale heads while keeping the decision scalar.
-                similarity = F.cosine_similarity(q, self._archive_query_cache, dim=-1)
+                similarity = F.cosine_similarity(archive_query, self._archive_query_cache, dim=-1)
                 refresh = bool(
                     torch.any(similarity < self.archive_query_cosine_threshold).item()
                 )
             if refresh:
-                archive_query = q if lexical_q is None else lexical_q
-                self._archive_read_cache = self.archive.read(archive_query)
-                self._archive_query_cache = archive_query.detach()
+                read_query = archive_query if lexical_q is None else lexical_q
+                self._archive_read_cache = self.archive.read(read_query)
+                self._archive_query_cache = read_query.detach()
             assert self._archive_read_cache is not None
             archive_out = self._archive_read_cache
             gate = (
@@ -1576,25 +1639,39 @@ class QCCSelfAttention(nn.Module):
         ):
             self.reset_cache(bsz, device=hidden.device)
         q_proj, k_proj, v_proj, gate_proj = self._project_qkv_gate(hidden)
-        q = self._split_heads(q_proj)
-        k = self._split_heads(k_proj)
+        q_raw = self._split_heads(q_proj)
+        k_raw = self._split_heads(k_proj)
         v = self._split_heads(v_proj)
         lexical_q, lexical_k, lexical_v = self._lexical_archive_triplet(archive_hint)
+        archive_q = q_raw
+        archive_k_current = k_raw
         if position_ids is None:
             position_ids = self._seen_tokens + torch.arange(
                 length, device=hidden.device, dtype=torch.long
             )
-        q, k = self._apply_rope(q, k, position_ids)
+        q, k = self._apply_rope(q_raw, k_raw, position_ids)
+        if not self.archive_position_invariant:
+            archive_q = q
+            archive_k_current = k
 
         if self.use_archive:
             if self._local_key_cache is None:
                 shape = (bsz, self.num_heads, self.window_size, self.head_dim)
                 self._local_key_cache = torch.empty(shape, device=k.device, dtype=k.dtype)
                 self._local_value_cache = torch.empty(shape, device=v.device, dtype=v.dtype)
+                if self.archive_position_invariant and lexical_k is None:
+                    self._archive_key_cache = torch.empty(
+                        shape, device=k_raw.device, dtype=k_raw.dtype
+                    )
                 if lexical_k is not None:
                     self._lexical_key_cache = torch.empty(shape, device=lexical_k.device, dtype=lexical_k.dtype)
                     self._lexical_value_cache = torch.empty(shape, device=lexical_v.device, dtype=lexical_v.dtype)
             combined_k, combined_v, old_length = self._combined_local_chunk(k, v)
+            combined_archive_k = (
+                self._combined_archive_key_chunk(archive_k_current)
+                if self.archive_position_invariant and lexical_k is None
+                else None
+            )
             if lexical_k is not None:
                 combined_lexical_k, combined_lexical_v, _ = self._combined_lexical_chunk(lexical_k, lexical_v)
             else:
@@ -1692,13 +1769,15 @@ class QCCSelfAttention(nn.Module):
             if event_count > 0:
                 evicted_k = combined_k[:, :, :event_count]
                 evicted_v = combined_v[:, :, :event_count]
+                if combined_archive_k is not None:
+                    evicted_k = combined_archive_k[:, :, :event_count]
                 if combined_lexical_k is not None:
                     evicted_k = combined_lexical_k[:, :, :event_count]
                     evicted_v = combined_lexical_v[:, :, :event_count]
                 self.archive.update_read_chunk(
                     evicted_k,
                     evicted_v,
-                    q[:, :, event_start:] if lexical_q is None else lexical_q[:, :, event_start:],
+                    archive_q[:, :, event_start:] if lexical_q is None else lexical_q[:, :, event_start:],
                     output=archive_out[:, :, event_start:],
                 )
             gate = (
@@ -1740,6 +1819,13 @@ class QCCSelfAttention(nn.Module):
                     remainder = keep - first
                     self._lexical_key_cache[:, :, :remainder] = lexical_tail_k[:, :, first:]
                     self._lexical_value_cache[:, :, :remainder] = lexical_tail_v[:, :, first:]
+            if combined_archive_k is not None:
+                assert self._archive_key_cache is not None
+                archive_tail_k = combined_archive_k[:, :, -keep:]
+                self._archive_key_cache[:, :, new_start : new_start + first] = archive_tail_k[:, :, :first]
+                if first < keep:
+                    remainder = keep - first
+                    self._archive_key_cache[:, :, :remainder] = archive_tail_k[:, :, first:]
             self._cache_start = new_start
             self._cache_length = keep
         self._seen_tokens += length
@@ -1748,6 +1834,8 @@ class QCCSelfAttention(nn.Module):
     def _forward_train_chunked(
         self, hidden: Tensor, q: Tensor, k: Tensor, v: Tensor,
         archive_hint: Optional[Tensor] = None,
+        archive_query_source: Optional[Tensor] = None,
+        archive_key_source: Optional[Tensor] = None,
     ) -> Tensor:
         """Differentiable bounded-memory path for long training sequences.
 
@@ -1769,8 +1857,10 @@ class QCCSelfAttention(nn.Module):
             )
         bsz, length, _ = hidden.shape
         lexical_q, lexical_k, lexical_v = self._lexical_archive_triplet(archive_hint)
-        archive_q = q if lexical_q is None else lexical_q
-        archive_k = k if lexical_k is None else lexical_k
+        archive_q_base = q if archive_query_source is None else archive_query_source
+        archive_k_base = k if archive_key_source is None else archive_key_source
+        archive_q = archive_q_base if lexical_q is None else lexical_q
+        archive_k = archive_k_base if lexical_k is None else lexical_k
         archive_v = v if lexical_v is None else lexical_v
         window = min(self.window_size, length)
         block_size = self.archive.scan_block_size
@@ -2047,13 +2137,17 @@ class QCCSelfAttention(nn.Module):
     def _forward_inference(
         self, hidden: Tensor, q: Tensor, k: Tensor, v: Tensor,
         archive_hint: Optional[Tensor] = None,
+        archive_query_source: Optional[Tensor] = None,
+        archive_key_source: Optional[Tensor] = None,
     ) -> Tensor:
         """Vectorized local path used by evaluation/decode (no autograd)."""
 
         bsz, length, _ = hidden.shape
         lexical_q, lexical_k, lexical_v = self._lexical_archive_triplet(archive_hint)
-        archive_q = q if lexical_q is None else lexical_q
-        archive_k = k if lexical_k is None else lexical_k
+        archive_q_base = q if archive_query_source is None else archive_query_source
+        archive_k_base = k if archive_key_source is None else archive_key_source
+        archive_q = archive_q_base if lexical_q is None else lexical_q
+        archive_k = archive_k_base if lexical_k is None else lexical_k
         archive_v = v if lexical_v is None else lexical_v
         window = min(self.window_size, length)
         if hidden.is_cuda or hidden.device.type == "mps":
@@ -2139,14 +2233,24 @@ class QCCSelfAttention(nn.Module):
             raise ValueError("hidden must have shape [batch, sequence, d_model]")
         bsz, length, _ = hidden.shape
         q_proj, k_proj, v_proj, _ = self._project_qkv_gate(hidden)
-        q = self._split_heads(q_proj)
-        k = self._split_heads(k_proj)
+        q_raw = self._split_heads(q_proj)
+        k_raw = self._split_heads(k_proj)
         v = self._split_heads(v_proj)
         if position_ids is None:
             position_ids = torch.arange(length, device=hidden.device, dtype=torch.long)
-        q, k = self._apply_rope(q, k, position_ids)
+        q, k = self._apply_rope(q_raw, k_raw, position_ids)
+        archive_q_source = q_raw if self.archive_position_invariant else q
+        archive_k_source = k_raw if self.archive_position_invariant else k
         if not torch.is_grad_enabled():
-            return self._forward_inference(hidden, q, k, v, archive_hint=archive_hint)
+            return self._forward_inference(
+                hidden,
+                q,
+                k,
+                v,
+                archive_hint=archive_hint,
+                archive_query_source=archive_q_source,
+                archive_key_source=archive_k_source,
+            )
         if hidden.is_cuda and length > self.window_size:
             # CUDA training uses the same bounded block equations as
             # inference, but keeps the scan differentiable.  This avoids the
@@ -2158,7 +2262,15 @@ class QCCSelfAttention(nn.Module):
                 or self.archive._numerator.device != hidden.device
             ):
                 self.archive.reset_state(bsz, device=hidden.device)
-            return self._forward_train_chunked(hidden, q, k, v, archive_hint=archive_hint)
+            return self._forward_train_chunked(
+                hidden,
+                q,
+                k,
+                v,
+                archive_hint=archive_hint,
+                archive_query_source=archive_q_source,
+                archive_key_source=archive_k_source,
+            )
         if (
             reset_state
             or self.archive._numerator.shape[0] != bsz
@@ -2167,15 +2279,23 @@ class QCCSelfAttention(nn.Module):
             self.archive.reset_state(bsz, device=hidden.device)
 
         local_keys: list[Tensor] = []
+        archive_keys: list[Tensor] = []
         local_values: list[Tensor] = []
         outputs: list[Tensor] = []
         scale = 1.0 / math.sqrt(self.head_dim)
         for t in range(length):
             kt, vt = k[:, :, t], v[:, :, t]
             local_keys.append(kt)
+            archive_keys.append(archive_k_source[:, :, t])
             local_values.append(vt)
             if len(local_keys) > self.window_size:
-                self.archive.update(local_keys.pop(0), local_values.pop(0))
+                evicted_local_key = local_keys.pop(0)
+                evicted_archive_key = archive_keys.pop(0)
+                evicted_value = local_values.pop(0)
+                self.archive.update(
+                    evicted_archive_key if self.archive_position_invariant else evicted_local_key,
+                    evicted_value,
+                )
 
             lk = torch.stack(local_keys, dim=2)
             lv = torch.stack(local_values, dim=2)
@@ -2183,7 +2303,7 @@ class QCCSelfAttention(nn.Module):
             local_prob = F.softmax(local_logits, dim=-1)
             local_out = torch.einsum("bhl,bhld->bhd", local_prob, lv)
             if self.use_archive and t >= self.window_size:
-                archive_out = self.archive.read(q[:, :, t])
+                archive_out = self.archive.read(archive_q_source[:, :, t])
                 gate = torch.sigmoid(self.gate(hidden[:, t])).unsqueeze(-1)
                 head_out = gate * local_out + (1.0 - gate) * archive_out
             else:
@@ -2280,6 +2400,7 @@ class QCCForCausalLM(nn.Module):
         archive_prefix_pair_landmark: bool = False,
         archive_landmark_temperature: float = 1.0,
         archive_lexical_landmark: bool = False,
+        archive_position_invariant: bool = False,
         archive_decay_rates: Optional[tuple[float, ...]] = None,
     ) -> None:
         super().__init__()
@@ -2322,6 +2443,7 @@ class QCCForCausalLM(nn.Module):
                 archive_prefix_pair_landmark=archive_prefix_pair_landmark,
                 archive_landmark_temperature=archive_landmark_temperature,
                 archive_lexical_landmark=archive_lexical_landmark,
+                archive_position_invariant=archive_position_invariant,
                 rope_theta=rope_theta if position_encoding == "rope" else None,
                 max_position_embeddings=max_position_embeddings,
                 decay_rates=archive_decay_rates,

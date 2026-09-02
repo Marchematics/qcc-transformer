@@ -37,9 +37,18 @@ class _Model(nn.Module):
         self.attn = _Attention(kv_heads=kv_heads)
 
 
+def test_patch_hf_reads_transformers5_rope_parameters():
+    model = _Model()
+    model.config.rope_theta = None
+    model.config.rope_parameters = {"rope_theta": 1_000_000.0}
+    patch_hf_model(model, window_size=4, num_codes=4, use_triton=False)
+    assert model.attn.qcc.rope_theta == 1_000_000.0
+
+
 def test_patch_hf_attention_preserves_prefill_and_decode_shapes():
     model = _Model()
     assert patch_hf_model(model, window_size=4, num_codes=4, use_triton=False) == ["attn"]
+    assert model.attn.qcc.archive_position_invariant
     output, _, cache = model.attn(torch.randn(2, 8, 16), use_cache=True)
     assert output.shape == (2, 8, 16)
     assert cache is not None and cache.get_seq_length() == 8

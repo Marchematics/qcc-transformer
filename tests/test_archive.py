@@ -310,6 +310,48 @@ def test_rope_position_mode_matches_streaming_decode() -> None:
     torch.testing.assert_close(chunked, sequence, rtol=3e-4, atol=3e-4)
 
 
+def test_position_invariant_archive_rope_matches_streaming_decode() -> None:
+    """Raw archive addressing must preserve the exact serving recurrence.
+
+    Local attention still uses rotary Q/K, while the archive receives the
+    unrotated projections.  This specifically exercises a wrapped ring and
+    catches accidental mixing of rotary and raw key layouts.
+    """
+
+    torch.manual_seed(291)
+    model = QCCForCausalLM(
+        vocab_size=37,
+        d_model=24,
+        num_layers=2,
+        num_heads=4,
+        max_position_embeddings=512,
+        window_size=5,
+        num_codes=6,
+        position_encoding="rope",
+        archive_position_invariant=True,
+        use_triton=False,
+    ).eval()
+    tokens = torch.randint(0, 37, (2, 23))
+    with torch.no_grad():
+        sequence = model(tokens)
+        model.reset_cache(tokens.shape[0])
+        streamed = torch.stack(
+            [model.decode_step(tokens[:, t]) for t in range(tokens.shape[1])], dim=1
+        )
+        model.reset_cache(tokens.shape[0])
+        chunked = torch.cat(
+            [model.decode_chunk(tokens[:, :8], reset_cache=True), model.decode_chunk(tokens[:, 8:])],
+            dim=1,
+        )
+    torch.testing.assert_close(streamed, sequence, rtol=3e-4, atol=3e-4)
+    for layer in model.layers:
+        attention = layer.attention
+        assert attention.archive_position_invariant
+        assert attention._archive_key_cache is not None
+        assert attention._archive_key_cache.shape[2] == attention.window_size
+    torch.testing.assert_close(chunked, sequence, rtol=3e-4, atol=3e-4)
+
+
 def test_model_decay_schedule_reaches_configured_context_horizon() -> None:
     model = QCCForCausalLM(
         vocab_size=17,
