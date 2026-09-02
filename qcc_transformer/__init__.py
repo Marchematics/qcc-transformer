@@ -1,5 +1,6 @@
 """QCC-Transformer research prototype."""
 
+from .associative import AssociativeLandmarkState, SetAssociativeLandmarkBank
 from .model import (
     QCCArchive,
     QCCForCausalLM,
@@ -22,6 +23,8 @@ from .vllm import QCCVLLMBackend, QCCVLLMState
 from .vllm_plugin import register_vllm_backend
 
 __all__ = [
+    "AssociativeLandmarkState",
+    "SetAssociativeLandmarkBank",
     "QCCArchive",
     "QCCForCausalLM",
     "QCCSelfAttention",
