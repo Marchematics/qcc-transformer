@@ -112,6 +112,10 @@ def main() -> None:
         help="use raw Q/K for archive; local attention keeps RoPE",
     )
     parser.add_argument("--max-tokens", type=int, default=2048)
+    parser.add_argument(
+        "--num-train-chunks", type=int, default=1,
+        help="number of sequential training chunks to distill (cycles across chunks each step)",
+    )
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--trust-remote-code", action="store_true")
     parser.add_argument("--kv-head-policy", choices=("reject", "repeat"), default="repeat")
@@ -130,8 +134,8 @@ def main() -> None:
                         help="minimum held-out cosine for fidelity gate")
     args = parser.parse_args()
 
-    if args.steps <= 0 or args.lr <= 0 or args.max_tokens <= 0:
-        raise ValueError("steps, lr, and max-tokens must be positive")
+    if args.steps <= 0 or args.lr <= 0 or args.max_tokens <= 0 or args.num_train_chunks <= 0:
+        raise ValueError("steps, lr, max-tokens, and num-train-chunks must be positive")
     if args.max_tokens <= args.window_size:
         raise ValueError("max-tokens must exceed window-size to exercise archive")
 
@@ -154,17 +158,34 @@ def main() -> None:
     common = {"trust_remote_code": args.trust_remote_code}
     tokenizer = AutoTokenizer.from_pretrained(args.model, **common)
 
-    def encode_text(text: str) -> dict:
+    def encode_text(text: str, *, max_length: int | None = None) -> dict:
         encoded = tokenizer(
             text,
             return_tensors="pt",
             add_special_tokens=True,
             truncation=True,
-            max_length=args.max_tokens,
+            max_length=max_length or args.max_tokens,
         )
         return {key: value.to(device) for key, value in encoded.items()}
 
-    train_encoded = encode_text(train_text)
+    if args.num_train_chunks == 1:
+        train_batches = [encode_text(train_text)]
+    else:
+        full = tokenizer(train_text, return_tensors="pt", add_special_tokens=True, truncation=True,
+                         max_length=args.max_tokens * args.num_train_chunks)
+        ids = full["input_ids"][0]
+        mask = full.get("attention_mask")
+        train_batches = []
+        for start in range(0, ids.numel(), args.max_tokens):
+            chunk_ids = ids[start : start + args.max_tokens]
+            if chunk_ids.numel() <= args.window_size:
+                continue
+            batch = {"input_ids": chunk_ids.unsqueeze(0)}
+            if mask is not None:
+                batch["attention_mask"] = mask[0, start : start + chunk_ids.numel()].unsqueeze(0)
+            train_batches.append({key: value.to(device) for key, value in batch.items()})
+        if not train_batches:
+            raise ValueError("train-file did not produce any chunks longer than window-size")
     held_out_encoded = encode_text(held_out_text) if held_out_text else None
 
     # Capture teacher logits and release immediately
@@ -172,7 +193,7 @@ def main() -> None:
     baseline = AutoModelForCausalLM.from_pretrained(args.model, **common).to(device).eval()
 
     with torch.no_grad():
-        train_teacher = baseline(**train_encoded, use_cache=False).logits.float().cpu()
+        train_teachers = [baseline(**batch, use_cache=False).logits.float().cpu() for batch in train_batches]
         held_out_teacher = None
         if held_out_encoded:
             held_out_teacher = baseline(**held_out_encoded, use_cache=False).logits.float().cpu()
@@ -247,8 +268,9 @@ def main() -> None:
 
     for step in range(args.steps):
         optimizer.zero_grad(set_to_none=True)
-        student = patched(**train_encoded, use_cache=False).logits.float()
-        loss = _chunked_mse(student, train_teacher)
+        batch_index = step % len(train_batches)
+        student = patched(**train_batches[batch_index], use_cache=False).logits.float()
+        loss = _chunked_mse(student, train_teachers[batch_index])
         loss.backward()
         torch.nn.utils.clip_grad_norm_(trainable, 1.0)
         optimizer.step()
@@ -259,9 +281,14 @@ def main() -> None:
     # Evaluate
     patched.eval()
     with torch.no_grad():
-        train_student = patched(**train_encoded, use_cache=False).logits.float()
-        train_cosine = _mean_cosine_from_cpu(train_student, train_teacher)
-        train_agreement = (train_student.argmax(-1).cpu() == train_teacher.argmax(-1)).float().mean()
+        train_cosines = []
+        train_agreements = []
+        for batch, teacher in zip(train_batches, train_teachers):
+            train_student = patched(**batch, use_cache=False).logits.float()
+            train_cosines.append(_mean_cosine_from_cpu(train_student, teacher))
+            train_agreements.append((train_student.argmax(-1).cpu() == teacher.argmax(-1)).float().mean())
+        train_cosine = torch.stack(train_cosines).mean()
+        train_agreement = torch.stack(train_agreements).mean()
 
         held_out_cosine = None
         held_out_agreement = None
@@ -293,6 +320,7 @@ def main() -> None:
             "calibrated_layers": calibrate_layers,
             "kv_head_policy": args.kv_head_policy,
             "gate_bias_init": args.gate_bias_init,
+            "num_train_chunks": len(train_batches),
         },
     )
 
@@ -309,7 +337,8 @@ def main() -> None:
         "vllm_zero_code_changes": True,
         "gradient_checkpointing": args.gradient_checkpointing,
         "output": str(args.output),
-        "train_tokens": int(train_encoded["input_ids"].shape[-1]),
+        "train_tokens": int(sum(batch["input_ids"].shape[-1] for batch in train_batches)),
+        "train_chunks": len(train_batches),
         "steps": args.steps,
         "train_mean_logit_cosine": float(train_cosine.item()),
         "train_top1_agreement": float(train_agreement.item()),
