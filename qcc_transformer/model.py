@@ -1003,6 +1003,9 @@ class QCCSelfAttention(nn.Module):
         self._seen_tokens = 0
         self._archive_read_cache: Optional[Tensor] = None
         self._archive_query_cache: Optional[Tensor] = None
+        self._fused_projection_weight: Optional[Tensor] = None
+        self._fused_projection_bias: Optional[Tensor] = None
+        self._fused_projection_versions: Optional[tuple[int, int, int, int]] = None
 
     def _project_qkv_gate(self, hidden: Tensor) -> tuple[Tensor, Tensor, Tensor, Tensor]:
         """Project Q/K/V and the mixing gate with one GEMM.
@@ -1014,14 +1017,36 @@ class QCCSelfAttention(nn.Module):
         dispatcher round trips that otherwise dominate the bounded-memory
         archive work.
         """
-        weight = torch.cat(
-            (self.q_proj.weight, self.k_proj.weight, self.v_proj.weight, self.gate.weight),
-            dim=0,
+        versions = (
+            self.q_proj.weight._version,
+            self.k_proj.weight._version,
+            self.v_proj.weight._version,
+            self.gate.weight._version,
         )
-        bias = torch.cat(
-            (self.q_proj.bias, self.k_proj.bias, self.v_proj.bias, self.gate.bias),
-            dim=0,
-        )
+        use_cache = not torch.is_grad_enabled() and not self.training
+        if (
+            use_cache
+            and self._fused_projection_weight is not None
+            and self._fused_projection_bias is not None
+            and self._fused_projection_versions == versions
+            and self._fused_projection_weight.device == hidden.device
+            and self._fused_projection_weight.dtype == hidden.dtype
+        ):
+            weight = self._fused_projection_weight
+            bias = self._fused_projection_bias
+        else:
+            weight = torch.cat(
+                (self.q_proj.weight, self.k_proj.weight, self.v_proj.weight, self.gate.weight),
+                dim=0,
+            )
+            bias = torch.cat(
+                (self.q_proj.bias, self.k_proj.bias, self.v_proj.bias, self.gate.bias),
+                dim=0,
+            )
+            if use_cache:
+                self._fused_projection_weight = weight
+                self._fused_projection_bias = bias
+                self._fused_projection_versions = versions
         projected = F.linear(hidden, weight, bias)
         q, k, v, gate = projected.split(
             (self.d_model, self.d_model, self.d_model, self.num_heads), dim=-1
