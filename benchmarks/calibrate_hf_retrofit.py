@@ -20,6 +20,44 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from qcc_transformer import patch_hf_model, save_retrofit_adapter
 
 
+def _chunked_mse(student: torch.Tensor, teacher_cpu: torch.Tensor, *, chunk_size: int = 8192) -> torch.Tensor:
+    """Compute MSE while keeping teacher targets off the accelerator.
+
+    A 1.5B Qwen vocabulary produces hundreds of MB of logits even for a
+    short sequence.  Keeping a second full-vocabulary teacher tensor on a
+    24GB GPU causes calibration OOMs, so materialize one vocabulary slice at
+    a time and accumulate the scalar loss.
+    """
+    if student.shape != teacher_cpu.shape:
+        raise ValueError(f"student/teacher shape mismatch: {student.shape} vs {teacher_cpu.shape}")
+    total = student.new_zeros(())
+    vocab = student.shape[-1]
+    for start in range(0, vocab, chunk_size):
+        end = min(start + chunk_size, vocab)
+        target = teacher_cpu[..., start:end].to(device=student.device, dtype=student.dtype)
+        total = total + torch.nn.functional.mse_loss(
+            student[..., start:end], target, reduction="sum"
+        )
+    return total / student.numel()
+
+
+def _mean_cosine_from_cpu(student: torch.Tensor, teacher_cpu: torch.Tensor, *, chunk_size: int = 8192) -> torch.Tensor:
+    """Mean per-token cosine without copying the full teacher to GPU."""
+    if student.shape != teacher_cpu.shape:
+        raise ValueError(f"student/teacher shape mismatch: {student.shape} vs {teacher_cpu.shape}")
+    dot = student.new_zeros((student.shape[0], student.shape[1]))
+    student_sq = student.new_zeros(dot.shape)
+    teacher_sq = student.new_zeros(dot.shape)
+    for start in range(0, student.shape[-1], chunk_size):
+        end = min(start + chunk_size, student.shape[-1])
+        s = student[..., start:end]
+        t = teacher_cpu[..., start:end].to(device=student.device, dtype=student.dtype)
+        dot = dot + (s * t).sum(dim=-1)
+        student_sq = student_sq + (s * s).sum(dim=-1)
+        teacher_sq = teacher_sq + (t * t).sum(dim=-1)
+    return (dot / (student_sq.sqrt() * teacher_sq.sqrt()).clamp_min(1e-12)).mean()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", required=True)
@@ -79,7 +117,7 @@ def main() -> None:
     # modest 512-token calibration look like an algorithmic OOM.
     baseline = AutoModelForCausalLM.from_pretrained(args.model, **common).to(device).eval()
     with torch.no_grad():
-        teacher = baseline(**encoded, use_cache=False).logits.float()
+        teacher = baseline(**encoded, use_cache=False).logits.float().cpu()
     del baseline
     if device.type == "cuda":
         torch.cuda.empty_cache()
@@ -130,7 +168,7 @@ def main() -> None:
     for _ in range(args.steps):
         optimizer.zero_grad(set_to_none=True)
         student = patched(**encoded, use_cache=False).logits.float()
-        loss = torch.nn.functional.mse_loss(student, teacher)
+        loss = _chunked_mse(student, teacher)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(trainable, 1.0)
         optimizer.step()
@@ -138,12 +176,8 @@ def main() -> None:
     patched.eval()
     with torch.no_grad():
         student = patched(**encoded, use_cache=False).logits.float()
-        cosine = torch.nn.functional.cosine_similarity(
-            student.reshape(-1, student.shape[-1]),
-            teacher.reshape(-1, teacher.shape[-1]),
-            dim=-1,
-        ).mean()
-        agreement = (student.argmax(-1) == teacher.argmax(-1)).float().mean()
+        cosine = _mean_cosine_from_cpu(student, teacher)
+        agreement = (student.argmax(-1).cpu() == teacher.argmax(-1)).float().mean()
     args.output.parent.mkdir(parents=True, exist_ok=True)
     save_retrofit_adapter(
         patched,

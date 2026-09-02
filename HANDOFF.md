@@ -85,6 +85,7 @@ cd /home/frankwang122222/zjh/zjh/*/qcc-transformer-next
 - `patch_hf_model` 为每个替换层记录稳定的 `_qcc_layer_index`，供校准脚本选择；
 - 优化器参数在构造前去重，避免 HF wrapper/nested module 引用同一参数时发生重复更新；
 - `scripts/test_single_layerwise.sh` 和 `scripts/run_layerwise_sweep.sh` 提供远程实验入口，但其中的结果尚未形成 gate 证据。
+- `scripts/run_layerwise_10gpu.sh` 可将 10 组配置分配到 10 张卡；最近一次 `layerwise10_20260903_021353` 有 9 组完成、1 组（`codes=64`）OOM，最佳 held-out cosine `0.8414`，全部 `held_out_gate_passed=false`。
 
 ## 4. 已验证结果（严格区分证据等级）
 
@@ -134,7 +135,7 @@ artifacts/remote_gpu/retrain_20260902/
 ## 6. 当前困难与风险
 
 1. 当前 archive 主要保留 code-response statistics，真实 Qwen 长程 logits 与 Full-KV 差距仍大；简单增加 codes 会显著抬高反向峰值显存。
-2. 目前 calibration 是全层 teacher-distillation，虽已 checkpointing，仍受单卡 24GB 和 1.5B 模型训练吞吐限制。
+2. calibration 已增加 CPU teacher logits 和词表分块损失，但 24GB 卡在 `max_tokens=512`、`codes=64` 时仍会 OOM；更长序列需要进一步分块 activation/逐层蒸馏。
 3. 尚无官方 RULER、LongBench、PG-19 的 matched Full-KV/QCC 结果；尚无真实 128K vLLM TPOT、吞吐、peak memory/concurrency 证据。
 4. 尚未完成正式 vLLM backend registration；当前 primitive 不能冒充零改动 upstream backend。
 5. 当前没有一个 `gate_99.py` evidence bundle 返回 `passed: true`；不得宣称“99 gate 已通过”“≥98% 全面质量”或“颠覆级加速”。

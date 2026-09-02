@@ -22,6 +22,38 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from qcc_transformer import patch_hf_model, save_retrofit_adapter
 
 
+def _chunked_mse(student: torch.Tensor, teacher_cpu: torch.Tensor, *, chunk_size: int = 8192) -> torch.Tensor:
+    """Compute full-vocabulary MSE with teacher targets streamed from CPU."""
+    if student.shape != teacher_cpu.shape:
+        raise ValueError(f"student/teacher shape mismatch: {student.shape} vs {teacher_cpu.shape}")
+    total = student.new_zeros(())
+    for start in range(0, student.shape[-1], chunk_size):
+        end = min(start + chunk_size, student.shape[-1])
+        target = teacher_cpu[..., start:end].to(device=student.device, dtype=student.dtype)
+        total = total + torch.nn.functional.mse_loss(
+            student[..., start:end], target, reduction="sum"
+        )
+    return total / student.numel()
+
+
+def _mean_cosine_from_cpu(student: torch.Tensor, teacher_cpu: torch.Tensor, *, chunk_size: int = 8192) -> torch.Tensor:
+    """Mean per-token cosine while keeping the teacher off GPU."""
+    if student.shape != teacher_cpu.shape:
+        raise ValueError(f"student/teacher shape mismatch: {student.shape} vs {teacher_cpu.shape}")
+    shape = student.shape[:-1]
+    dot = student.new_zeros(shape)
+    student_sq = student.new_zeros(shape)
+    teacher_sq = student.new_zeros(shape)
+    for start in range(0, student.shape[-1], chunk_size):
+        end = min(start + chunk_size, student.shape[-1])
+        s = student[..., start:end]
+        t = teacher_cpu[..., start:end].to(device=student.device, dtype=student.dtype)
+        dot = dot + (s * t).sum(dim=-1)
+        student_sq = student_sq + (s * s).sum(dim=-1)
+        teacher_sq = teacher_sq + (t * t).sum(dim=-1)
+    return (dot / (student_sq.sqrt() * teacher_sq.sqrt()).clamp_min(1e-12)).mean()
+
+
 def parse_layer_spec(spec: str, num_layers: int) -> list[int]:
     """Parse layer specification like '8-15', '0,2,4', or 'last-half'."""
     spec = spec.strip().lower()
@@ -136,10 +168,10 @@ def main() -> None:
     baseline = AutoModelForCausalLM.from_pretrained(args.model, **common).to(device).eval()
 
     with torch.no_grad():
-        train_teacher = baseline(**train_encoded, use_cache=False).logits.float()
+        train_teacher = baseline(**train_encoded, use_cache=False).logits.float().cpu()
         held_out_teacher = None
         if held_out_encoded:
-            held_out_teacher = baseline(**held_out_encoded, use_cache=False).logits.float()
+            held_out_teacher = baseline(**held_out_encoded, use_cache=False).logits.float().cpu()
 
     del baseline
     if device.type == "cuda":
@@ -211,7 +243,7 @@ def main() -> None:
     for step in range(args.steps):
         optimizer.zero_grad(set_to_none=True)
         student = patched(**train_encoded, use_cache=False).logits.float()
-        loss = torch.nn.functional.mse_loss(student, train_teacher)
+        loss = _chunked_mse(student, train_teacher)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(trainable, 1.0)
         optimizer.step()
@@ -223,12 +255,8 @@ def main() -> None:
     patched.eval()
     with torch.no_grad():
         train_student = patched(**train_encoded, use_cache=False).logits.float()
-        train_cosine = torch.nn.functional.cosine_similarity(
-            train_student.reshape(-1, train_student.shape[-1]),
-            train_teacher.reshape(-1, train_teacher.shape[-1]),
-            dim=-1,
-        ).mean()
-        train_agreement = (train_student.argmax(-1) == train_teacher.argmax(-1)).float().mean()
+        train_cosine = _mean_cosine_from_cpu(train_student, train_teacher)
+        train_agreement = (train_student.argmax(-1).cpu() == train_teacher.argmax(-1)).float().mean()
 
         held_out_cosine = None
         held_out_agreement = None
@@ -236,12 +264,8 @@ def main() -> None:
 
         if held_out_teacher is not None:
             held_out_student = patched(**held_out_encoded, use_cache=False).logits.float()
-            held_out_cosine = torch.nn.functional.cosine_similarity(
-                held_out_student.reshape(-1, held_out_student.shape[-1]),
-                held_out_teacher.reshape(-1, held_out_teacher.shape[-1]),
-                dim=-1,
-            ).mean()
-            held_out_agreement = (held_out_student.argmax(-1) == held_out_teacher.argmax(-1)).float().mean()
+            held_out_cosine = _mean_cosine_from_cpu(held_out_student, held_out_teacher)
+            held_out_agreement = (held_out_student.argmax(-1).cpu() == held_out_teacher.argmax(-1)).float().mean()
             held_out_gate_passed = float(held_out_cosine.item()) >= args.quality_gate
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
