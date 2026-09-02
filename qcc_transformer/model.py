@@ -86,6 +86,7 @@ class QCCArchive(nn.Module):
         scan_block_size: int = 256,
         content_threshold: Optional[float] = None,
         persistent_landmark: bool = False,
+        prefix_landmark: bool = False,
     ) -> None:
         super().__init__()
         if num_heads <= 0 or head_dim <= 0 or num_codes <= 0:
@@ -126,6 +127,9 @@ class QCCArchive(nn.Module):
         # seen for each code indefinitely.  The mechanism is disabled by
         # default so existing kernels/checkpoints retain their exact state.
         self.persistent_landmark = persistent_landmark
+        self.prefix_landmark = prefix_landmark
+        if prefix_landmark and not persistent_landmark:
+            raise ValueError("prefix_landmark requires persistent_landmark")
         if persistent_landmark:
             self.landmark_mix_logits = nn.Parameter(torch.zeros(num_heads))
         self.register_buffer("decay_rates", rates, persistent=True)
@@ -172,6 +176,7 @@ class QCCArchive(nn.Module):
         )
         self._step = 0
         if self.persistent_landmark:
+            self._landmark_count = 0
             self._landmark_score = torch.full(
                 (batch_size, self.num_heads, self.num_codes),
                 -torch.inf,
@@ -208,6 +213,13 @@ class QCCArchive(nn.Module):
 
         if not self.persistent_landmark:
             return
+        if self.prefix_landmark and self._landmark_count < self.num_codes:
+            slot = self._landmark_count
+            self._landmark_key[:, :, slot] = key.to(self._landmark_key.dtype)
+            self._landmark_value[:, :, slot] = value.to(self._landmark_value.dtype)
+            self._landmark_score[:, :, slot] = self._landmark_scores(key)
+            self._landmark_count += 1
+            return
         score = self._landmark_scores(key)
         if self.content_threshold is not None:
             score = torch.where(
@@ -229,6 +241,20 @@ class QCCArchive(nn.Module):
 
     def _update_landmark_chunk(self, key: Tensor, value: Tensor) -> None:
         """Vectorized landmark update for an evicted token block."""
+
+        if not self.persistent_landmark or key.shape[2] == 0:
+            return
+        if self.prefix_landmark:
+            take = min(key.shape[2], self.num_codes - self._landmark_count)
+            for index in range(take):
+                self._update_landmark(key[:, :, index], value[:, :, index])
+            if take < key.shape[2]:
+                self._update_landmark_chunk_max(key[:, :, take:], value[:, :, take:])
+            return
+        self._update_landmark_chunk_max(key, value)
+
+    def _update_landmark_chunk_max(self, key: Tensor, value: Tensor) -> None:
+        """Vectorized max-salience update used after prefix slots are filled."""
 
         if not self.persistent_landmark or key.shape[2] == 0:
             return
@@ -849,6 +875,7 @@ class QCCSelfAttention(nn.Module):
         archive_scan_block_size: int = 256,
         archive_content_threshold: Optional[float] = None,
         archive_persistent_landmark: bool = False,
+        archive_prefix_landmark: bool = False,
         rope_theta: Optional[float] = None,
         max_position_embeddings: int = 4096,
         decay_rates: Optional[tuple[float, ...]] = None,
@@ -1790,6 +1817,7 @@ class QCCForCausalLM(nn.Module):
         archive_scan_block_size: int = 256,
         archive_content_threshold: Optional[float] = None,
         archive_persistent_landmark: bool = False,
+        archive_prefix_landmark: bool = False,
         archive_decay_rates: Optional[tuple[float, ...]] = None,
     ) -> None:
         super().__init__()
@@ -1828,6 +1856,7 @@ class QCCForCausalLM(nn.Module):
                 archive_scan_block_size=archive_scan_block_size,
                 archive_content_threshold=archive_content_threshold,
                 archive_persistent_landmark=archive_persistent_landmark,
+                archive_prefix_landmark=archive_prefix_landmark,
                 rope_theta=rope_theta if position_encoding == "rope" else None,
                 max_position_embeddings=max_position_embeddings,
                 decay_rates=archive_decay_rates,
