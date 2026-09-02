@@ -1,138 +1,170 @@
-# QCC Transformer 交接文件
+# QCC Transformer 本地交接文件
 
 更新时间：2026-09-03（Asia/Shanghai）
+交接对象：下一位继续实现、评测或部署 QCC Transformer 的工程师/模型
+状态：代码已推送；99 gate 尚未通过；不要把当前结果包装成已达标结果。
 
-## 目标与验收口径
+## 1. 项目目标与验收口径
 
-当前严格目标是让同一个真实 pretrained 1B--7B checkpoint 同时满足：
+目标是让同一个真实 pretrained 1B–7B checkpoint，同时满足以下五项要求：
 
-- 官方 RULER、LongBench、PG-19 相对 matched Full-KV 的质量比均 `>= 0.98`；
-- 真实 vLLM、128K context：TPOT `>= 5x`、吞吐 `>= 2x`；
-- matched peak memory reduction `>= 80%`，long-context concurrency `>= 4x`；
-- 校准 trainable 参数 `<= 1%`，HF/vLLM 零业务代码接入。
+1. 官方 RULER、LongBench、PG-19 相对 matched Full-KV 的质量均达到 `>= 98%`；
+2. 真实 vLLM、128K context：TPOT `>= 5x`，吞吐 `>= 2x`；
+3. matched peak memory reduction `>= 80%`，并带来 long-context concurrency `>= 4x`；
+4. 校准 trainable 参数 `<= 1%`；
+5. HF/vLLM 基本零业务代码接入，做到 retrofit/即插即用。
 
-`benchmarks/gate_99.py` 是 fail-closed gate。当前没有任何通过 bundle，不能把
-synthetic、random-weight、QCC-only、短上下文或 unmatched 结果当作 99 gate 证据。
+`benchmarks/gate_99.py` 是 fail-closed 验收器。没有完整、同模型、同硬件、同数据和可复核原始日志的 evidence bundle，就不能声称通过 99 gate。synthetic、random-weight、QCC-only、短上下文或 unmatched 结果只能作为开发诊断。
 
-## 代码与工作区路径
+## 2. 本地、远程与 GitHub 路径
 
-- 本地仓库：`/Users/nathmath/Documents/Codex/2026-09-01/cha`
-- GitHub：<https://github.com/Marchematics/qcc-transformer>
-- 当前本地分支：`main`
-- 上次已推送提交：`3ae1a9a Use fused local kernel in vLLM state`
-- 本次改动尚未提交：位置解耦 archive、HF RoPE 修复、校准内存优化、测试和文档。
-- 远程独立工作区（实际存在路径）：
-  `/home/frankwang122222/zjh/zjh/工作文件/qcc-transformer-next`
-- 远程连接：`ssh frankwang122222@100.127.220.34`
-- 远程真实模型：
-  `/home/frankwang122222/zjh/zjh/工作文件/qcc-transformer-next/models/qwen2.5-1.5b`
+### 本地（当前 Codex 工作区）
 
-用户要求的 `/zjh/工作目录/工作文件` 在该主机上没有对应的项目子目录；实际 QCC
-项目在上面的 `zjh/zjh/工作文件` 路径，不能混用两个路径。
+- 仓库根目录：`/Users/nathmath/Documents/Codex/2026-09-01/cha`
+- 交接文件：`/Users/nathmath/Documents/Codex/2026-09-01/cha/HANDOFF.md`
+- 工作区说明：`/Users/nathmath/Documents/Codex/2026-09-01/cha/WORKSPACE.md`
+- 研究计划/实验跟踪：`/Users/nathmath/Documents/Codex/2026-09-01/cha/refine-logs/`
+- 核心实现：`/Users/nathmath/Documents/Codex/2026-09-01/cha/qcc_transformer/`
+- 基准与 gate：`/Users/nathmath/Documents/Codex/2026-09-01/cha/benchmarks/`
+- 测试：`/Users/nathmath/Documents/Codex/2026-09-01/cha/tests/`
+- 实验产物：`/Users/nathmath/Documents/Codex/2026-09-01/cha/artifacts/`
 
-## 已实现的核心改动
+### 远程 GPU 工作区
 
-### 位置解耦 archive
+- SSH：`ssh frankwang122222@100.127.220.34`
+- 用户要求的资源根目录：`/home/frankwang122222/zjh/工作目录/工作文件`
+- 实际 QCC 项目目录（当前可用的 canonical project path）：`/home/frankwang122222/zjh/zjh/工作文件/qcc-transformer-next`
+- 真实 checkpoint：`/home/frankwang122222/zjh/zjh/工作文件/qcc-transformer-next/models/qwen2.5-1.5b`
+- 远程实验产物：`<project>/artifacts/hf_99/`，包括 `sweep/`、`sweep2/`、`sweep3/`
 
-`qcc_transformer/model.py` 增加 `archive_position_invariant`：
+中文路径在某些 shell/同步工具中会出现编码问题；远程进入项目时可以使用：
 
-- 局部 attention 继续使用 rotary Q/K；
-- 长程 archive 使用 raw（未旋转）Q/K，避免不同绝对位置的 RoPE 相位污染内容寻址；
-- streaming `step`、`step_chunk`、CUDA differentiable chunk path 和 ring wrap-around
-  均维护独立 raw key ring。
+```bash
+cd /home/frankwang122222/zjh/zjh/*/qcc-transformer-next
+```
 
-HF retrofit 默认开启该选项，可用 `--no-archive-position-invariant` 做旧语义 ablation。
+不要把 SSH 密码写入脚本、日志或本文件；使用现有 SSH agent/密钥或交互式认证。
 
-### HF/Qwen 兼容性修复
+### GitHub
 
-- `_apply_rope` 改为 Hugging Face Llama/Qwen 使用的 half-split `rotate_half` 约定；
-- `patch_hf_model` 同时读取旧版 `config.rope_theta` 和 Transformers 5.x
-  `config.rope_parameters["rope_theta"]`；
-- retrofit 新建的 `rope_inv_freq` buffer 显式移动到 HF projection 所在 CUDA 设备；
-- GQA/MQA 仍需显式 `kv_head_policy="repeat"`，不会静默改变 head 语义。
+- 仓库：<https://github.com/Marchematics/qcc-transformer>
+- 分支：`main`
+- 当前已推送提交：`ede94fc Fix HF RoPE retrofit and position-invariant archive`
+- 本地工作树中未跟踪的实验日志/产物不属于代码提交，见第 5 节。
 
-### 校准与审计
+## 3. 已实现内容
 
-`benchmarks/calibrate_hf_retrofit.py` 现在：
+### 3.1 Position-invariant archive
 
-- 先计算 teacher logits、释放 teacher，再加载 student，避免 24GB 卡双模型 OOM；
-- 默认开启 gradient checkpointing，并启用 input grads；
-- 输出 `parameter_count`、`trainable_parameter_count`、fraction、`run_id`、HF/vLLM
-  zero-code flags；
-- adapter 仍只包含 QCC archive/gate，不复制 pretrained backbone。
+`qcc_transformer/model.py` 新增 `archive_position_invariant`：
 
-## 已验证结果（必须区分口径）
+- 局部 attention 仍使用 rotary Q/K，保持 HF/Qwen 的局部语义；
+- 长程 archive 使用未旋转的 raw Q/K，避免绝对位置 RoPE 相位污染内容寻址；
+- 已贯通 `forward`、streaming `step`、`step_chunk`、CUDA differentiable chunk path 与 ring wrap-around；
+- HF retrofit 默认开启；使用 `--no-archive-position-invariant` 可做旧语义 ablation。
 
-### 本地
+### 3.2 HF/Qwen RoPE 与投影兼容
 
-- `git diff --check`、`compileall`、pytest：通过（当前 51 个收集项，46 passed、5 个 CUDA/Triton 条件 skip）。
+- `_apply_rope` 使用 HF Llama/Qwen 的 half-split `rotate_half` 约定；
+- 同时兼容旧版 `config.rope_theta` 与 Transformers 5.x 的 `config.rope_parameters["rope_theta"]`；
+- 新建的 `rope_inv_freq` buffer 会显式移动到 projection 所在 CUDA device；
+- GQA/MQA 不静默改变 head 语义，使用 `kv_head_policy="repeat"` 时才显式复制 KV heads。
 
-### 远程真实 Qwen2.5-1.5B（1,543,714,304 参数）
+### 3.3 校准、显存与审计
 
-| 实验 | 结果 | 结论 |
+`benchmarks/calibrate_hf_retrofit.py` 已支持：
+
+- 先算 teacher logits、释放 teacher，再加载 student，避免 24GB 卡双模型 OOM；
+- 默认 gradient checkpointing，并启用 input grads；
+- 输出模型参数量、可训练参数量、参数比例、`run_id` 以及 HF/vLLM zero-code flags；
+- adapter 只保存 QCC archive/gate，不复制 pretrained backbone。
+
+## 4. 已验证结果（严格区分证据等级）
+
+### 本地回归
+
+- `python -m pytest -q`：51 个收集项，46 passed，5 个 CUDA/Triton 条件 skip；
+- `git diff --check`：通过；
+- `python -m compileall qcc_transformer benchmarks tests`：通过。
+
+### 真实 Qwen2.5-1.5B
+
+远程模型参数量约 `1,543,714,304`。当前结果：
+
+| 实验 | 结果 | 解释 |
 |---|---:|---|
 | 1001 token，window 覆盖全序列，matched Full-KV | cosine `0.9998749`，top-1 `100%` | HF projection/GQA/RoPE/local exact path 已对齐 |
-| 9868 token，uncalibrated archive，window 128 | cosine `0.5875`，top-1 `9.97%` | 长程 archive 质量严重不足 |
-| calibration 10 steps，window 64/codes 32；held-out 1001 | cosine `0.9319`，top-1 `99.9%` | 未达到 0.99 |
-| calibration 100 steps，window 48/codes 32；train 256 | cosine `0.9800`，top-1 `100%` | 训练集诊断 |
-| 同一 adapter held-out 1001 token | cosine `0.9686`，top-1 `100%` | 仍未达到 0.99 |
-| best of 10-card sweep3 held-out | cosine `0.9370`，top-1 `100%` | 仍未达到 0.99 |
+| 9868 token，window 128，未校准 archive | cosine `0.5875`，top-1 `9.97%` | 长程 archive 明显不足 |
+| 10-step calibration，window 64/codes 32，held-out 1001 | cosine `0.9319`，top-1 `99.9%` | 未达到 0.99 |
+| 100-step calibration，window 48/codes 32，训练集 | cosine `0.9800`，top-1 `100%` | 仅训练集诊断，不是 gate 证据 |
+| 同 adapter held-out 1001 | cosine `0.9686`，top-1 `100%` | 仍未达到 0.99 |
+| 10 卡 sweep3 最佳 held-out | cosine `0.9370`，top-1 `100%` | 仍未达到 0.99 |
 
-校准 trainable 参数：`1,935,696 / 1,545,650,000 = 0.1252%`，满足参数比例限制，
-但不代表质量 gate 已满足。
+校准参数比例：`1,935,696 / 1,545,650,000 = 0.1252%`，满足 `<=1%` 这一单项限制，但不代表整体 99 gate 通过。
 
-## 远程资源与清理状态
+特别注意：Qwen2.5-1.5B 原始 `max_position_embeddings=32768`，不能直接拿它作为 128K pretrained gate 证据；128K 需要原生长上下文 checkpoint、明确 RoPE scaling 适配，或另行审计的长上下文扩展方案。
 
-- 远程有 10 张 RTX 3090（每张 24GB）；2026-09-03 已按用户授权停止 Volt、roco-spring、YOLO 等其它 GPU 任务。
-- 第三轮 sweep 使用 10 卡并行，所有作业属于 QCC 项目，日志和 adapter 在
-  `artifacts/hf_99/sweep3/`。
-- 远程 QCC 证据目录：`artifacts/hf_99/`；未把大模型、adapter 或日志推入 Git。
-- 远程磁盘曾 100% 满；已清理可重建的 `~/.cache/pip`（约 3.7GB）及超过保留期的
-  Hugging Face `.incomplete` 下载，释放约 4.5GB。未删除 HOTC2026、biohub 或其它项目的用户数据。
+## 5. 资源、运行状态与清理
+
+- 远端共有 10 张 RTX 3090，每张 24GB；按用户授权，Volt、roco-spring、YOLO 等其它 GPU 任务已停止；当前没有 QCC 活跃任务，10 卡可继续并行实验。
+- 三轮 Qwen sweep 均为 QCC 项目实验，日志/adapter 位于远程 `artifacts/hf_99/sweep*`。
+- 远程曾发生磁盘 100% 满；已清理可重建的 `~/.cache/pip`（约 3.7GB）、过期 Hugging Face `.incomplete` 文件和本次同步产生的 `._*` 文件，释放约 4.5GB。
+- 未删除 HOTC2026、biohub、其它用户项目或用户已有 QCC artifacts。
 - Colab CLI 曾返回 `Service Unavailable`，当前没有活动 Colab session。
-- 远程未安装正式 vLLM；`qcc_transformer/vllm.py` 是 dependency-free primitive，
-  不是已注册的 upstream vLLM backend。远程工作区顶层有一个同名 `vllm.py`，测试正式
-  vLLM 时应在项目目录外或先确认 import 来源，避免 shadowing。
+- 远程未安装正式 vLLM；`qcc_transformer/vllm.py` 目前是 dependency-free primitive，不是 upstream vLLM 已注册 backend。远程项目顶层还有同名 `vllm.py`，做正式 vLLM 测试时要先确认 import 来源，避免 shadowing。
 
-## 当前主要困难
+本地以下未跟踪文件是有意保留的实验结果，不要误删：
 
-1. 线性/多尺度 archive 只保留 code response statistics，真实 Qwen 长程 logits 与 Full-KV 差距仍大；增加 codes 会明显推高反向峰值显存。
-2. 目前 calibration 是全层 teacher-distillation，虽已用 checkpointing，但仍受 24GB 显存和 1.5B 模型训练吞吐限制。
-3. Qwen2.5 原始 `max_position_embeddings=32768`；不能把它直接当作 128K pretrained gate，需要 RoPE scaling/原生长上下文 checkpoint 或明确的长上下文适配证据。
-4. 尚无官方 RULER/LongBench/PG-19 的 matched Full-KV/QCC 结果；尚无真实 vLLM 128K TPOT/吞吐、peak memory/concurrency 证据。
-5. 不能用当前结果宣称“99 gate 通过”或“颠覆级加速”。
+```text
+artifacts/hf_99/
+artifacts/local_cpu/multiseed/
+artifacts/remote_gpu/retrain_20260902/
+```
 
-## 推荐下一步
+清理前必须确认：属于 QCC、未被活跃作业引用、超过保留期且可从源数据/脚本重建；不要按文件名批量删除压缩包或其它项目目录。
 
-1. 读取 `artifacts/hf_99/adapter_eval_long.json`，确认 100-step adapter 的 held-out 结果。
-2. 加入按层/按深度的 calibration（优先后半层），并比较 codes/window、gate 初始化和 persistent landmark；每次保留 held-out 文本。
-3. 选择原生支持 >=128K 的真实 1B--7B checkpoint，准备官方 RULER/LongBench/PG-19 数据，生成同 `run_id` 的 evidence sections。
-4. 在干净环境安装匹配版本 vLLM，完成 version-specific backend registration 和 128K matched benchmark；同时记录 CUDA peak memory 与并发曲线。
-5. 所有 section 写入一个 JSON bundle 后运行：
+## 6. 当前困难与风险
 
-   ```bash
-   python benchmarks/gate_99.py --evidence artifacts/gates/<run_id>.json
-   ```
+1. 当前 archive 主要保留 code-response statistics，真实 Qwen 长程 logits 与 Full-KV 差距仍大；简单增加 codes 会显著抬高反向峰值显存。
+2. 目前 calibration 是全层 teacher-distillation，虽已 checkpointing，仍受单卡 24GB 和 1.5B 模型训练吞吐限制。
+3. 尚无官方 RULER、LongBench、PG-19 的 matched Full-KV/QCC 结果；尚无真实 128K vLLM TPOT、吞吐、peak memory/concurrency 证据。
+4. 尚未完成正式 vLLM backend registration；当前 primitive 不能冒充零改动 upstream backend。
+5. 当前没有一个 `gate_99.py` evidence bundle 返回 `passed: true`；不得宣称“99 gate 已通过”“≥98% 全面质量”或“颠覆级加速”。
 
-6. 只有 gate 返回 `passed: true` 且原始日志、模型 hash、硬件信息可复核时，才可对外声称满足用户的五项要求。
+## 7. 下一阶段目标（按优先级）
 
-## 常用命令
+1. 先提升真实长程 fidelity：实现按层/按深度 calibration（优先后半层），系统比较 `num_codes`、`window_size`、gate 初始化、persistent/prefix landmark，并固定 held-out 文本。
+2. 选择原生支持 `>=128K` 的真实 1B–7B checkpoint，记录模型 hash、tokenizer、RoPE 配置和硬件信息。
+3. 接入官方 RULER、LongBench、PG-19，分别跑 matched Full-KV 与 QCC，输出可复核的逐任务结果。
+4. 在干净环境安装匹配版本 vLLM，完成 version-specific backend registration；跑真实 128K TPOT、吞吐、CUDA peak memory 和并发曲线。
+5. 把所有验收 section 写入同一个 evidence bundle，并执行：
 
-本地回归：
+```bash
+cd /Users/nathmath/Documents/Codex/2026-09-01/cha
+python benchmarks/gate_99.py --evidence artifacts/gates/<run_id>.json
+```
+
+只有 gate 返回 `passed: true`，且原始日志、模型 hash、硬件和 benchmark 可复核，才可以对外宣称达到用户的五项目标。
+
+## 8. 常用命令
+
+### 本地回归
 
 ```bash
 cd /Users/nathmath/Documents/Codex/2026-09-01/cha
 python -m pytest -q
+python -m compileall qcc_transformer benchmarks tests
+git diff --check
 ```
 
-远程进入项目（用 glob 可规避中文路径编码问题）：
+### 远程进入项目
 
 ```bash
 ssh frankwang122222@100.127.220.34
 cd /home/frankwang122222/zjh/zjh/工作文件/qcc-transformer-next
 ```
 
-真实 HF matched fidelity：
+### 真实 HF matched fidelity（示例）
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 HF_ENDPOINT=https://hf-mirror.com \
@@ -141,3 +173,11 @@ python benchmarks/benchmark_hf_retrofit.py \
   --window-size 128 --num-codes 64 --kv-head-policy repeat \
   --output artifacts/hf_99/<name>.json
 ```
+
+## 9. 交接原则
+
+- 先读本文件、`README.md`、`WORKSPACE.md` 和 `refine-logs/EXPERIMENT_PLAN.md`，再启动长任务；
+- 所有新实验必须记录 `run_id`、模型路径/hash、数据来源、卡号、CUDA/PyTorch/Transformers 版本、命令行、原始日志和输出 JSON；
+- 不覆盖已有 artifacts；新实验使用新目录或新文件名；
+- 任何性能/质量数字先跑 `gate_99.py` 和相应审计，再写入 README 或论文；
+- 用户要求的“实现并推到 GitHub”已完成到 `ede94fc`，后续代码改动需单独提交并推送，避免把大模型和大日志提交进 Git。
