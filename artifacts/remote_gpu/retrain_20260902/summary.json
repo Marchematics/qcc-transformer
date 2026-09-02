@@ -1,0 +1,34 @@
+{
+  "runtime": "tsinghua3090-X11DPG-OT",
+  "gpus": 8,
+  "code_commit": "62186e1",
+  "configuration": {
+    "d_model": 32,
+    "layers": 1,
+    "heads": 4,
+    "num_codes": 32,
+    "window_size": 16,
+    "position_encoding": "none",
+    "persistent_landmark": true,
+    "prefix_landmark": true,
+    "training_steps": 800,
+    "training_batch": 8,
+    "query_curriculum": [32, 120]
+  },
+  "stress_set": {
+    "contexts": [128000, 1000000],
+    "value_ids_per_context": 29,
+    "examples_per_seed": 58,
+    "seeds": [101, 102, 103, 104, 105, 106, 107, 108]
+  },
+  "results": {
+    "aggregate_correct": 18,
+    "aggregate_examples": 464,
+    "aggregate_accuracy": 0.0387931034,
+    "mean_seed_accuracy": 0.03879325,
+    "best_seed": 101,
+    "best_seed_correct": 4,
+    "best_seed_accuracy": 0.068966
+  },
+  "interpretation": "After fixing prefix-landmark wiring, eight independently trained seeds still fail the strict multi-value 128K/1M stress test. This is a reproducible negative result, not evidence for the 1M retrieval target."
+}

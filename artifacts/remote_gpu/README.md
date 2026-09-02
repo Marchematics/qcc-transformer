@@ -23,3 +23,9 @@ measured `0.72×/0.68×/0.69×/0.91×` QCC-vs-Full-KV ratios at 1K/2K/4K/8K
 (2-step averages).  The modest change confirms that Python/module dispatch
 and the full model shell, rather than only local attention, dominate this
 reference implementation; it is retained as a negative systems ablation.
+
+`retrain_20260902/summary.json` records an eight-seed retraining sweep after
+the prefix-wiring fix.  The strict 128K/1M all-value stress set yielded
+`18/464 = 3.88%` aggregate accuracy (best seed `4/58 = 6.90%`).  This confirms
+that the retrieval failure is not a single unlucky initialization and keeps
+the 1M ≥98% gate explicitly failed.
