@@ -144,7 +144,12 @@ def main() -> None:
         "matched": True,
         "note": "Streaming memory/prefill diagnostic; combine with task quality and versioned vLLM evidence for 99 gate.",
     }
-    if baseline_result.get("status") == "ok" and qcc_result.get("status") == "ok":
+    measurable_memory = all(
+        isinstance(result.get(field), (int, float))
+        for result in (baseline_result, qcc_result)
+        for field in ("peak_allocated_bytes", "peak_reserved_bytes")
+    )
+    if baseline_result.get("status") == "ok" and qcc_result.get("status") == "ok" and measurable_memory:
         result["derived"] = {
             "prefill_speedup": baseline_result["tokens_per_second"] / max(qcc_result["tokens_per_second"], 1e-12),
             "peak_allocated_reduction": 1.0 - qcc_result["peak_allocated_bytes"] / max(baseline_result["peak_allocated_bytes"], 1),
@@ -157,6 +162,9 @@ def main() -> None:
             "peak_reserved_reduction": None,
             "note": "A matched speed/memory ratio is undefined because one side did not complete.",
         }
+        if baseline_result.get("status") == "ok" and qcc_result.get("status") == "ok":
+            result["derived"]["note"] = "Peak CUDA memory is unavailable on non-CUDA device; only throughput is reported."
+            result["derived"]["prefill_speedup"] = baseline_result["tokens_per_second"] / max(qcc_result["tokens_per_second"], 1e-12)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2), encoding="utf-8")
     print(json.dumps(result, indent=2))

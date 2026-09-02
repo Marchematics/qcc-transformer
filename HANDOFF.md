@@ -188,6 +188,9 @@ python benchmarks/gate_99.py --evidence artifacts/gates/<run_id>.json
 - 2026-09-03 复查时远程 SSH 与 Colab 均无可用活动会话；重新启动长任务前先检查连接和 GPU 占用。
 - 本地 tiny-random-Llama CPU smoke 已验证 `--cosine-weight 0.3` 与多 chunk
   参数路径可运行（1 step，held-out cosine `0.99537`；仅 API smoke，不是 gate 证据）。
+- 新增 `benchmarks/benchmark_hf_concurrency.py`，可扫独立请求 batch；底层
+  `benchmark_hf_streaming_memory.py` 现支持 `--batch-size`，并在 CPU 上只报告
+  吞吐、不错误计算 CUDA 峰值显存。该工具仍是 HF diagnostic，不能替代 vLLM gate。
 
 ### 本地回归
 
