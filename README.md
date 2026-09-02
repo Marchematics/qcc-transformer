@@ -172,6 +172,14 @@ also completed a 4M-token MPS stream in `51.57 s` with `91.70 ms` TPOT and a
 at the configured FullAttention context length; it is not a 4M FullAttention
 execution or a language-quality result.
 
+The lexical-ring configuration also completed an actual 4M-token CUDA stream
+on an RTX 3090 (`d_model=64`, two layers, eight heads, 16-token window, 32
+codes, chunk size 256).  It processed all 4,000,000 tokens in `55.805 s` and
+reported a warmed steady-state TPOT of `2.248 ms`; the bounded state was
+`106,496 B`, or `0.002600%` of a hypothetical 4M fp32 Full-KV cache.  This is
+an execution and state result only: no 4M FullAttention run was attempted.
+See [`artifacts/remote_gpu/lexical_state_4m_fair.json`](artifacts/remote_gpu/lexical_state_4m_fair.json).
+
 ### Colab CUDA/Triton evidence (Tesla T4)
 
 The run is reproducible with the Colab CLI (after `colab auth login`):
