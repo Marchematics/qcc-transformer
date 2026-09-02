@@ -50,8 +50,16 @@ def _model_kwargs(args: argparse.Namespace, length: int, *, full: bool) -> dict[
         "d_model": args.d_model,
         "num_layers": args.layers,
         "num_heads": args.heads,
-        "max_position_embeddings": length + 1,
-        "window_size": length + 1 if full else args.window_size,
+        # Reserve positions for the post-prefill decode warmup/measurement
+        # probes as well as the prompt itself.  Without this budget the
+        # harness can fail after a successful long prefill and misreport a
+        # model position-limit error as a latency failure.
+        "max_position_embeddings": length + args.decode_warmup + args.decode_steps + 1,
+        "window_size": (
+            length + args.decode_warmup + args.decode_steps + 1
+            if full
+            else args.window_size
+        ),
         "num_codes": args.num_codes,
         "archive_content_threshold": args.archive_content_threshold,
         "position_encoding": args.position_encoding,
@@ -97,7 +105,8 @@ def _latency_gates(
     for length in lengths:
         qcc = QCCForCausalLM(**_model_kwargs(args, length, full=False)).to(device)
         qcc_prefill, qcc_tpot, _ = run_stream(
-            qcc, length, args.chunk_size, args.vocab_size, device
+            qcc, length, args.chunk_size, args.vocab_size, device,
+            decode_warmup=args.decode_warmup, decode_steps=args.decode_steps,
         )
         entry: dict[str, Any] = {
             "qcc_prefill_seconds": qcc_prefill,
@@ -107,7 +116,8 @@ def _latency_gates(
         if args.compare_full and length <= args.full_max_length:
             full = QCCForCausalLM(**_model_kwargs(args, length, full=True)).to(device)
             full_prefill, full_tpot, _ = run_stream(
-                full, length, args.chunk_size, args.vocab_size, device
+                full, length, args.chunk_size, args.vocab_size, device,
+                decode_warmup=args.decode_warmup, decode_steps=args.decode_steps,
             )
             entry["full"] = {
                 "prefill_seconds": full_prefill,
@@ -214,6 +224,8 @@ def main() -> None:
     parser.add_argument("--archive-content-threshold", type=float, default=None)
     parser.add_argument("--archive-scan-block-size", type=int, default=256)
     parser.add_argument("--chunk-size", type=int, default=256)
+    parser.add_argument("--decode-warmup", type=int, default=4)
+    parser.add_argument("--decode-steps", type=int, default=16)
     parser.add_argument("--batch", type=int, default=2)
     parser.add_argument("--full-max-length", type=int, default=4096)
     parser.add_argument("--retrieval-context", type=int, default=1_000_000)
@@ -238,6 +250,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.full_max_length <= 0 or args.chunk_size <= 0:
         raise ValueError("full-max-length and chunk-size must be positive")
+    if args.decode_warmup < 0 or args.decode_steps <= 0:
+        raise ValueError("decode-warmup must be non-negative and decode-steps positive")
     if args.threads is not None:
         if args.threads <= 0:
             raise ValueError("threads must be positive")
