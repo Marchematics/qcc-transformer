@@ -1,0 +1,25 @@
+{
+  "model": "Qwen/Qwen2.5-0.5B-Instruct",
+  "model_snapshot": "local HF snapshot used for smoke test",
+  "prompt_tokens": 4,
+  "retrofit": {
+    "window_size": 16,
+    "num_codes": 16,
+    "kv_head_policy": "repeat",
+    "patched_layers": 24
+  },
+  "device": "cpu",
+  "baseline_full_kv": {
+    "ttft_seconds": 1.8664254999966943,
+    "tpot_ms": 33.29102099814918
+  },
+  "qcc_retrofit": {
+    "ttft_seconds": 0.09959958300169092,
+    "tpot_ms": 32.42760449938942
+  },
+  "speedup": {
+    "ttft": 18.739290303705467,
+    "tpot": 1.0266259722877777
+  },
+  "note": "Matched real-HF latency smoke on a short CPU prompt; short-prompt TTFT is not evidence for 128K/1M behavior."
+}
