@@ -235,16 +235,24 @@ class QCCArchive(nn.Module):
                 # Bind the previous retained key to the current token's value.
                 # This is useful for marker/value streams where the query
                 # matches the marker key but the answer is its successor.
-                self._landmark_value[:, :, self._prefix_pending_slot] = value.to(
+                updated_value = self._landmark_value.clone()
+                updated_value[:, :, self._prefix_pending_slot] = value.to(
                     self._landmark_value.dtype
                 )
+                self._landmark_value = updated_value
             score = self._landmark_scores(key)
-            self._landmark_key[:, :, slot] = key.to(self._landmark_key.dtype)
-            self._landmark_value[:, :, slot] = value.to(self._landmark_value.dtype)
+            updated_key = self._landmark_key.clone()
+            updated_value = self._landmark_value.clone()
+            updated_key[:, :, slot] = key.to(self._landmark_key.dtype)
+            updated_value[:, :, slot] = value.to(self._landmark_value.dtype)
+            self._landmark_key = updated_key
+            self._landmark_value = updated_value
             # Validity is tracked per retained slot; use the strongest code
             # response as its scalar salience while routing itself uses the
             # retained key directly at read time.
-            self._landmark_score[:, :, slot] = score.max(dim=-1).values
+            updated_score = self._landmark_score.clone()
+            updated_score[:, :, slot] = score.max(dim=-1).values
+            self._landmark_score = updated_score
             self._landmark_count += 1
             if self.prefix_pair_landmark:
                 self._prefix_pending_slot = slot
