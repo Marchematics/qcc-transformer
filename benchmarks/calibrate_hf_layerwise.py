@@ -151,6 +151,10 @@ def main() -> None:
         "--archive-landmark-temperature", type=float, default=1.0,
         help="routing temperature multiplier for persistent landmarks",
     )
+    parser.add_argument(
+        "--archive-norm-gating", action="store_true",
+        help="parameter-free norm agreement gate for archive contribution",
+    )
     parser.add_argument("--max-tokens", type=int, default=2048)
     parser.add_argument(
         "--num-train-chunks", type=int, default=1,
@@ -264,6 +268,7 @@ def main() -> None:
         archive_prefix_landmark=args.archive_prefix_landmark,
         archive_prefix_pair_landmark=args.archive_prefix_pair_landmark,
         archive_landmark_temperature=args.archive_landmark_temperature,
+        archive_norm_gating=args.archive_norm_gating,
         kv_head_policy=args.kv_head_policy,
         gate_bias_init=args.gate_bias_init,
     )

@@ -113,6 +113,11 @@ directional logit loss into the historical MSE objective, which is useful when
 top-1/ranking fidelity lags behind the training MSE.  Set the weight to `0` to
 reproduce prior runs exactly.
 
+For a parameter-free safety variant, `--archive-norm-gating` attenuates the
+archive contribution when its response norm disagrees with the exact local
+window. It preserves O(1) state and is included in the final 10-GPU sweep as a
+separate landmark/norm-gating configuration.
+
 For a real-model latency smoke (Full-KV teacher vs retrofit student), run:
 
 ```bash
@@ -171,7 +176,7 @@ This avoids pinning an unstable vLLM ABI while making the cache state and
 shape contract explicit; upstream vLLM still needs a version-specific backend
 registration and matched quality benchmark.
 
-### 99 gate (all five requirements must hold simultaneously)
+### 99 gate (all requirements must hold simultaneously)
 
 `benchmarks/gate_99.py` is the fail-closed acceptance test for a production
 claim. It consumes one JSON evidence bundle and exits non-zero unless the same
@@ -180,6 +185,12 @@ claim. It consumes one JSON evidence bundle and exits non-zero unless the same
 with TPOT speedup `>=5x` and throughput speedup `>=2x`, matched peak-memory
 reduction `>=80%` and concurrency speedup `>=4x`, and calibration of at most
 `1%` trainable parameters with explicit HF/vLLM zero-code evidence.
+The final schema additionally requires 1M retrieval (>=99%, >=1000 trials with
+random depth/multi-needle/semantic distractors), tail-safety buckets (>=95%,
+misses <1%), Pareto dominance over FP8 Full-KV plus two compression baselines,
+non-regressing p95/p99 production latency, 128K/256K/512K/1M scaling points,
+and independent replication across at least two model families and GPU
+generations.
 Synthetic, random-weight, QCC-only, short-context, or unmatched records are
 rejected even when their numeric value looks favorable.
 
@@ -188,11 +199,12 @@ python benchmarks/gate_99.py --evidence artifacts/gates/run.json
 ```
 
 The expected keys are `run_id`, `model`, `quality.ruler|longbench|pg19`,
-`vllm_latency`, `memory`, and `calibration`; each section records its own
-`run_id`, provenance flags, and raw Full-KV/QCC measurements. The current
-repository intentionally does **not** ship a passing bundle: real 1--7B
-quality, official long-context scores, and matched vLLM/memory/concurrency
-evidence are still missing and therefore the gate must fail closed.
+`vllm_latency`, `memory`, `calibration`, `retrieval_1m`, `tail_safety`,
+`pareto_dominance`, `production_latency`, `scaling_law`, and `generalization`;
+each section records its own `run_id`, provenance flags, and raw Full-KV/QCC
+measurements. The current repository intentionally does **not** ship a passing
+bundle: real long-context quality, matched vLLM/memory/concurrency evidence,
+and the extended anti-cherry-picking sections are still missing.
 
 ## Run tests
 

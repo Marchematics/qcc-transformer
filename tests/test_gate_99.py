@@ -59,6 +59,50 @@ def _evidence() -> dict:
             "vllm_zero_code_changes": True,
             "run_id": run_id,
         },
+        "retrieval_1m": {
+            "model_id": "org/qwen-1.5b", "trials": 1000,
+            "qcc_success_rate": 0.995, "full_kv_success_rate": 1.0,
+            "random_depth": True, "multi_needle": True, "semantic_distractor": True,
+            "matched_full_kv": True, "real_model": True, "official": True,
+            "synthetic": False, "qcc_only": False, "run_id": run_id,
+        },
+        "tail_safety": {
+            "model_id": "org/qwen-1.5b", "catastrophic_retrieval_miss_rate": 0.0,
+            "critical_buckets": [{"qcc_full_kv_ratio": 0.99}],
+            "matched_full_kv": True, "real_model": True, "official": True,
+            "synthetic": False, "qcc_only": False, "run_id": run_id,
+        },
+        "pareto_dominance": {
+            "model_id": "org/qwen-1.5b",
+            "baselines": [
+                {"name": "fp8_full_kv", "qcc_dominates": True},
+                {"name": "compresskv", "qcc_dominates": True},
+                {"name": "h2o", "qcc_dominates": True},
+            ],
+            "matched_full_kv": True, "real_model": True, "official": True,
+            "synthetic": False, "qcc_only": False, "run_id": run_id,
+        },
+        "production_latency": {
+            "model_id": "org/qwen-1.5b", "ttft_regression": 0.0,
+            "p95_tpot_speedup": 1.1, "p99_tpot_speedup": 1.02,
+            "throughput_latency_tradeoff": False,
+            "matched_full_kv": True, "real_model": True, "official": True,
+            "synthetic": False, "qcc_only": False, "run_id": run_id,
+        },
+        "scaling_law": {
+            "model_id": "org/qwen-1.5b",
+            "points": [
+                {"context_tokens": n, "qcc_state_bytes": 1000, "tpot_ms": 1.0, "matched_full_kv": True}
+                for n in (128_000, 256_000, 512_000, 1_000_000)
+            ],
+            "matched_full_kv": True, "real_model": True, "official": True,
+            "synthetic": False, "qcc_only": False, "run_id": run_id,
+        },
+        "generalization": {
+            "model_families": 2, "gpu_generations": 2, "independent_reproductions": 2,
+            "matched_full_kv": True, "real_model": True, "official": True,
+            "synthetic": False, "qcc_only": False, "run_id": run_id,
+        },
     }
 
 

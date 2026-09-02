@@ -97,6 +97,12 @@ def test_patch_hf_gate_bias_ablation_is_explicit():
     assert torch.allclose(model.attn.qcc.gate.bias, torch.zeros_like(model.attn.qcc.gate.bias))
 
 
+def test_patch_hf_archive_norm_gating_is_explicit():
+    model = _Model()
+    patch_hf_model(model, window_size=4, num_codes=4, use_triton=False, archive_norm_gating=True)
+    assert model.attn.qcc.archive_norm_gating is True
+
+
 def test_patch_hf_supports_fused_qkv_attention():
     model = _FusedModel()
     assert patch_hf_model(model, window_size=4, num_codes=4, use_triton=False, kv_head_policy="repeat") == ["attn"]

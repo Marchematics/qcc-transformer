@@ -14,24 +14,24 @@ NUM_TRAIN_CHUNKS="${NUM_TRAIN_CHUNKS:-4}"
 cd "$PROJECT_DIR"
 mkdir -p "$OUTPUT_DIR"
 
-# gpu:layers:window:codes:steps:lr:cosine_weight:persistent_landmark
+# gpu:layers:window:codes:steps:lr:cosine_weight:persistent_landmark:norm_gate
 CONFIGS=(
-  "0:all:48:16:50:0.01:0.0:0"
-  "1:all:48:16:50:0.01:0.1:0"
-  "2:all:48:16:50:0.01:0.3:0"
-  "3:all:48:16:50:0.01:0.5:0"
-  "4:all:48:16:50:0.01:1.0:0"
-  "5:last-half:48:32:50:0.01:0.3:0"
-  "6:last-half:64:32:50:0.005:0.3:0"
-  "7:last-quarter:48:16:50:0.01:0.3:0"
-  "8:all:48:16:100:0.01:0.3:1"
-  "9:all:48:32:100:0.005:0.3:1"
+  "0:all:48:16:50:0.01:0.0:0:0"
+  "1:all:48:16:50:0.01:0.1:0:0"
+  "2:all:48:16:50:0.01:0.3:0:0"
+  "3:all:48:16:50:0.01:0.5:0:0"
+  "4:all:48:16:50:0.01:1.0:0:0"
+  "5:last-half:48:32:50:0.01:0.3:0:0"
+  "6:last-half:64:32:50:0.005:0.3:0:0"
+  "7:last-quarter:48:16:50:0.01:0.3:0:0"
+  "8:all:48:16:100:0.01:0.3:1:0"
+  "9:all:48:32:100:0.005:0.3:1:1"
 )
 
 pids=()
 for config in "${CONFIGS[@]}"; do
-  IFS=':' read -r gpu layers window codes steps lr cosine_weight persistent_landmark <<< "$config"
-  stem="${RUN_ID}_gpu${gpu}_layers-${layers}_w${window}_c${codes}_s${steps}_cw${cosine_weight}_lm${persistent_landmark}"
+  IFS=':' read -r gpu layers window codes steps lr cosine_weight persistent_landmark norm_gate <<< "$config"
+  stem="${RUN_ID}_gpu${gpu}_layers-${layers}_w${window}_c${codes}_s${steps}_cw${cosine_weight}_lm${persistent_landmark}_ng${norm_gate}"
   log_file="$OUTPUT_DIR/${stem}.log"
   output_file="$OUTPUT_DIR/${stem}.pt"
   echo "Launching GPU ${gpu}: layers=${layers} window=${window} codes=${codes} steps=${steps} lr=${lr} cosine_weight=${cosine_weight}"
@@ -58,6 +58,9 @@ for config in "${CONFIGS[@]}"; do
       --quality-gate 0.99)
     if [[ "$persistent_landmark" == "1" ]]; then
       cmd+=(--archive-persistent-landmark)
+    fi
+    if [[ "$norm_gate" == "1" ]]; then
+      cmd+=(--archive-norm-gating)
     fi
     "${cmd[@]}"
   ) >"$log_file" 2>&1 &

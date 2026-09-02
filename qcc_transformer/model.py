@@ -944,6 +944,7 @@ class QCCSelfAttention(nn.Module):
         lazy_decay: bool = False,
         archive_read_stride: int = 1,
         archive_query_cosine_threshold: Optional[float] = None,
+        archive_norm_gating: bool = False,
         archive_scan_block_size: int = 1024,
         archive_content_threshold: Optional[float] = None,
         archive_persistent_landmark: bool = False,
@@ -1063,6 +1064,7 @@ class QCCSelfAttention(nn.Module):
         # cosine-close to the previous refreshed query. The state is still
         # updated every token, so this knob changes only read freshness.
         self.archive_query_cosine_threshold = archive_query_cosine_threshold
+        self.archive_norm_gating = bool(archive_norm_gating)
         self._local_keys: list[Tensor] = []
         self._local_values: list[Tensor] = []
         self._local_key_cache: Optional[Tensor] = None
@@ -1089,6 +1091,26 @@ class QCCSelfAttention(nn.Module):
         self._fused_projection_weight: Optional[Tensor] = None
         self._fused_projection_bias: Optional[Tensor] = None
         self._fused_projection_versions: Optional[tuple[int, int, int, int]] = None
+
+    def _mix_local_archive(self, local: Tensor, archive: Tensor, gate: Tensor) -> Tensor:
+        """Mix local and archived responses, optionally suppressing bad scales.
+
+        Archive statistics can have a very different norm from the exact local
+        attention response even when the learned gate is unchanged.  When
+        enabled, a parameter-free geometric norm agreement factor limits the
+        remote contribution; this is causal and keeps the bounded state/API
+        unchanged.  The default is disabled for exact historical behavior.
+        """
+        if not self.archive_norm_gating:
+            return gate * local + (1.0 - gate) * archive
+        local_norm = local.float().square().mean(dim=-1, keepdim=True).sqrt()
+        archive_norm = archive.float().square().mean(dim=-1, keepdim=True).sqrt()
+        agreement = torch.minimum(
+            local_norm / archive_norm.clamp_min(1e-6),
+            archive_norm / local_norm.clamp_min(1e-6),
+        ).clamp(0.0, 1.0).to(local.dtype)
+        remote_weight = (1.0 - gate) * agreement
+        return (1.0 - remote_weight) * local + remote_weight * archive
 
     def _project_qkv_gate(self, hidden: Tensor) -> tuple[Tensor, Tensor, Tensor, Tensor]:
         """Project Q/K/V and the mixing gate with one GEMM.
@@ -1662,7 +1684,7 @@ class QCCSelfAttention(nn.Module):
                 if self.archive.prefix_landmark
                 else torch.sigmoid(gate_proj[:, 0]).unsqueeze(-1)
             )
-            head_out = gate * local_out + (1.0 - gate) * archive_out
+            head_out = self._mix_local_archive(local_out, archive_out, gate)
         else:
             head_out = local_out
         self._seen_tokens += 1
@@ -1842,7 +1864,7 @@ class QCCSelfAttention(nn.Module):
                 if self.archive.prefix_landmark
                 else torch.sigmoid(gate_proj).transpose(1, 2).unsqueeze(-1)
             )
-            mixed_out = gate * local_out + (1.0 - gate) * archive_out
+            mixed_out = self._mix_local_archive(local_out, archive_out, gate)
             active = (
                 self._seen_tokens + torch.arange(length, device=hidden.device)
                 >= self.window_size
@@ -2180,7 +2202,7 @@ class QCCSelfAttention(nn.Module):
             if self.archive.prefix_landmark
             else torch.sigmoid(self.gate(hidden)).transpose(1, 2).unsqueeze(-1)
         )
-        mixed_out = gate * local_out + (1.0 - gate) * archive_out
+        mixed_out = self._mix_local_archive(local_out, archive_out, gate)
         active = (torch.arange(length, device=hidden.device) >= window).view(
             1, 1, length, 1
         )
@@ -2270,7 +2292,7 @@ class QCCSelfAttention(nn.Module):
                     output=archive_out[:, :, self.window_size :],
                 )
             gate = torch.sigmoid(self.gate(hidden)).transpose(1, 2).unsqueeze(-1)
-            mixed_out = gate * local_out + (1.0 - gate) * archive_out
+            mixed_out = self._mix_local_archive(local_out, archive_out, gate)
             active = (torch.arange(length, device=hidden.device) >= self.window_size).view(1, 1, length, 1)
             head_out = torch.where(active, mixed_out, local_out)
         else:
@@ -2362,7 +2384,7 @@ class QCCSelfAttention(nn.Module):
             if self.use_archive and t >= self.window_size:
                 archive_out = self.archive.read(archive_q_source[:, :, t])
                 gate = torch.sigmoid(self.gate(hidden[:, t])).unsqueeze(-1)
-                head_out = gate * local_out + (1.0 - gate) * archive_out
+                head_out = self._mix_local_archive(local_out, archive_out, gate)
             else:
                 head_out = local_out
             # Concatenate heads in head-major order, matching the vectorized
