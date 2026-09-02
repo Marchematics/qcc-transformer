@@ -649,7 +649,11 @@ class QCCArchive(nn.Module):
                         content_threshold=self.content_threshold,
                     )
                     self._step += events
-                    return self._combine_landmark(query, output)
+                    combined = self._combine_landmark(query, output)
+                    if output is not None and combined.data_ptr() != output.data_ptr():
+                        output.copy_(combined)
+                        return output
+                    return combined
 
         if self.lazy_decay:
             outputs = []
@@ -681,7 +685,11 @@ class QCCArchive(nn.Module):
                     output=output,
                     content_threshold=self.content_threshold,
                 )
-                return self._combine_landmark(query, result)
+                combined = self._combine_landmark(query, result)
+                if output is not None and combined.data_ptr() != output.data_ptr():
+                    output.copy_(combined)
+                    return output
+                return combined
 
         # Sparse/lazy CUDA chunks and unsupported devices use the reference
         # event path or block scan below.
@@ -1826,6 +1834,53 @@ class QCCSelfAttention(nn.Module):
             self.archive._landmark_score = landmark_score_state.detach()
             self.archive._landmark_value = landmark_value_state.detach()
             self.archive._landmark_key = landmark_key_state.detach()
+        if self.archive.persistent_landmark and self.archive.prefix_landmark and event_count:
+            # The token-at-a-time serving path fills prefix slots in temporal
+            # order.  Reproduce that exact address policy in the CUDA
+            # training path instead of treating prefix landmarks as ordinary
+            # max-salience slots (which silently changed the semantics during
+            # curriculum training).  Lexical mode makes these keys
+            # position-free; pair mode binds each key to its successor value.
+            prefix_count = min(self.archive.num_codes, event_count)
+            prefix_keys = archive_k[:, :, :prefix_count]
+            if self.archive.prefix_pair_landmark:
+                successor_end = min(event_count, prefix_count + 1)
+                prefix_values = archive_v[:, :, 1:successor_end]
+                if prefix_values.shape[2] < prefix_count:
+                    prefix_values = torch.cat(
+                        (prefix_values, archive_v[:, :, prefix_count - 1 : prefix_count]),
+                        dim=2,
+                    )
+            else:
+                prefix_values = archive_v[:, :, :prefix_count]
+            query_block = archive_q[:, :, window:]
+            routing_logits = torch.einsum(
+                "bhed,bhmd->bhem", query_block.to(state_dtype), prefix_keys.to(state_dtype)
+            ) / math.sqrt(self.head_dim) * self.archive.landmark_temperature
+            prefix_routing = F.softmax(routing_logits, dim=-1).to(query_block.dtype)
+            prefix_out = torch.einsum(
+                "bhem,bhmd->bhed", prefix_routing, prefix_values.to(query_block.dtype)
+            )
+            archive_out[:, :, window:] = prefix_out
+            # Keep a detached serving snapshot for callers inspecting the
+            # archive after a differentiable forward pass.
+            scores = torch.einsum(
+                "bhed,hmd->bhem", prefix_keys.to(state_dtype),
+                self.archive.codes.to(device=hidden.device, dtype=state_dtype),
+            ) / math.sqrt(self.head_dim)
+            score_state = torch.full(
+                (bsz, self.num_heads, self.archive.num_codes), -torch.inf,
+                device=hidden.device, dtype=state_dtype,
+            )
+            score_state[:, :, :prefix_count] = scores.max(dim=-1).values
+            key_state = torch.zeros_like(self.archive._landmark_key)
+            value_state = torch.zeros_like(self.archive._landmark_value)
+            key_state[:, :, :prefix_count] = prefix_keys.to(key_state.dtype)
+            value_state[:, :, :prefix_count] = prefix_values.to(value_state.dtype)
+            self.archive._landmark_count = prefix_count
+            self.archive._landmark_score = score_state.detach()
+            self.archive._landmark_key = key_state.detach()
+            self.archive._landmark_value = value_state.detach()
         gate = (
             torch.zeros_like(self.gate(hidden)).transpose(1, 2).unsqueeze(-1)
             if self.archive.prefix_landmark
@@ -1945,7 +2000,7 @@ class QCCSelfAttention(nn.Module):
         q, k = self._apply_rope(q, k, position_ids)
         if not torch.is_grad_enabled():
             return self._forward_inference(hidden, q, k, v, archive_hint=archive_hint)
-        if hidden.is_cuda and length > self.window_size and not self.archive.prefix_landmark:
+        if hidden.is_cuda and length > self.window_size:
             # CUDA training uses the same bounded block equations as
             # inference, but keeps the scan differentiable.  This avoids the
             # O(sequence-length) Python/autograd loop for long retrieval

@@ -269,6 +269,14 @@ contextual archive keys.  The implementation has dedicated forward,
 `decode_step`, and `decode_chunk` parity tests; no quality claim is made until
 strict all-value long-context evaluation passes.
 
+After implementing the CUDA training semantics for prefix-pair slots and
+fixing the Triton output-buffer path, a freshly trained one-layer diagnostic
+checkpoint reached `58/58` on the strict stress file: 29 independently sampled
+values at query 115,200 in 128K streams and 29 at query 900,000 in 1M streams.
+This is strong evidence that position-free marker addressing solves this
+synthetic associative task, but it is not a RULER, LongBench, or pretrained-LM
+result; those gates remain to be measured separately.
+
 ### 1M-token T4 latency/state snapshot
 
 An end-to-end QCC-only stream on a Google Colab Tesla T4 processed one million
