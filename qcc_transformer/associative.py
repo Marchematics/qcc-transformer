@@ -1,8 +1,8 @@
 """Set-associative exact landmark memory for QCC research experiments.
 
-This module is intentionally independent from the recurrent response archive so it can
-be benchmarked before being wired into every HF/vLLM path. Persistent memory is
-O(heads * sets * ways * head_dim) and therefore independent of context length.
+The bank is intentionally independent from the recurrent response archive so it can be
+benchmarked and calibrated in isolation. Persistent state is
+``O(heads * sets * ways * head_dim)`` and therefore independent of context length.
 """
 from __future__ import annotations
 
@@ -26,14 +26,14 @@ class SetAssociativeLandmarkBank(nn.Module):
     """Small exact-KV bank with learned set routing and multi-way replacement.
 
     Each incoming key is routed to the strongest learned set. Every set has ``ways``
-    exact slots; replacements are controlled by a learned admission score plus a small
-    diversity bonus. Reads probe the top ``probe_sets`` sets and perform exact
-    query/key matching inside their ways.
+    exact slots; replacement is controlled by an admission score plus a diversity
+    bonus. Reads probe the top ``probe_sets`` sets and perform exact query/key matching
+    inside their ways.
 
-    The learned admission projection is deliberately tiny (one vector per head) so a
-    pretrained retrofit can tune what deserves exact retention without training the
-    backbone. It is a selection mechanism, not a claim that arbitrary random
-    associations can be compressed losslessly.
+    ``write_mask`` is deliberately explicit. A production caller can run a learned
+    salience predictor once per block and prevent low-value filler from touching the
+    exact tier at all. This keeps state bounded *and* avoids turning constant memory
+    into per-token Python replacement overhead.
     """
 
     def __init__(
@@ -71,7 +71,15 @@ class SetAssociativeLandmarkBank(nn.Module):
         self.admission_vector = nn.Parameter(torch.randn(num_heads, head_dim) * scale)
         self.reset_state(1)
 
-    def reset_state(self, batch_size: int, *, device=None, dtype=None) -> None:
+    def reset_state(
+        self,
+        batch_size: int,
+        *,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> None:
+        if batch_size <= 0:
+            raise ValueError("batch_size must be positive")
         device = device or self.set_codes.device
         dtype = dtype if dtype in (torch.float32, torch.float64) else torch.float32
         shape = (batch_size, self.num_heads, self.num_sets, self.ways)
@@ -83,9 +91,13 @@ class SetAssociativeLandmarkBank(nn.Module):
 
     @property
     def state(self) -> AssociativeLandmarkState:
-        return AssociativeLandmarkState(self._keys, self._values, self._scores, self._ages)
+        return AssociativeLandmarkState(
+            self._keys, self._values, self._scores, self._ages
+        )
 
     def state_bytes(self) -> int:
+        """Return mutable serving-state bytes, excluding trainable parameters."""
+
         return sum(
             tensor.numel() * tensor.element_size()
             for tensor in (self._keys, self._values, self._scores, self._ages)
@@ -109,13 +121,19 @@ class SetAssociativeLandmarkBank(nn.Module):
         value: Tensor,
         *,
         admission_bias: Tensor | None = None,
+        write_mask: Tensor | None = None,
     ) -> None:
-        """Insert one exact association per batch/head.
+        """Insert one exact association per selected batch/head.
 
-        ``admission_bias`` may be supplied by a caller that has a task/model-specific
-        salience signal. This is the hook used by future HF distillation: the generic
-        bank itself never relies on marker IDs or benchmark labels.
+        Args:
+            key, value: ``[batch, heads, head_dim]``.
+            admission_bias: optional external salience score ``[batch, heads]``.
+                A teacher-trained predictor can supply this without baking task labels
+                into the bank.
+            write_mask: optional bool mask ``[batch, heads]`` or ``[batch]``. False
+                entries do not allocate empty slots and cannot replace existing slots.
         """
+
         if key.shape != value.shape or key.ndim != 3:
             raise ValueError("key and value must have shape [batch, heads, head_dim]")
         if key.shape[1:] != (self.num_heads, self.head_dim):
@@ -166,6 +184,15 @@ class SetAssociativeLandmarkBank(nn.Module):
         ).squeeze(-1)
         should_write = has_empty | (candidate_score > weakest_score)
 
+        if write_mask is not None:
+            if write_mask.shape == (key.shape[0],):
+                write_mask = write_mask[:, None].expand(-1, self.num_heads)
+            if write_mask.shape != should_write.shape:
+                raise ValueError("write_mask must have shape [batch] or [batch, heads]")
+            should_write = should_write & write_mask.to(
+                device=key.device, dtype=torch.bool
+            )
+
         write_batch = batch_index.expand_as(set_index)[should_write]
         write_head = head_index.expand_as(set_index)[should_write]
         write_set = set_index[should_write]
@@ -182,7 +209,8 @@ class SetAssociativeLandmarkBank(nn.Module):
         self._ages[write_batch, write_head, write_set, write_way] = self._step
 
     def read(self, query: Tensor, *, hard: bool = False) -> tuple[Tensor, Tensor]:
-        """Read top routed sets; return response and best cosine-match confidence."""
+        """Read top routed sets; return response and best cosine confidence."""
+
         if query.ndim != 3 or query.shape[1:] != (self.num_heads, self.head_dim):
             raise ValueError("query must have shape [batch, heads, head_dim]")
         self._ensure_state(query)
@@ -215,6 +243,85 @@ class SetAssociativeLandmarkBank(nn.Module):
         else:
             weights = F.softmax(similarity * self.temperature, dim=-1).to(values.dtype)
             response = torch.einsum("bhn,bhnd->bhd", weights, values)
+        any_valid = valid.any(dim=-1)
+        response = torch.where(
+            any_valid.unsqueeze(-1), response, torch.zeros_like(response)
+        )
+        confidence = torch.where(
+            any_valid, confidence, torch.full_like(confidence, -1.0)
+        )
+        return response.to(query.dtype), confidence
+
+    def read_chunk(
+        self, query: Tensor, *, hard: bool = False
+    ) -> tuple[Tensor, Tensor]:
+        """Vectorized reads against one frozen bank state.
+
+        ``query`` is ``[batch, heads, tokens, head_dim]``. The state must not be
+        mutated during this call; a causal caller can therefore process a chunk in a
+        handful of segments separated by the few admitted insertions instead of one
+        Python operation per token.
+        """
+
+        if (
+            query.ndim != 4
+            or query.shape[1] != self.num_heads
+            or query.shape[-1] != self.head_dim
+        ):
+            raise ValueError(
+                "query must have shape [batch, heads, tokens, head_dim]"
+            )
+        batch, heads, tokens, dim = query.shape
+        if tokens == 0:
+            return query.new_empty(query.shape), query.new_empty(batch, heads, 0)
+        self._ensure_state(query[:, :, 0])
+
+        codes = self.set_codes.to(query.device, self._keys.dtype)
+        set_logits = torch.einsum(
+            "bhtd,hmd->bhtm", query.to(self._keys.dtype), codes
+        ) / math.sqrt(self.head_dim)
+        probe = set_logits.topk(self.probe_sets, dim=-1).indices
+
+        keys_all = self._keys[:, :, None].expand(
+            batch, heads, tokens, self.num_sets, self.ways, dim
+        )
+        values_all = self._values[:, :, None].expand_as(keys_all)
+        scores_all = self._scores[:, :, None].expand(
+            batch, heads, tokens, self.num_sets, self.ways
+        )
+        gather_keys = probe[..., None, None].expand(
+            batch, heads, tokens, self.probe_sets, self.ways, dim
+        )
+        keys = keys_all.gather(3, gather_keys).reshape(
+            batch, heads, tokens, -1, dim
+        )
+        values = values_all.gather(3, gather_keys).reshape_as(keys)
+        gather_scores = probe[..., None].expand(
+            batch, heads, tokens, self.probe_sets, self.ways
+        )
+        scores = scores_all.gather(3, gather_scores).reshape(
+            batch, heads, tokens, -1
+        )
+        valid = torch.isfinite(scores)
+
+        normalized_query = F.normalize(query.to(keys.dtype), dim=-1)
+        normalized_keys = F.normalize(keys, dim=-1)
+        similarity = torch.einsum(
+            "bhtd,bhtnd->bhtn", normalized_query, normalized_keys
+        )
+        similarity = torch.where(
+            valid, similarity, torch.full_like(similarity, -1.0e9)
+        )
+        confidence, best = similarity.max(dim=-1)
+        if hard:
+            response = values.gather(
+                3, best[..., None, None].expand(batch, heads, tokens, 1, dim)
+            ).squeeze(3)
+        else:
+            weights = F.softmax(similarity * self.temperature, dim=-1).to(
+                values.dtype
+            )
+            response = torch.einsum("bhtn,bhtnd->bhtd", weights, values)
         any_valid = valid.any(dim=-1)
         response = torch.where(
             any_valid.unsqueeze(-1), response, torch.zeros_like(response)
