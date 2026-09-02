@@ -1220,12 +1220,24 @@ class QCCSelfAttention(nn.Module):
             local_keys = self._full_key_cache[:, :, : self._seen_tokens + 1]
             local_values = self._full_value_cache[:, :, : self._seen_tokens + 1]
         if self.use_archive:
-            # SDPA handles the small local window with one fused primitive;
-            # this is materially cheaper than several per-token einsums on
-            # both CPU flash-attention and CUDA backends.
-            local_out = F.scaled_dot_product_attention(
-                q.unsqueeze(2), local_keys, local_values, dropout_p=0.0
-            ).squeeze(2)
+            if key.is_cuda and self._cache_length == self.window_size:
+                # Once the ring is full, a single Triton program computes the
+                # exact local softmax/value reduction.  This removes the SDPA
+                # wrapper and its mask setup from the persistent one-token path.
+                from .triton_kernels import TRITON_AVAILABLE, triton_local_decode_attention
+                if TRITON_AVAILABLE:
+                    local_out = triton_local_decode_attention(
+                        q, local_keys, local_values, valid_length=self.window_size
+                    )
+                else:
+                    local_out = F.scaled_dot_product_attention(
+                        q.unsqueeze(2), local_keys, local_values, dropout_p=0.0
+                    ).squeeze(2)
+            else:
+                # SDPA handles the small local window with one fused primitive.
+                local_out = F.scaled_dot_product_attention(
+                    q.unsqueeze(2), local_keys, local_values, dropout_p=0.0
+                ).squeeze(2)
         else:
             # Use the same fused SDPA primitive as the block path for an honest
             # full-KV serving baseline. All cached keys are valid for this

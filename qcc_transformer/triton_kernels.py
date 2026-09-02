@@ -15,6 +15,75 @@ try:  # pragma: no cover - exercised only on a Triton-enabled GPU runner
     TRITON_AVAILABLE = True
 
     @triton.jit
+    def _qcc_local_decode_kernel(
+        output_ptr,
+        query_ptr,
+        key_ptr,
+        value_ptr,
+        batch_size,
+        num_heads,
+        valid_length,
+        stride_ob,
+        stride_oh,
+        stride_od,
+        stride_qb,
+        stride_qh,
+        stride_qd,
+        stride_kb,
+        stride_kh,
+        stride_kw,
+        stride_kd,
+        stride_vb,
+        stride_vh,
+        stride_vw,
+        stride_vd,
+        BLOCK_D: tl.constexpr,
+        BLOCK_W: tl.constexpr,
+        HEAD_DIM: tl.constexpr,
+    ):
+        """One-launch exact softmax over the bounded local decode window."""
+        pid = tl.program_id(0)
+        batch = pid // num_heads
+        head = pid % num_heads
+        offs_d = tl.arange(0, BLOCK_D)
+        offs_w = tl.arange(0, BLOCK_W)
+        mask_d = offs_d < HEAD_DIM
+        mask_w = offs_w < valid_length
+        q = tl.load(
+            query_ptr + batch * stride_qb + head * stride_qh + offs_d * stride_qd,
+            mask=mask_d,
+            other=0.0,
+        ).to(tl.float32)
+        logits = tl.zeros((BLOCK_W,), dtype=tl.float32)
+        for index in range(BLOCK_W):
+            key = tl.load(
+                key_ptr + batch * stride_kb + head * stride_kh + index * stride_kw + offs_d * stride_kd,
+                mask=mask_d,
+                other=0.0,
+            ).to(tl.float32)
+            dot = tl.sum(q * key, axis=0) / tl.sqrt(tl.full((), HEAD_DIM, tl.float32))
+            logits = tl.where(offs_w == index, dot, logits)
+        logits = tl.where(mask_w, logits, -float("inf"))
+        max_logit = tl.max(logits, axis=0)
+        weights = tl.exp(logits - max_logit)
+        weights = tl.where(mask_w, weights, 0.0)
+        weights = weights / tl.sum(weights, axis=0)
+        result = tl.zeros((BLOCK_D,), dtype=tl.float32)
+        for index in range(BLOCK_W):
+            value = tl.load(
+                value_ptr + batch * stride_vb + head * stride_vh + index * stride_vw + offs_d * stride_vd,
+                mask=mask_d,
+                other=0.0,
+            ).to(tl.float32)
+            weight = tl.sum(tl.where(offs_w == index, weights, 0.0), axis=0)
+            result += weight * value
+        tl.store(
+            output_ptr + batch * stride_ob + head * stride_oh + offs_d * stride_od,
+            result,
+            mask=mask_d,
+        )
+
+    @triton.jit
     def _qcc_update_kernel(
         numerator_ptr,
         denominator_ptr,
@@ -934,6 +1003,37 @@ try:  # pragma: no cover - exercised only on a Triton-enabled GPU runner
         tl.store(output_ptr + output_offsets, output, mask=mask_d)
 except ImportError:  # pragma: no cover - normal CPU installation
     TRITON_AVAILABLE = False
+
+
+def triton_local_decode_attention(
+    query: torch.Tensor,
+    keys: torch.Tensor,
+    values: torch.Tensor,
+    *,
+    valid_length: int,
+) -> torch.Tensor:
+    """Compute one exact local-window attention query in a single Triton launch."""
+    if not TRITON_AVAILABLE or not query.is_cuda:
+        raise RuntimeError("Triton CUDA runtime is unavailable")
+    if query.ndim != 3 or keys.ndim != 4 or values.shape != keys.shape:
+        raise ValueError("query must be [B,H,D], keys/values [B,H,W,D]")
+    batch, heads, dim = query.shape
+    if keys.shape[0] != batch or keys.shape[1] != heads or keys.shape[3] != dim:
+        raise ValueError("local attention shapes do not match")
+    if not 0 < valid_length <= keys.shape[2]:
+        raise ValueError("valid_length must be within the key window")
+    query = query.contiguous()
+    keys = keys.contiguous()
+    values = values.contiguous()
+    output = torch.empty_like(query)
+    block_dim = 1 << max(4, (dim - 1).bit_length())
+    block_window = 1 << max(0, (keys.shape[2] - 1).bit_length())
+    _qcc_local_decode_kernel[(batch * heads,)](
+        output, query, keys, values, batch, heads, valid_length,
+        *output.stride(), *query.stride(), *keys.stride(), *values.stride(),
+        BLOCK_D=block_dim, BLOCK_W=block_window, HEAD_DIM=dim,
+    )
+    return output
 
 
 def triton_update_archive(
