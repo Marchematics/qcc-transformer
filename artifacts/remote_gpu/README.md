@@ -29,3 +29,8 @@ the prefix-wiring fix.  The strict 128K/1M all-value stress set yielded
 `18/464 = 3.88%` aggregate accuracy (best seed `4/58 = 6.90%`).  This confirms
 that the retrieval failure is not a single unlucky initialization and keeps
 the 1M ≥98% gate explicitly failed.
+
+`temp_sweep_20260902/summary.json` tests landmark routing temperatures 1, 4,
+and 16 on the same strict stress set.  Accuracies were `6.90%`, `3.45%`, and
+`3.45%`, respectively.  Sharpening the route therefore does not repair the
+long-tail failure; raw training/evaluation logs are kept beside the summary.

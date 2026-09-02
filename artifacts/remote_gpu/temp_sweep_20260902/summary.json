@@ -1,0 +1,29 @@
+{
+  "runtime": "tsinghua3090-X11DPG-OT",
+  "gpus": [1, 3, 4],
+  "source_commit": "d225e48",
+  "configuration": {
+    "d_model": 32,
+    "layers": 1,
+    "heads": 4,
+    "num_codes": 32,
+    "window_size": 16,
+    "position_encoding": "none",
+    "persistent_landmark": true,
+    "prefix_landmark": true,
+    "training_steps": 800,
+    "training_batch": 8,
+    "query_curriculum": [32, 120]
+  },
+  "stress_set": {
+    "contexts": [128000, 1000000],
+    "value_ids_per_context": 29,
+    "examples_per_run": 58
+  },
+  "results": [
+    {"temperature": 1.0, "correct": 4, "examples": 58, "accuracy": 0.068966},
+    {"temperature": 4.0, "correct": 2, "examples": 58, "accuracy": 0.034483},
+    {"temperature": 16.0, "correct": 2, "examples": 58, "accuracy": 0.034483}
+  ],
+  "interpretation": "Sharpening landmark routing does not repair long-tail retrieval; the failure is query/key representation mismatch rather than softmax temperature. This is a negative ablation and not evidence for the 1M retrieval target."
+}
