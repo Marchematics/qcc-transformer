@@ -101,6 +101,11 @@ def main() -> None:
     parser.add_argument("--active-codes", type=int, default=None)
     parser.add_argument("--lazy-decay", action="store_true")
     parser.add_argument("--archive-read-stride", type=int, default=1)
+    parser.add_argument(
+        "--archive-lexical-landmark",
+        action="store_true",
+        help="use a second bounded raw-token ring for position-free archive addressing",
+    )
     parser.add_argument("--archive-scan-block-size", type=int, default=256)
     parser.add_argument(
         "--position-encoding",
@@ -146,6 +151,7 @@ def main() -> None:
         active_codes=args.active_codes,
         lazy_decay=args.lazy_decay,
         archive_read_stride=args.archive_read_stride,
+        archive_lexical_landmark=args.archive_lexical_landmark,
         archive_query_cosine_threshold=args.archive_query_cosine_threshold,
         archive_scan_block_size=args.archive_scan_block_size,
         position_encoding=args.position_encoding,
