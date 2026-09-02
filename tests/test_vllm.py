@@ -12,6 +12,19 @@ def test_vllm_state_consumes_projected_block():
     assert state._seen == 5
 
 
+def test_vllm_block_matches_tokenized_execution():
+    torch.manual_seed(0)
+    state = QCCVLLMState(2, 4, window_size=3, num_codes=4, use_triton=False)
+    tokenized = state.fork()
+    query = torch.randn(1, 2, 12, 4)
+    block = state.forward(query, query, query)
+    pieces = [
+        tokenized.forward(query[:, :, i : i + 1], query[:, :, i : i + 1], query[:, :, i : i + 1])
+        for i in range(query.shape[2])
+    ]
+    assert torch.allclose(block, torch.cat(pieces, dim=2), atol=1e-5, rtol=1e-5)
+
+
 def test_vllm_state_rejects_wrong_shape():
     state = QCCVLLMState(2, 4, window_size=3, num_codes=4, use_triton=False)
     with pytest.raises(ValueError, match="shape"):

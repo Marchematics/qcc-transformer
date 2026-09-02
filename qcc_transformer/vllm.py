@@ -55,15 +55,39 @@ class QCCVLLMState:
             window_size=window_size,
             use_triton=use_triton,
         )
-        self._keys: list[Tensor] = []
-        self._values: list[Tensor] = []
+        self._key_ring: Tensor | None = None
+        self._value_ring: Tensor | None = None
+        self._ring_start = 0
+        self._ring_length = 0
         self._seen = 0
 
     def reset(self, batch_size: int, *, device: torch.device, dtype: torch.dtype) -> None:
         self.archive.reset_state(batch_size, device=device, dtype=torch.float32)
-        self._keys.clear()
-        self._values.clear()
+        self._key_ring = torch.empty(
+            batch_size, self.num_heads, self.window_size, self.head_dim,
+            device=device, dtype=dtype,
+        )
+        self._value_ring = torch.empty_like(self._key_ring)
+        self._ring_start = 0
+        self._ring_length = 0
         self._seen = 0
+
+    def _ordered_ring(self) -> tuple[Tensor, Tensor]:
+        if self._key_ring is None or self._value_ring is None:
+            raise RuntimeError("state has not been reset")
+        if self._ring_length == 0:
+            return self._key_ring[:, :, :0], self._value_ring[:, :, :0]
+        end = self._ring_start + self._ring_length
+        if end <= self.window_size:
+            return (
+                self._key_ring[:, :, self._ring_start:end],
+                self._value_ring[:, :, self._ring_start:end],
+            )
+        first = self.window_size - self._ring_start
+        return (
+            torch.cat((self._key_ring[:, :, self._ring_start:], self._key_ring[:, :, : end % self.window_size]), dim=2),
+            torch.cat((self._value_ring[:, :, self._ring_start:], self._value_ring[:, :, : end % self.window_size]), dim=2),
+        )
 
     @torch.no_grad()
     def forward(self, query: Tensor, key: Tensor, value: Tensor) -> Tensor:
@@ -81,28 +105,59 @@ class QCCVLLMState:
             raise ValueError("query/key/value must all have shape [batch, heads, tokens, dim]")
         if query.shape[1:] != (self.num_heads, query.shape[2], self.head_dim):
             raise ValueError("projected tensor shape does not match QCCVLLMState")
-        if self.archive._numerator.shape[0] != query.shape[0] or self.archive._numerator.device != query.device:
+        if (
+            self._key_ring is None
+            or self.archive._numerator.shape[0] != query.shape[0]
+            or self.archive._numerator.device != query.device
+        ):
             self.reset(query.shape[0], device=query.device, dtype=query.dtype)
-        outputs: list[Tensor] = []
-        scale = self.head_dim**-0.5
-        for index in range(query.shape[2]):
-            kt = key[:, :, index]
-            vt = value[:, :, index]
-            if len(self._keys) >= self.window_size:
-                self.archive.update(self._keys.pop(0), self._values.pop(0))
-            self._keys.append(kt)
-            self._values.append(vt)
-            local_k = torch.stack(self._keys, dim=2)
-            local_v = torch.stack(self._values, dim=2)
-            local = F.scaled_dot_product_attention(
-                query[:, :, index : index + 1], local_k, local_v, dropout_p=0.0
-            ).squeeze(2)
-            if self._seen >= self.window_size:
-                remote = self.archive.read(query[:, :, index])
-                local = (1.0 - self.archive_mix) * local + self.archive_mix * remote
-            outputs.append(local)
-            self._seen += 1
-        return torch.stack(outputs, dim=2)
+        old_k, old_v = self._ordered_ring()
+        old_length = old_k.shape[2]
+        combined_k = torch.cat((old_k, key), dim=2)
+        combined_v = torch.cat((old_v, value), dim=2)
+        length = query.shape[2]
+        total_length = combined_k.shape[2]
+        positions = old_length + torch.arange(length, device=query.device)
+        key_positions = torch.arange(total_length, device=query.device)
+        valid = (key_positions[None, :] <= positions[:, None]) & (
+            key_positions[None, :] >= positions[:, None] - self.window_size + 1
+        )
+        local = F.scaled_dot_product_attention(
+            query.contiguous(), combined_k.contiguous(), combined_v.contiguous(),
+            attn_mask=valid, dropout_p=0.0,
+        )
+        archive_out = torch.zeros_like(local)
+        event_start = max(0, self.window_size - old_length)
+        event_count = length - event_start
+        if event_count > 0:
+            self.archive.update_read_chunk(
+                combined_k[:, :, :event_count],
+                combined_v[:, :, :event_count],
+                query[:, :, event_start:],
+                output=archive_out[:, :, event_start:],
+            )
+        active = (self._seen + torch.arange(length, device=query.device) >= self.window_size).view(1, 1, length, 1)
+        output = torch.where(
+            active,
+            (1.0 - self.archive_mix) * local + self.archive_mix * archive_out,
+            local,
+        )
+        keep = min(self.window_size, total_length)
+        assert self._key_ring is not None and self._value_ring is not None
+        evicted = max(0, total_length - self.window_size)
+        new_start = (self._ring_start + evicted) % self.window_size
+        tail_k, tail_v = combined_k[:, :, -keep:], combined_v[:, :, -keep:]
+        first = min(keep, self.window_size - new_start)
+        self._key_ring[:, :, new_start : new_start + first] = tail_k[:, :, :first]
+        self._value_ring[:, :, new_start : new_start + first] = tail_v[:, :, :first]
+        if first < keep:
+            remainder = keep - first
+            self._key_ring[:, :, :remainder] = tail_k[:, :, first:]
+            self._value_ring[:, :, :remainder] = tail_v[:, :, first:]
+        self._ring_start = new_start
+        self._ring_length = keep
+        self._seen += length
+        return output
 
     @property
     def seen_tokens(self) -> int:
