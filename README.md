@@ -2,7 +2,7 @@
 
 Query-Compiled Cache (QCC) Transformer is a PyTorch research prototype for long-context decoding. It keeps an exact recent window and compiles older tokens into a constant-size set of multi-timescale softmax responses.
 
-This repository is an implementation of a falsifiable hypothesis, not a claim of a solved production system. The reference path uses Python sequence loops so that the state equations are easy to inspect. CUDA inference dispatches fused archive update/read kernels for each bounded block; projection, local-attention, and cache-maintenance fusion remain open systems work.
+This repository is an implementation of a falsifiable hypothesis, not a claim of a solved production system. The reference path uses Python sequence loops so that the state equations are easy to inspect. CUDA inference dispatches fused archive update/read and bounded local-window kernels for each block; projection and cache-maintenance fusion remain open systems work.
 
 ## Why this is different
 
