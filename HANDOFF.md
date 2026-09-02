@@ -194,6 +194,10 @@ python benchmarks/gate_99.py --evidence artifacts/gates/<run_id>.json
 - `benchmarks/gate_99.py` 已扩展为严格 11 项验收：1M retrieval、tail safety、
   Pareto baseline、p95/p99 latency、scaling law、跨模型/GPU 复现均为必填；
   缺失任何 section 都 fail-closed。
+- 新增 `qcc_transformer.vllm_plugin.register_vllm_backend()`：惰性导入 vLLM v1
+  registry 并注册 `AttentionBackendEnum.CUSTOM`，无 vLLM 环境会给出明确错误；
+  这只是 ABI wiring，仍需提供真实 version-specific `AttentionBackend` 实现和
+  端到端 benchmark，不能把 primitive 当作已完成 upstream backend。
 - `QCCSelfAttention` 新增可选 `archive_norm_gating`（参数量不变、O(1) 状态），
   按 local/archive 响应范数一致性抑制异常远程读；默认关闭，10 卡 sweep 的
   GPU9 打开该消融。
