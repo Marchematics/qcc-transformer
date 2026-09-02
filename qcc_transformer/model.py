@@ -1232,7 +1232,11 @@ class QCCSelfAttention(nn.Module):
                 self._archive_query_cache = q.detach()
             assert self._archive_read_cache is not None
             archive_out = self._archive_read_cache
-            gate = torch.sigmoid(self.gate(hidden)).unsqueeze(-1)
+            gate = (
+                torch.zeros_like(self.gate(hidden)).unsqueeze(-1)
+                if self.archive.prefix_landmark
+                else torch.sigmoid(self.gate(hidden)).unsqueeze(-1)
+            )
             head_out = gate * local_out + (1.0 - gate) * archive_out
         else:
             head_out = local_out
@@ -1347,7 +1351,11 @@ class QCCSelfAttention(nn.Module):
                     q[:, :, event_start:],
                     output=archive_out[:, :, event_start:],
                 )
-            gate = torch.sigmoid(self.gate(hidden)).transpose(1, 2).unsqueeze(-1)
+            gate = (
+                torch.zeros_like(self.gate(hidden)).transpose(1, 2).unsqueeze(-1)
+                if self.archive.prefix_landmark
+                else torch.sigmoid(self.gate(hidden)).transpose(1, 2).unsqueeze(-1)
+            )
             mixed_out = gate * local_out + (1.0 - gate) * archive_out
             active = (
                 self._seen_tokens + torch.arange(length, device=hidden.device)
@@ -1606,7 +1614,11 @@ class QCCSelfAttention(nn.Module):
             self.archive._landmark_score = landmark_score_state.detach()
             self.archive._landmark_value = landmark_value_state.detach()
             self.archive._landmark_key = landmark_key_state.detach()
-        gate = torch.sigmoid(self.gate(hidden)).transpose(1, 2).unsqueeze(-1)
+        gate = (
+            torch.zeros_like(self.gate(hidden)).transpose(1, 2).unsqueeze(-1)
+            if self.archive.prefix_landmark
+            else torch.sigmoid(self.gate(hidden)).transpose(1, 2).unsqueeze(-1)
+        )
         mixed_out = gate * local_out + (1.0 - gate) * archive_out
         active = (torch.arange(length, device=hidden.device) >= window).view(
             1, 1, length, 1
