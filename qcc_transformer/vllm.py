@@ -31,7 +31,7 @@ class QCCVLLMState:
         window_size: int = 128,
         num_codes: int = 16,
         max_position_embeddings: int = 131_072,
-        archive_mix: float = 0.5,
+        archive_mix: float = 0.125,
         use_triton: bool = True,
     ) -> None:
         if not 0.0 <= archive_mix <= 1.0:
@@ -39,6 +39,11 @@ class QCCVLLMState:
         self.num_heads = num_heads
         self.head_dim = head_dim
         self.window_size = window_size
+        # HF retrofit initializes its learned gate with ``gate_bias_init=2``;
+        # sigmoid(2) gives a local-path weight of ≈0.881 and therefore an
+        # archive contribution of ≈0.119.  Keep the standalone vLLM primitive
+        # aligned with that conservative quality-first default instead of the
+        # historical 50/50 ablation.  Callers can still override explicitly.
         self.archive_mix = archive_mix
         scales = 4
         horizons = torch.logspace(

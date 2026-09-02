@@ -153,6 +153,10 @@ backend = QCCVLLMBackend(num_heads=32, head_dim=128, window_size=128, num_codes=
 out = backend.forward(request_id, query, key, value)  # [1, H, T, D]
 ```
 
+The vLLM primitive defaults to `archive_mix=0.125`, matching the
+quality-first local/archive gate initialization used by the HF retrofit; set
+`archive_mix=0.5` explicitly when reproducing the historical 50/50 ablation.
+
 This avoids pinning an unstable vLLM ABI while making the cache state and
 shape contract explicit; upstream vLLM still needs a version-specific backend
 registration and matched quality benchmark.
