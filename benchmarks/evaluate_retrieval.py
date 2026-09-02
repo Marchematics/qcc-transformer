@@ -130,6 +130,54 @@ def evaluate(
 
 
 @torch.no_grad()
+def evaluate_with_report(
+    model: QCCForCausalLM,
+    dataset: Path,
+    *,
+    chunk_size: int,
+    device: torch.device,
+    max_examples: int | None,
+) -> tuple[int, int, list[dict[str, int | bool]]]:
+    """Evaluate and retain per-record predictions for failure analysis.
+
+    The regular evaluator intentionally emits only aggregate metrics.  This
+    diagnostic path records line number, context length, target position,
+    answer set (as a sorted representative list), and the argmax prediction;
+    it does not alter model execution or the aggregate score.
+    """
+
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be positive")
+    correct = total = 0
+    report: list[dict[str, int | bool]] = []
+    for line_number, (input_ids, target_position, answers) in _iter_records(
+        dataset, max_examples
+    ):
+        logits = _predict_logits(
+            model,
+            input_ids,
+            target_position,
+            chunk_size=chunk_size,
+            device=device,
+        )
+        prediction = int(logits.argmax().item())
+        hit = prediction in answers
+        correct += int(hit)
+        total += 1
+        report.append(
+            {
+                "line": line_number,
+                "length": int(input_ids.numel()),
+                "target_position": target_position,
+                "answer": min(answers),
+                "prediction": prediction,
+                "correct": hit,
+            }
+        )
+    return correct, total, report
+
+
+@torch.no_grad()
 def evaluate_pair(
     qcc: QCCForCausalLM,
     full: QCCForCausalLM,
@@ -189,6 +237,12 @@ def main() -> None:
     parser.add_argument("--chunk-size", type=int, default=256)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--max-examples", type=int, default=None)
+    parser.add_argument(
+        "--report-json",
+        type=Path,
+        default=None,
+        help="write per-record predictions for diagnosing retrieval failures",
+    )
     parser.add_argument("--target-accuracy", type=float, default=0.98)
     parser.add_argument(
         "--compare-full-kv",
@@ -255,13 +309,26 @@ def main() -> None:
             max_examples=args.max_examples,
         )
     else:
-        correct, total = evaluate(
-            model,
-            args.dataset,
-            chunk_size=args.chunk_size,
-            device=device,
-            max_examples=args.max_examples,
-        )
+        if args.report_json is None:
+            correct, total = evaluate(
+                model,
+                args.dataset,
+                chunk_size=args.chunk_size,
+                device=device,
+                max_examples=args.max_examples,
+            )
+        else:
+            correct, total, report = evaluate_with_report(
+                model,
+                args.dataset,
+                chunk_size=args.chunk_size,
+                device=device,
+                max_examples=args.max_examples,
+            )
+            args.report_json.parent.mkdir(parents=True, exist_ok=True)
+            args.report_json.write_text(
+                json.dumps(report, indent=2) + "\n", encoding="utf-8"
+            )
     accuracy = correct / total if total else 0.0
     print(
         f"device={device} examples={total} correct={correct} "

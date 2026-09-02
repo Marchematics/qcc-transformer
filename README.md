@@ -221,6 +221,12 @@ remote CUDA worker on 2026-09-02. The lexical-pair checkpoint got 55/58
 `artifacts/remote_gpu/strict_random_allvalues_eval_seed915_summary.json` and
 must not be presented as RULER, LongBench, PG-19, or pretrained-LM quality.
 
+An 8,000-step follow-up using 64 archive codes improved the same strict split
+to 56/58 (`96.5517%`): 29/29 at 128K and 27/29 at 1M. Both misses occur at
+the 1M/query-900K tail (answers 3 and 31); the per-record report is kept in
+`artifacts/remote_gpu/strict_random_codes64_seed918_report.json`, while the
+aggregate gate remains failed at `98%`.
+
 ### Colab synthetic retrieval diagnostic (STE content gate)
 
 The differentiable archive uses a straight-through content gate: the forward
