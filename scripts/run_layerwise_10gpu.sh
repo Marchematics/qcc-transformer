@@ -13,27 +13,27 @@ MAX_TOKENS="${MAX_TOKENS:-512}"
 cd "$PROJECT_DIR"
 mkdir -p "$OUTPUT_DIR"
 
-# gpu:layers:window:codes:steps:lr
+# gpu:layers:window:codes:steps:lr:cosine_weight
 CONFIGS=(
-  "0:all:48:16:50:0.01"
-  "1:all:48:32:50:0.01"
-  "2:all:64:16:50:0.01"
-  "3:all:64:32:50:0.005"
-  "4:last-half:48:16:50:0.01"
-  "5:last-half:48:32:50:0.01"
-  "6:last-half:64:32:50:0.005"
-  "7:last-quarter:48:16:50:0.01"
-  "8:all:32:32:50:0.01"
-  "9:all:48:64:50:0.005"
+  "0:all:48:16:50:0.01:0.0"
+  "1:all:48:16:50:0.01:0.1"
+  "2:all:48:16:50:0.01:0.3"
+  "3:all:48:16:50:0.01:0.5"
+  "4:all:48:16:50:0.01:1.0"
+  "5:last-half:48:32:50:0.01:0.3"
+  "6:last-half:64:32:50:0.005:0.3"
+  "7:last-quarter:48:16:50:0.01:0.3"
+  "8:all:32:32:100:0.01:0.3"
+  "9:all:48:64:100:0.005:0.3"
 )
 
 pids=()
 for config in "${CONFIGS[@]}"; do
-  IFS=':' read -r gpu layers window codes steps lr <<< "$config"
-  stem="${RUN_ID}_gpu${gpu}_layers-${layers}_w${window}_c${codes}_s${steps}"
+  IFS=':' read -r gpu layers window codes steps lr cosine_weight <<< "$config"
+  stem="${RUN_ID}_gpu${gpu}_layers-${layers}_w${window}_c${codes}_s${steps}_cw${cosine_weight}"
   log_file="$OUTPUT_DIR/${stem}.log"
   output_file="$OUTPUT_DIR/${stem}.pt"
-  echo "Launching GPU ${gpu}: layers=${layers} window=${window} codes=${codes} steps=${steps} lr=${lr}"
+  echo "Launching GPU ${gpu}: layers=${layers} window=${window} codes=${codes} steps=${steps} lr=${lr} cosine_weight=${cosine_weight}"
   (
     CUDA_VISIBLE_DEVICES="$gpu" \
     HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}" \
@@ -48,6 +48,7 @@ for config in "${CONFIGS[@]}"; do
       --num-codes "$codes" \
       --steps "$steps" \
       --lr "$lr" \
+      --cosine-weight "$cosine_weight" \
       --max-tokens "$MAX_TOKENS" \
       --kv-head-policy repeat \
       --run-id "$RUN_ID" \
