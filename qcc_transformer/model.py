@@ -213,7 +213,12 @@ class QCCArchive(nn.Module):
 
         if not self.persistent_landmark:
             return
-        if self.prefix_landmark and self._landmark_count < self.num_codes:
+        if self.prefix_landmark:
+            if self._landmark_count >= self.num_codes:
+                # Prefix mode is intentionally immutable after the fixed
+                # prefix has been captured; later filler must never replace
+                # those exact-key anchors.
+                return
             slot = self._landmark_count
             score = self._landmark_scores(key)
             self._landmark_key[:, :, slot] = key.to(self._landmark_key.dtype)
@@ -252,8 +257,7 @@ class QCCArchive(nn.Module):
             take = min(key.shape[2], self.num_codes - self._landmark_count)
             for index in range(take):
                 self._update_landmark(key[:, :, index], value[:, :, index])
-            if take < key.shape[2]:
-                self._update_landmark_chunk_max(key[:, :, take:], value[:, :, take:])
+            # Once the prefix is full, intentionally ignore later events.
             return
         self._update_landmark_chunk_max(key, value)
 
