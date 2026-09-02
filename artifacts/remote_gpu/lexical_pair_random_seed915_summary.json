@@ -1,0 +1,34 @@
+{
+  "checkpoint": "runs/lexical_pair_random_seed915.pt",
+  "device": "NVIDIA RTX 3090 (CUDA device 2)",
+  "training": {
+    "steps": 3000,
+    "train_length": 128,
+    "query_position": 96,
+    "random_marker": true,
+    "random_filler": true,
+    "best_accuracy": 1.0
+  },
+  "model": {
+    "vocab_size": 32,
+    "d_model": 32,
+    "layers": 1,
+    "heads": 4,
+    "window_size": 16,
+    "num_codes": 32,
+    "position_encoding": "none",
+    "archive_persistent_landmark": true,
+    "archive_prefix_landmark": true,
+    "archive_prefix_pair_landmark": true,
+    "archive_lexical_landmark": true,
+    "use_triton": true
+  },
+  "evaluation": {
+    "records": 32,
+    "lengths": [128, 1024, 128000, 1000000],
+    "examples_per_length": 8,
+    "correct": 32,
+    "accuracy": 1.0
+  },
+  "status": "synthetic random-address diagnostic; not RULER or pretrained-LM evidence"
+}

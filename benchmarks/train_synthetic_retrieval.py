@@ -38,6 +38,8 @@ def make_batch(
     vocab_size: int,
     *,
     device: torch.device,
+    random_marker: bool = False,
+    random_filler: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Create marker/value streams and return tokens plus the value target."""
 
@@ -45,12 +47,16 @@ def make_batch(
         raise ValueError("length must leave a target token after query_position")
     if vocab_size < 5:
         raise ValueError("vocab_size must leave marker, filler, and value tokens")
-    marker = 1
-    filler = 2
+    if random_marker:
+        marker = torch.randint(1, vocab_size, (batch_size,), device=device)
+    else:
+        marker = torch.ones(batch_size, dtype=torch.long, device=device)
+    if random_filler:
+        filler = torch.randint(1, vocab_size, (batch_size,), device=device)
+    else:
+        filler = torch.full((batch_size,), 2, dtype=torch.long, device=device)
     values = torch.randint(3, vocab_size, (batch_size,), device=device)
-    tokens = torch.full(
-        (batch_size, length), filler, dtype=torch.long, device=device
-    )
+    tokens = filler[:, None].expand(batch_size, length).clone()
     tokens[:, 0] = marker
     tokens[:, 1] = values
     tokens[:, query_position] = marker
@@ -95,6 +101,8 @@ def train(
     device: torch.device,
     lr: float,
     log_every: int,
+    random_marker: bool = False,
+    random_filler: bool = False,
 ) -> dict[str, float]:
     """Train only the retrieval position and return final metrics."""
 
@@ -122,6 +130,8 @@ def train(
             step_query_position,
             vocab_size,
             device=device,
+            random_marker=random_marker,
+            random_filler=random_filler,
         )
         optimizer.zero_grad(set_to_none=True)
         logits = model(tokens)
@@ -172,6 +182,8 @@ def write_dataset(
     query_fraction: float,
     vocab_size: int,
     seed: int,
+    random_marker: bool = False,
+    random_filler: bool = False,
 ) -> int:
     """Write evaluator JSONL without retaining all long records in memory."""
 
@@ -189,10 +201,12 @@ def write_dataset(
             query_position = max(2, min(length - 2, int(length * query_fraction)))
             for _ in range(examples_per_length):
                 value = generator.randrange(3, vocab_size)
-                tokens = [2] * length
-                tokens[0] = 1
+                marker = generator.randrange(1, vocab_size) if random_marker else 1
+                filler = generator.randrange(1, vocab_size) if random_filler else 2
+                tokens = [filler] * length
+                tokens[0] = marker
                 tokens[1] = value
-                tokens[query_position] = 1
+                tokens[query_position] = marker
                 tokens[query_position + 1] = value
                 json.dump(
                     {
@@ -229,6 +243,8 @@ def main() -> None:
     parser.add_argument("--archive-prefix-pair-landmark", action="store_true")
     parser.add_argument("--archive-landmark-temperature", type=float, default=1.0)
     parser.add_argument("--archive-lexical-landmark", action="store_true")
+    parser.add_argument("--random-marker", action="store_true")
+    parser.add_argument("--random-filler", action="store_true")
     parser.add_argument("--max-position-embeddings", type=int, default=128_001)
     parser.add_argument(
         "--position-encoding",
@@ -271,6 +287,8 @@ def main() -> None:
         device=device,
         lr=args.lr,
         log_every=args.log_every,
+        random_marker=args.random_marker,
+        random_filler=args.random_filler,
     )
     args.checkpoint.parent.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -291,6 +309,8 @@ def main() -> None:
         query_fraction=args.query_fraction,
         vocab_size=args.vocab_size,
         seed=args.seed + 1,
+        random_marker=args.random_marker,
+        random_filler=args.random_filler,
     )
     print(
         json.dumps(
