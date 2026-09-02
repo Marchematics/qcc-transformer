@@ -58,6 +58,11 @@ model, 120 calibration steps reached cosine `0.999485` and top-1 agreement
 as calibration-only evidence; held-out RULER/LongBench quality is still
 required.
 
+```python
+from qcc_transformer import load_retrofit_adapter
+load_retrofit_adapter(model, "qcc_adapter.pt", window_size=128, num_codes=64)
+```
+
 For a vLLM custom attention backend, use the dependency-free
 `QCCVLLMState.forward(query, key, value)` primitive from
 `qcc_transformer.vllm` inside the backend's scheduler-managed per-sequence
