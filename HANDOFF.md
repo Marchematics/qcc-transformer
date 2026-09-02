@@ -191,6 +191,12 @@ python benchmarks/gate_99.py --evidence artifacts/gates/<run_id>.json
 - 新增 `benchmarks/benchmark_hf_concurrency.py`，可扫独立请求 batch；底层
   `benchmark_hf_streaming_memory.py` 现支持 `--batch-size`，并在 CPU 上只报告
   吞吐、不错误计算 CUDA 峰值显存。该工具仍是 HF diagnostic，不能替代 vLLM gate。
+- `benchmarks/gate_99.py` 已扩展为严格 11 项验收：1M retrieval、tail safety、
+  Pareto baseline、p95/p99 latency、scaling law、跨模型/GPU 复现均为必填；
+  缺失任何 section 都 fail-closed。
+- `QCCSelfAttention` 新增可选 `archive_norm_gating`（参数量不变、O(1) 状态），
+  按 local/archive 响应范数一致性抑制异常远程读；默认关闭，10 卡 sweep 的
+  GPU9 打开该消融。
 
 ### 本地回归
 
