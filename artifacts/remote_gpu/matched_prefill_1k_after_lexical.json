@@ -1,0 +1,12 @@
+{
+  "device": "NVIDIA RTX 3090 (CUDA device 0)",
+  "length": 1024,
+  "mode": "prefill",
+  "chunk_size": 1,
+  "qcc_seconds": 0.0460,
+  "full_kv_seconds": 0.0174,
+  "speedup": 0.38,
+  "qcc_bounded_state_elements": 164864,
+  "full_kv_cache_elements": 1048576,
+  "note": "Short-context overhead regime; this is not evidence for long-context speedup"
+}
