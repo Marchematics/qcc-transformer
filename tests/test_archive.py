@@ -87,6 +87,31 @@ def test_prefix_landmark_keeps_first_slots_and_uses_key_routing() -> None:
     assert float(read[0, 0, 0]) > float(read[0, 0, 1])
 
 
+def test_prefix_pair_landmark_binds_key_to_successor_value() -> None:
+    archive = QCCArchive(
+        num_heads=1,
+        head_dim=2,
+        num_codes=2,
+        decay_rates=(0.8,),
+        window_size=1,
+        use_triton=False,
+        persistent_landmark=True,
+        prefix_landmark=True,
+        prefix_pair_landmark=True,
+    )
+    keys = torch.tensor([[[[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0]]]])
+    values = torch.tensor([[[[10.0, 0.0], [20.0, 0.0], [30.0, 0.0]]]])
+    archive.update(keys[:, :, 0], values[:, :, 0])
+    archive.update(keys[:, :, 1], values[:, :, 1] + 100.0)
+    # Slot zero retains the first key but now carries the second event value.
+    torch.testing.assert_close(
+        archive._landmark_key[0, 0, 0], keys[0, 0, 0], rtol=0, atol=0
+    )
+    torch.testing.assert_close(
+        archive._landmark_value[0, 0, 0], values[0, 0, 1] + 100.0, rtol=0, atol=0
+    )
+
+
 def test_model_forward_shapes_and_gradients() -> None:
     torch.manual_seed(1)
     model = QCCForCausalLM(

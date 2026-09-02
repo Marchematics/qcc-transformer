@@ -87,6 +87,7 @@ class QCCArchive(nn.Module):
         content_threshold: Optional[float] = None,
         persistent_landmark: bool = False,
         prefix_landmark: bool = False,
+        prefix_pair_landmark: bool = False,
     ) -> None:
         super().__init__()
         if num_heads <= 0 or head_dim <= 0 or num_codes <= 0:
@@ -128,8 +129,11 @@ class QCCArchive(nn.Module):
         # default so existing kernels/checkpoints retain their exact state.
         self.persistent_landmark = persistent_landmark
         self.prefix_landmark = prefix_landmark
+        self.prefix_pair_landmark = prefix_pair_landmark
         if prefix_landmark and not persistent_landmark:
             raise ValueError("prefix_landmark requires persistent_landmark")
+        if prefix_pair_landmark and not prefix_landmark:
+            raise ValueError("prefix_pair_landmark requires prefix_landmark")
         if persistent_landmark:
             self.landmark_mix_logits = nn.Parameter(torch.zeros(num_heads))
         self.register_buffer("decay_rates", rates, persistent=True)
@@ -177,6 +181,7 @@ class QCCArchive(nn.Module):
         self._step = 0
         if self.persistent_landmark:
             self._landmark_count = 0
+            self._prefix_pending_slot = -1
             self._landmark_score = torch.full(
                 (batch_size, self.num_heads, self.num_codes),
                 -torch.inf,
@@ -220,6 +225,13 @@ class QCCArchive(nn.Module):
                 # those exact-key anchors.
                 return
             slot = self._landmark_count
+            if self.prefix_pair_landmark and self._prefix_pending_slot >= 0:
+                # Bind the previous retained key to the current token's value.
+                # This is useful for marker/value streams where the query
+                # matches the marker key but the answer is its successor.
+                self._landmark_value[:, :, self._prefix_pending_slot] = value.to(
+                    self._landmark_value.dtype
+                )
             score = self._landmark_scores(key)
             self._landmark_key[:, :, slot] = key.to(self._landmark_key.dtype)
             self._landmark_value[:, :, slot] = value.to(self._landmark_value.dtype)
@@ -228,6 +240,8 @@ class QCCArchive(nn.Module):
             # retained key directly at read time.
             self._landmark_score[:, :, slot] = score.max(dim=-1).values
             self._landmark_count += 1
+            if self.prefix_pair_landmark:
+                self._prefix_pending_slot = slot
             return
         score = self._landmark_scores(key)
         if self.content_threshold is not None:
@@ -892,6 +906,7 @@ class QCCSelfAttention(nn.Module):
         archive_content_threshold: Optional[float] = None,
         archive_persistent_landmark: bool = False,
         archive_prefix_landmark: bool = False,
+        archive_prefix_pair_landmark: bool = False,
         rope_theta: Optional[float] = None,
         max_position_embeddings: int = 4096,
         decay_rates: Optional[tuple[float, ...]] = None,
@@ -954,6 +969,7 @@ class QCCSelfAttention(nn.Module):
             scan_block_size=archive_scan_block_size,
             content_threshold=archive_content_threshold,
             persistent_landmark=archive_persistent_landmark,
+            prefix_pair_landmark=archive_prefix_pair_landmark,
         )
         self.archive_read_stride = archive_read_stride
         # Optional adaptive remote-read suppression. ``None`` keeps exact
@@ -1848,6 +1864,7 @@ class QCCForCausalLM(nn.Module):
         archive_content_threshold: Optional[float] = None,
         archive_persistent_landmark: bool = False,
         archive_prefix_landmark: bool = False,
+        archive_prefix_pair_landmark: bool = False,
         archive_decay_rates: Optional[tuple[float, ...]] = None,
     ) -> None:
         super().__init__()
@@ -1887,6 +1904,7 @@ class QCCForCausalLM(nn.Module):
                 archive_content_threshold=archive_content_threshold,
                 archive_persistent_landmark=archive_persistent_landmark,
                 archive_prefix_landmark=archive_prefix_landmark,
+                archive_prefix_pair_landmark=archive_prefix_pair_landmark,
                 rope_theta=rope_theta if position_encoding == "rope" else None,
                 max_position_embeddings=max_position_embeddings,
                 decay_rates=archive_decay_rates,

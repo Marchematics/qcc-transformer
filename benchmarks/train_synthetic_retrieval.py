@@ -76,6 +76,7 @@ def _model_kwargs(args: argparse.Namespace) -> dict[str, Any]:
         "archive_content_threshold": args.archive_content_threshold,
         "archive_persistent_landmark": args.archive_persistent_landmark,
         "archive_prefix_landmark": args.archive_prefix_landmark,
+        "archive_prefix_pair_landmark": args.archive_prefix_pair_landmark,
     }
 
 
@@ -223,6 +224,7 @@ def main() -> None:
     parser.add_argument("--archive-content-threshold", type=float, default=None)
     parser.add_argument("--archive-persistent-landmark", action="store_true")
     parser.add_argument("--archive-prefix-landmark", action="store_true")
+    parser.add_argument("--archive-prefix-pair-landmark", action="store_true")
     parser.add_argument("--max-position-embeddings", type=int, default=128_001)
     parser.add_argument(
         "--position-encoding",
