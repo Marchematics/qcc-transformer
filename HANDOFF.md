@@ -100,6 +100,7 @@ cd /home/frankwang122222/zjh/zjh/*/qcc-transformer-next
 - 新增 gate-bias smoke（全层、3 steps、bias=2.0）：held-out cosine `0.8406`，仅作初始化诊断；
 - 远程当前已有 Qwen2.5-0.5B/1.5B（原生 `max_position_embeddings=32768`）和已下载的 `microsoft/Phi-4-mini-instruct`（真实 3.8B、`131072` context）；Phi-4 使用 Phi3 fused `qkv_proj` 和 partial/long RoPE，兼容实现见下一条。
 - 已接入 Phi3/Phi4 fused `qkv_proj` 视图、单源 GEMM、GQA repeat 和 partial/LongRoPE 频率提取；真实 Phi-4-mini 81-token matched smoke：cosine `0.9999655`、top-1 `100%`，32/32 层成功 patch。该结果只证明短上下文路径对齐，不证明 128K archive 质量。
+- 真实 Phi-4-mini 512-token long diagnostic（window 128、codes 16、未校准）：cosine `0.9646269`、top-1 `89.84375%`；50-step 全层校准后训练 cosine `0.9974645`、held-out cosine `0.9698532`、参数比例 `0.1037%`，仍未达到 `0.99`。
 
 ## 4. 已验证结果（严格区分证据等级）
 
