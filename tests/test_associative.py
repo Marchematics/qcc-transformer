@@ -88,3 +88,56 @@ def test_probe_sets_recovers_second_best_routing_set() -> None:
     query = torch.tensor([[[0.1, 1.0]]])
     response, _ = bank.read(query, hard=True)
     torch.testing.assert_close(response, value_b, rtol=0, atol=0)
+
+
+def test_write_mask_skips_low_salience_rows() -> None:
+    torch.manual_seed(33)
+    bank = SetAssociativeLandmarkBank(
+        num_heads=1,
+        head_dim=4,
+        num_sets=1,
+        ways=2,
+        probe_sets=1,
+    )
+    with torch.no_grad():
+        bank.admission_vector.zero_()
+    key = torch.randn(2, 1, 4)
+    value = torch.randn_like(key)
+    bank.update(
+        key,
+        value,
+        admission_bias=torch.tensor([[10.0], [-10.0]]),
+        write_mask=torch.tensor([[True], [False]]),
+    )
+    assert torch.isfinite(bank.state.scores[0]).any()
+    assert not torch.isfinite(bank.state.scores[1]).any()
+
+
+def test_read_chunk_matches_individual_reads_for_frozen_state() -> None:
+    torch.manual_seed(44)
+    bank = SetAssociativeLandmarkBank(
+        num_heads=2,
+        head_dim=8,
+        num_sets=4,
+        ways=2,
+        probe_sets=4,
+    )
+    with torch.no_grad():
+        bank.admission_vector.zero_()
+    for _ in range(5):
+        key = torch.randn(1, 2, 8)
+        bank.update(
+            key,
+            torch.randn_like(key),
+            admission_bias=torch.full((1, 2), 10.0),
+        )
+    query = torch.randn(1, 2, 7, 8)
+    block_out, block_conf = bank.read_chunk(query, hard=True)
+    outputs = []
+    confidences = []
+    for index in range(query.shape[2]):
+        output, confidence = bank.read(query[:, :, index], hard=True)
+        outputs.append(output)
+        confidences.append(confidence)
+    torch.testing.assert_close(block_out, torch.stack(outputs, dim=2))
+    torch.testing.assert_close(block_conf, torch.stack(confidences, dim=2))
