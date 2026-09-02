@@ -444,6 +444,18 @@ available smoke evidence:
 No row marked `missing` or `short-context only` should be reported as a
 production or universal speedup claim.
 
+### Remote multi-GPU matched timing
+
+The repository now includes matched RTX 3090 measurements in
+[`artifacts/remote_gpu/`](artifacts/remote_gpu/).  At 16K and 32K tokens, the
+QCC path reached `2.22×` and `5.17×` TPOT speedup against fused Full-KV, while
+TTFT speedups were `1.06×` and `2.21×`.  Prefill scaling crossed Full-KV at 4K
+(`1.62×`) and reached `2.91×` at 8K.  Decode scaling was only `0.70–0.89×`
+through 8K because this reference path still has Python-side per-token work;
+the results therefore motivate a fused persistent decode kernel rather than
+supporting the 1M TPOT ≥8× gate.  The 8K audit row contains a cold Triton
+compile outlier and is retained for auditability.
+
 On the reference CPU environment (PyTorch 2.9.1, one thread), a persistent
 decode benchmark with the fused SDPA full-KV control measured:
 
