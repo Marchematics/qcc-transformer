@@ -35,6 +35,23 @@ patched = patch_hf_model(model, window_size=128, num_codes=64)
 print("patched layers:", patched)
 ```
 
+Patching is idempotent: calling `patch_hf_model` a second time returns an
+empty list and does not wrap the same attention module recursively.  Popular
+Llama-2/3 and Qwen checkpoints often use grouped-query attention (GQA).  The
+safe default is to reject those models; an explicit, auditable head-sharing
+policy is available when the baseline comparison permits it:
+
+```python
+patched = patch_hf_model(model, kv_head_policy="repeat")
+```
+
+`repeat` expands each loaded KV head to its query-head group before entering
+the per-head archive.  It is not a claim of exact equivalence to every model's
+custom attention implementation, so the 99% gate must be rerun after
+calibration.  Adapter-only checkpoints can be written with
+`save_retrofit_adapter(model, "qcc_adapter.pt", base_model="...", revision="...")`;
+the file contains no copy of the pretrained backbone.
+
 Install the optional dependency with `pip install -e '.[hf]'`.  GQA/MQA
 models are rejected until an explicit KV-head policy is supplied; silently
 replicating heads would invalidate a 99% Full-KV quality gate.  The adapter
@@ -63,12 +80,35 @@ from qcc_transformer import load_retrofit_adapter
 load_retrofit_adapter(model, "qcc_adapter.pt", window_size=128, num_codes=64)
 ```
 
+The matched gate can score a held-out JSONL (one `text` or `prompt` field per
+line) rather than a single calibration prompt:
+
+```bash
+python benchmarks/benchmark_hf_retrofit.py \
+  --model <model-id> --jsonl heldout.jsonl --quality-gate 0.99
+```
+
+The benchmark loads the Full-KV teacher first, releases it, then loads the
+patched student; this keeps the comparison usable on a single GPU.  It reports
+per-record and aggregate logit cosine/top-1 agreement.  Passing this gate is
+necessary for the retrofit claim, but is not a substitute for held-out RULER,
+LongBench, or perplexity measurements.
+
 For a vLLM custom attention backend, use the dependency-free
 `QCCVLLMState.forward(query, key, value)` primitive from
 `qcc_transformer.vllm` inside the backend's scheduler-managed per-sequence
-state.  This avoids pinning an unstable vLLM ABI while making the cache state
-and shape contract explicit; an upstream vLLM integration still requires a
-version-specific backend registration and matched quality benchmark.
+state.  `QCCVLLMBackend` provides a minimal request registry with explicit
+`reset`, `fork`, and `drop` lifecycle operations for paged/beam serving:
+
+```python
+from qcc_transformer.vllm import QCCVLLMBackend
+backend = QCCVLLMBackend(num_heads=32, head_dim=128, window_size=128, num_codes=64)
+out = backend.forward(request_id, query, key, value)  # [1, H, T, D]
+```
+
+This avoids pinning an unstable vLLM ABI while making the cache state and
+shape contract explicit; upstream vLLM still needs a version-specific backend
+registration and matched quality benchmark.
 
 ## Run tests
 

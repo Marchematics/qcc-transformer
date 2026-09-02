@@ -8,13 +8,16 @@ from .model import (
     count_archive_elements,
 )
 from .retrofit import (
+    FidelityReport,
     HFQCCAttention,
     QCCCacheHandle,
     load_retrofit_adapter,
     patch_hf_model,
     retrofit_adapter_state,
+    save_retrofit_adapter,
+    compare_logits,
 )
-from .vllm import QCCVLLMState
+from .vllm import QCCVLLMBackend, QCCVLLMState
 
 __all__ = [
     "QCCArchive",
@@ -23,9 +26,13 @@ __all__ = [
     "SinusoidalPositionEmbedding",
     "count_archive_elements",
     "HFQCCAttention",
+    "FidelityReport",
     "QCCCacheHandle",
     "load_retrofit_adapter",
     "patch_hf_model",
     "retrofit_adapter_state",
+    "save_retrofit_adapter",
+    "compare_logits",
     "QCCVLLMState",
+    "QCCVLLMBackend",
 ]

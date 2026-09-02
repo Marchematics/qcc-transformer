@@ -27,6 +27,81 @@ from torch import Tensor, nn
 from .model import QCCSelfAttention
 
 
+@dataclass(frozen=True)
+class FidelityReport:
+    """Matched Full-KV-vs-retrofit quality metrics and gate decision."""
+
+    mean_logit_cosine: float
+    top1_agreement: float
+    quality_gate: float = 0.99
+
+    @property
+    def passed(self) -> bool:
+        return (
+            self.mean_logit_cosine >= self.quality_gate
+            and self.top1_agreement >= self.quality_gate
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "mean_logit_cosine": self.mean_logit_cosine,
+            "top1_agreement": self.top1_agreement,
+            "quality_gate": self.quality_gate,
+            "fidelity_passed": self.passed,
+        }
+
+
+def compare_logits(reference: Tensor, candidate: Tensor, *, quality_gate: float = 0.99) -> FidelityReport:
+    """Compute the repository's 99% Full-KV fidelity gate."""
+
+    if reference.shape != candidate.shape or reference.ndim < 2:
+        raise ValueError("reference and candidate logits must have the same rank-2+ shape")
+    if not 0.0 <= quality_gate <= 1.0:
+        raise ValueError("quality_gate must lie in [0, 1]")
+    reference = reference.float().reshape(-1, reference.shape[-1])
+    candidate = candidate.float().reshape(-1, candidate.shape[-1])
+    cosine = torch.nn.functional.cosine_similarity(reference, candidate, dim=-1).mean()
+    top1 = (reference.argmax(dim=-1) == candidate.argmax(dim=-1)).float().mean()
+    return FidelityReport(float(cosine.item()), float(top1.item()), quality_gate)
+
+
+class _RepeatKVProjection(nn.Module):
+    """Expand grouped-query K/V projections to query-head width.
+
+    This is an explicit opt-in policy.  Repeating each KV head preserves the
+    usual HF GQA semantics (each query group shares one projected KV head)
+    while allowing QCC's per-head archive to operate without inventing an
+    unvalidated averaging rule.
+    """
+
+    def __init__(self, base: nn.Module, query_heads: int, kv_heads: int, head_dim: int) -> None:
+        super().__init__()
+        if query_heads % kv_heads:
+            raise ValueError("query_heads must be divisible by kv_heads for repeat policy")
+        self.base = base
+        self.query_heads = query_heads
+        self.kv_heads = kv_heads
+        self.head_dim = head_dim
+        self.in_features = int(getattr(base, "in_features"))
+        self.out_features = query_heads * head_dim
+        self.repeat = query_heads // kv_heads
+
+    @property
+    def weight(self) -> Tensor:
+        return self.base.weight
+
+    @property
+    def bias(self) -> Optional[Tensor]:
+        return getattr(self.base, "bias", None)
+
+    def forward(self, hidden: Tensor) -> Tensor:
+        projected = self.base(hidden)
+        shape = (*projected.shape[:-1], self.kv_heads, self.head_dim)
+        projected = projected.view(*shape)
+        projected = projected.repeat_interleave(self.repeat, dim=-2)
+        return projected.reshape(*projected.shape[:-2], self.out_features)
+
+
 @dataclass
 class QCCCacheHandle:
     """Minimal cache protocol used by common HF generation loops.
@@ -74,6 +149,8 @@ class HFQCCAttention(nn.Module):
         archive_read_stride: int = 1,
         archive_query_cosine_threshold: Optional[float] = None,
         archive_lexical_landmark: bool = False,
+        kv_head_policy: str = "reject",
+        kv_heads: Optional[int] = None,
     ) -> None:
         super().__init__()
         required = ("q_proj", "k_proj", "v_proj", "o_proj")
@@ -90,11 +167,28 @@ class HFQCCAttention(nn.Module):
         d_model = int(q_proj.in_features)
         if q_proj.out_features % num_heads:
             raise ValueError("hidden size must be divisible by num_heads")
+        inferred_kv_heads = int(k_proj.out_features // (d_model // num_heads))
+        if kv_heads is None:
+            kv_heads = inferred_kv_heads
+        if kv_head_policy not in {"reject", "repeat"}:
+            raise ValueError("kv_head_policy must be 'reject' or 'repeat'")
         if k_proj.out_features != d_model or v_proj.out_features != d_model:
-            raise ValueError(
-                "QCC retrofit currently supports equal-width MHA projections; "
-                "GQA/MQA requires an explicit KV-head policy"
-            )
+            if kv_head_policy != "repeat":
+                raise ValueError(
+                    "QCC retrofit currently supports equal-width MHA projections; "
+                    "GQA/MQA requires kv_head_policy='repeat'"
+                )
+            if kv_heads <= 0 or num_heads % kv_heads:
+                raise ValueError("repeat policy requires query_heads divisible by kv_heads")
+            head_dim = d_model // num_heads
+            if k_proj.out_features != kv_heads * head_dim or v_proj.out_features != kv_heads * head_dim:
+                raise ValueError("K/V projection width is inconsistent with head counts")
+            k_proj_for_qcc: nn.Module = _RepeatKVProjection(k_proj, num_heads, kv_heads, head_dim)
+            v_proj_for_qcc: nn.Module = _RepeatKVProjection(v_proj, num_heads, kv_heads, head_dim)
+        else:
+            k_proj_for_qcc = k_proj
+            v_proj_for_qcc = v_proj
+            kv_heads = num_heads
         self.base_attention = base_attention
         self.qcc = QCCSelfAttention(
             d_model,
@@ -113,11 +207,26 @@ class HFQCCAttention(nn.Module):
         # parameters and should be calibrated or fine-tuned before quality
         # claims are made.
         self.qcc.q_proj = q_proj
-        self.qcc.k_proj = k_proj
-        self.qcc.v_proj = v_proj
+        self.qcc.k_proj = k_proj_for_qcc
+        self.qcc.v_proj = v_proj_for_qcc
         self.qcc.out_proj = getattr(base_attention, "o_proj")
         self.num_heads = num_heads
         self.d_model = d_model
+        self.kv_head_policy = kv_head_policy
+        self.kv_heads = int(kv_heads)
+        self._qcc_retrofit = True
+
+    def __getattr__(self, name: str) -> Any:
+        # HF decoder layers sometimes inspect implementation-specific fields
+        # such as ``layer_idx`` or ``rotary_emb`` on their attention module.
+        # Delegate those reads to the original module so patching is drop-in.
+        try:
+            return super().__getattr__(name)
+        except AttributeError:
+            base = self.__dict__.get("_modules", {}).get("base_attention")
+            if base is not None and hasattr(base, name):
+                return getattr(base, name)
+            raise
 
     @staticmethod
     def _positions(
@@ -209,6 +318,7 @@ def patch_hf_model(
     archive_read_stride: int = 1,
     archive_query_cosine_threshold: Optional[float] = None,
     archive_lexical_landmark: bool = False,
+    kv_head_policy: str = "reject",
 ) -> list[str]:
     """Replace compatible HF attention modules and return their module paths.
 
@@ -235,6 +345,8 @@ def patch_hf_model(
         )
     replaced: list[str] = []
     for name, module in candidates:
+        if getattr(module, "_qcc_retrofit", False) or getattr(module, "_qcc_retrofit_original", False):
+            continue
         q_heads = int(
             getattr(module, "num_heads", getattr(config, "num_attention_heads", 0))
         )
@@ -243,10 +355,10 @@ def patch_hf_model(
         )
         if q_heads <= 0:
             raise ValueError(f"cannot infer num_heads for {name}")
-        if kv_heads != q_heads:
+        if kv_heads != q_heads and kv_head_policy == "reject":
             raise ValueError(
                 f"{name} uses GQA/MQA ({q_heads} query vs {kv_heads} KV heads); "
-                "QCC retrofit requires an explicit KV-head reduction policy"
+                "QCC retrofit requires kv_head_policy='repeat'"
             )
         wrapper = HFQCCAttention(
             module,
@@ -259,7 +371,13 @@ def patch_hf_model(
             archive_read_stride=archive_read_stride,
             archive_query_cosine_threshold=archive_query_cosine_threshold,
             archive_lexical_landmark=archive_lexical_landmark,
+            kv_head_policy=kv_head_policy,
+            kv_heads=kv_heads,
         )
+        # The original module remains registered below the wrapper so its
+        # projection parameters are shared.  Mark it to make patching
+        # idempotent instead of recursively wrapping ``base_attention``.
+        setattr(module, "_qcc_retrofit_original", True)
         parent, attr = _module_parent(model, name)
         setattr(parent, attr, wrapper)
         replaced.append(name)
@@ -277,6 +395,26 @@ def retrofit_adapter_state(model: nn.Module) -> dict[str, Tensor]:
     if not state:
         raise ValueError("model has no QCC retrofit parameters; call patch_hf_model first")
     return state
+
+
+def save_retrofit_adapter(model: nn.Module, checkpoint: str | Path, **metadata: Any) -> Path:
+    """Save QCC-only parameters plus a reproducibility manifest.
+
+    The base HF model is never copied into the adapter.  Metadata is JSON-like
+    and can include the model id/revision, patch arguments, and calibration
+    split so a deployment script can verify that the adapter is being applied
+    to the intended backbone.
+    """
+
+    path = Path(checkpoint)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "state_dict": retrofit_adapter_state(model),
+        "format": "qcc-retrofit-v1",
+        "metadata": metadata,
+    }
+    torch.save(payload, path)
+    return path
 
 
 def load_retrofit_adapter(
@@ -305,9 +443,12 @@ def load_retrofit_adapter(
 
 
 __all__ = [
+    "FidelityReport",
     "HFQCCAttention",
     "QCCCacheHandle",
     "load_retrofit_adapter",
     "patch_hf_model",
     "retrofit_adapter_state",
+    "save_retrofit_adapter",
+    "compare_logits",
 ]

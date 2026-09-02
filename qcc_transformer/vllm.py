@@ -11,6 +11,7 @@ an assertion that the upstream vLLM ABI is stable.
 from __future__ import annotations
 
 import math
+import copy
 
 import torch
 from torch import Tensor
@@ -103,5 +104,54 @@ class QCCVLLMState:
             self._seen += 1
         return torch.stack(outputs, dim=2)
 
+    @property
+    def seen_tokens(self) -> int:
+        """Number of tokens consumed by this logical sequence."""
 
-__all__ = ["QCCVLLMState"]
+        return self._seen
+
+    def fork(self) -> "QCCVLLMState":
+        """Clone state for beam/speculative branches without sharing tensors."""
+
+        return copy.deepcopy(self)
+
+
+class QCCVLLMBackend:
+    """Small scheduler-facing state registry for vLLM custom backends.
+
+    vLLM versions expose different registration ABIs, so this class stays
+    dependency-free and handles the stable part: one bounded state per
+    logical request, explicit lifecycle, and beam/fork support.  A backend
+    adapter can call ``forward(request_id, q, k, v)`` from its attention kernel.
+    """
+
+    def __init__(self, num_heads: int, head_dim: int, **state_kwargs: object) -> None:
+        self.num_heads = num_heads
+        self.head_dim = head_dim
+        self.state_kwargs = dict(state_kwargs)
+        self._states: dict[str, QCCVLLMState] = {}
+
+    def reset(self, request_id: str, *, device: torch.device, dtype: torch.dtype) -> QCCVLLMState:
+        state = QCCVLLMState(self.num_heads, self.head_dim, **self.state_kwargs)
+        state.reset(1, device=device, dtype=dtype)
+        self._states[request_id] = state
+        return state
+
+    def forward(self, request_id: str, query: Tensor, key: Tensor, value: Tensor) -> Tensor:
+        if query.ndim != 4 or query.shape[0] != 1:
+            raise ValueError("QCCVLLMBackend expects one [batch=1] logical request")
+        state = self._states.get(request_id)
+        if state is None:
+            state = self.reset(request_id, device=query.device, dtype=query.dtype)
+        return state.forward(query, key, value)
+
+    def fork(self, source_id: str, target_id: str) -> None:
+        if source_id not in self._states:
+            raise KeyError(f"unknown source request: {source_id}")
+        self._states[target_id] = self._states[source_id].fork()
+
+    def drop(self, request_id: str) -> None:
+        self._states.pop(request_id, None)
+
+
+__all__ = ["QCCVLLMBackend", "QCCVLLMState"]

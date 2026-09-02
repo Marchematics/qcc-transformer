@@ -17,7 +17,7 @@ from pathlib import Path
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from qcc_transformer import patch_hf_model, retrofit_adapter_state
+from qcc_transformer import patch_hf_model, save_retrofit_adapter
 
 
 def main() -> None:
@@ -32,6 +32,7 @@ def main() -> None:
     parser.add_argument("--max-tokens", type=int, default=2048)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--trust-remote-code", action="store_true")
+    parser.add_argument("--kv-head-policy", choices=("reject", "repeat"), default="reject")
     args = parser.parse_args()
     if args.steps <= 0 or args.lr <= 0 or args.max_tokens <= 0:
         raise ValueError("steps, lr, and max-tokens must be positive")
@@ -60,6 +61,7 @@ def main() -> None:
         patched,
         window_size=args.window_size,
         num_codes=args.num_codes,
+        kv_head_policy=args.kv_head_policy,
     )
     for parameter in patched.parameters():
         parameter.requires_grad = False
@@ -99,17 +101,16 @@ def main() -> None:
         ).mean()
         agreement = (student.argmax(-1) == teacher.argmax(-1)).float().mean()
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(
-        {
-            "state_dict": retrofit_adapter_state(patched),
-            "base_model": args.model,
-            "retrofit": {
-                "window_size": args.window_size,
-                "num_codes": args.num_codes,
-                "patched_layers": replaced,
-            },
-        },
+    save_retrofit_adapter(
+        patched,
         args.output,
+        base_model=args.model,
+        retrofit={
+            "window_size": args.window_size,
+            "num_codes": args.num_codes,
+            "patched_layers": replaced,
+            "kv_head_policy": args.kv_head_policy,
+        },
     )
     print(
         json.dumps(

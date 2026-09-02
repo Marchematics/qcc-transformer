@@ -1043,6 +1043,27 @@ class QCCSelfAttention(nn.Module):
         dispatcher round trips that otherwise dominate the bounded-memory
         archive work.
         """
+        # Retrofit adapters may expose an explicit GQA/MQA expansion module
+        # for K/V.  That module is intentionally not folded into the fused
+        # GEMM: the fallback below projects and expands it without silently
+        # changing the loaded HF projection weights.
+        can_fuse = all(
+            isinstance(projection, nn.Linear)
+            and projection.out_features == self.d_model
+            for projection in (self.q_proj, self.k_proj, self.v_proj)
+        )
+        if not can_fuse:
+            q = self.q_proj(hidden)
+            k = self.k_proj(hidden)
+            v = self.v_proj(hidden)
+            gate = self.gate(hidden)
+            if k.shape[-1] != self.d_model or v.shape[-1] != self.d_model:
+                raise ValueError(
+                    "retrofit K/V projections must expand to hidden size; "
+                    "provide an explicit GQA/MQA policy"
+                )
+            return q, k, v, gate
+
         versions = (
             self.q_proj.weight._version,
             self.k_proj.weight._version,

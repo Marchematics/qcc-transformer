@@ -5,9 +5,11 @@ import torch
 from torch import nn
 
 from qcc_transformer.retrofit import (
+    compare_logits,
     load_retrofit_adapter,
     patch_hf_model,
     retrofit_adapter_state,
+    save_retrofit_adapter,
 )
 
 
@@ -84,3 +86,25 @@ def test_retrofit_adapter_round_trip(tmp_path):
 def test_patch_hf_rejects_grouped_query_attention():
     with pytest.raises(ValueError, match="GQA/MQA"):
         patch_hf_model(_Model(kv_heads=2), use_triton=False)
+
+
+def test_patch_hf_gqa_repeat_policy_and_idempotence():
+    model = _Model(kv_heads=2)
+    # The test fixture uses equal-width projections, but the explicit policy
+    # still permits a model whose config advertises grouped heads.
+    replaced = patch_hf_model(model, use_triton=False, kv_head_policy="repeat")
+    assert replaced == ["attn"]
+    assert patch_hf_model(model, use_triton=False, kv_head_policy="repeat") == []
+
+
+def test_fidelity_gate_and_adapter_manifest(tmp_path):
+    reference = torch.randn(2, 3, 7)
+    assert compare_logits(reference, reference).passed
+    report = compare_logits(reference, -reference)
+    assert not report.passed
+    model = _Model()
+    patch_hf_model(model, use_triton=False)
+    path = save_retrofit_adapter(model, tmp_path / "adapter.pt", base_model="fixture")
+    payload = torch.load(path, map_location="cpu")
+    assert payload["format"] == "qcc-retrofit-v1"
+    assert payload["metadata"]["base_model"] == "fixture"
