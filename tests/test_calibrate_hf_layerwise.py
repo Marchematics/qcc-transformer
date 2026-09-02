@@ -14,6 +14,7 @@ _SPEC.loader.exec_module(_MODULE)
 parse_layer_spec = _MODULE.parse_layer_spec
 _chunked_mse = _MODULE._chunked_mse
 _mean_cosine_from_cpu = _MODULE._mean_cosine_from_cpu
+_distillation_loss = _MODULE._distillation_loss
 
 
 @pytest.mark.parametrize(
@@ -48,3 +49,24 @@ def test_chunked_distillation_helpers_match_reference():
     ).mean()
     assert torch.allclose(_chunked_mse(student, teacher, chunk_size=5), expected_mse)
     assert torch.allclose(_mean_cosine_from_cpu(student, teacher, chunk_size=5), expected_cos)
+
+
+def test_distillation_loss_zero_weight_matches_mse():
+    import torch
+
+    student = torch.randn(2, 3, 11)
+    teacher = torch.randn(2, 3, 11)
+    assert torch.allclose(
+        _distillation_loss(student, teacher, chunk_size=4),
+        _chunked_mse(student, teacher, chunk_size=4),
+    )
+
+
+def test_distillation_loss_cosine_term_is_finite():
+    import torch
+
+    student = torch.ones(1, 1, 7)
+    teacher = torch.ones(1, 1, 7)
+    loss = _distillation_loss(student, teacher, chunk_size=3, cosine_weight=0.5)
+    assert torch.isfinite(loss)
+    assert loss.item() < 1e-6

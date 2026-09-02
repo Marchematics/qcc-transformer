@@ -54,6 +54,30 @@ def _mean_cosine_from_cpu(student: torch.Tensor, teacher_cpu: torch.Tensor, *, c
     return (dot / (student_sq.sqrt() * teacher_sq.sqrt()).clamp_min(1e-12)).mean()
 
 
+def _distillation_loss(
+    student: torch.Tensor,
+    teacher_cpu: torch.Tensor,
+    *,
+    chunk_size: int = 8192,
+    cosine_weight: float = 0.0,
+) -> torch.Tensor:
+    """Numerically stable logit distillation objective.
+
+    The original calibration used MSE only, which over-weights high-magnitude
+    vocabulary coordinates and can yield a good train loss but poor held-out
+    ranking fidelity.  A bounded cosine term directly optimizes directional
+    agreement while retaining the MSE scale.  ``cosine_weight=0`` is exactly
+    the historical objective for reproducibility.
+    """
+    if not 0.0 <= cosine_weight <= 1.0:
+        raise ValueError("cosine_weight must lie in [0, 1]")
+    mse = _chunked_mse(student, teacher_cpu, chunk_size=chunk_size)
+    if cosine_weight == 0.0:
+        return mse
+    cosine = _mean_cosine_from_cpu(student, teacher_cpu, chunk_size=chunk_size)
+    return (1.0 - cosine_weight) * mse + cosine_weight * (1.0 - cosine)
+
+
 def parse_layer_spec(spec: str, num_layers: int) -> list[int]:
     """Parse layer specification like '8-15', '0,2,4', or 'last-half'."""
     spec = spec.strip().lower()
@@ -132,10 +156,17 @@ def main() -> None:
     )
     parser.add_argument("--quality-gate", type=float, default=0.99,
                         help="minimum held-out cosine for fidelity gate")
+    parser.add_argument(
+        "--cosine-weight", type=float, default=0.0,
+        help="weight of directional (1-cosine) term in calibration loss; "
+             "0 preserves historical MSE-only behavior",
+    )
     args = parser.parse_args()
 
     if args.steps <= 0 or args.lr <= 0 or args.max_tokens <= 0 or args.num_train_chunks <= 0:
         raise ValueError("steps, lr, max-tokens, and num-train-chunks must be positive")
+    if not 0.0 <= args.cosine_weight <= 1.0:
+        raise ValueError("cosine-weight must lie in [0, 1]")
     if args.max_tokens <= args.window_size:
         raise ValueError("max-tokens must exceed window-size to exercise archive")
 
@@ -270,7 +301,11 @@ def main() -> None:
         optimizer.zero_grad(set_to_none=True)
         batch_index = step % len(train_batches)
         student = patched(**train_batches[batch_index], use_cache=False).logits.float()
-        loss = _chunked_mse(student, train_teachers[batch_index])
+        loss = _distillation_loss(
+            student,
+            train_teachers[batch_index],
+            cosine_weight=args.cosine_weight,
+        )
         loss.backward()
         torch.nn.utils.clip_grad_norm_(trainable, 1.0)
         optimizer.step()
