@@ -384,6 +384,63 @@ def test_decode_chunk_matches_token_stream(use_archive: bool) -> None:
     torch.testing.assert_close(chunk_logits, token_logits, rtol=2e-4, atol=2e-4)
 
 
+def test_lexical_landmark_decode_paths_match_and_ring_is_bounded() -> None:
+    """Lexical archive addressing must be transparent to serving semantics."""
+
+    torch.manual_seed(61)
+    model = QCCForCausalLM(
+        vocab_size=31,
+        d_model=24,
+        num_layers=2,
+        num_heads=4,
+        max_position_embeddings=128,
+        window_size=5,
+        num_codes=4,
+        use_triton=False,
+        archive_lexical_landmark=True,
+        position_encoding="rope",
+    ).eval()
+    tokens = torch.randint(0, 31, (2, 19))
+    with torch.no_grad():
+        sequence = model(tokens)
+        model.reset_cache(tokens.shape[0])
+        streamed = torch.stack(
+            [model.decode_step(tokens[:, t]) for t in range(tokens.shape[1])], dim=1
+        )
+        model.reset_cache(tokens.shape[0])
+        chunked = torch.cat(
+            [model.decode_chunk(tokens[:, :7], reset_cache=True), model.decode_chunk(tokens[:, 7:])],
+            dim=1,
+        )
+    torch.testing.assert_close(streamed, sequence, rtol=3e-4, atol=3e-4)
+    torch.testing.assert_close(chunked, streamed, rtol=3e-4, atol=3e-4)
+    for layer in model.layers:
+        attention = layer.attention
+        assert attention._lexical_key_cache is not None
+        assert attention._lexical_value_cache is not None
+        assert attention._cache_length <= attention.window_size
+        assert attention._lexical_key_cache.shape[2] == attention.window_size
+
+
+def test_lexical_triplet_is_position_free_and_matches_token_embedding() -> None:
+    torch.manual_seed(62)
+    attention = QCCSelfAttention(
+        d_model=16,
+        num_heads=4,
+        window_size=3,
+        num_codes=4,
+        archive_lexical_landmark=True,
+        use_triton=False,
+    )
+    hint = torch.randn(2, 7, 16)
+    query, key, value = attention._lexical_archive_triplet(hint)
+    assert query is not None and key is not None and value is not None
+    expected = hint.view(2, 7, 4, 4).transpose(1, 2)
+    torch.testing.assert_close(query, expected)
+    torch.testing.assert_close(key, expected)
+    torch.testing.assert_close(value, expected)
+
+
 def test_sparse_archive_read_matches_dense_when_all_codes_active() -> None:
     torch.manual_seed(7)
     kwargs = dict(num_heads=2, head_dim=8, num_codes=6, window_size=3, use_triton=False)

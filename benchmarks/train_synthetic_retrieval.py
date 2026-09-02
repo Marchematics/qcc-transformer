@@ -78,6 +78,7 @@ def _model_kwargs(args: argparse.Namespace) -> dict[str, Any]:
         "archive_prefix_landmark": args.archive_prefix_landmark,
         "archive_prefix_pair_landmark": args.archive_prefix_pair_landmark,
         "archive_landmark_temperature": args.archive_landmark_temperature,
+        "archive_lexical_landmark": args.archive_lexical_landmark,
     }
 
 
@@ -227,6 +228,7 @@ def main() -> None:
     parser.add_argument("--archive-prefix-landmark", action="store_true")
     parser.add_argument("--archive-prefix-pair-landmark", action="store_true")
     parser.add_argument("--archive-landmark-temperature", type=float, default=1.0)
+    parser.add_argument("--archive-lexical-landmark", action="store_true")
     parser.add_argument("--max-position-embeddings", type=int, default=128_001)
     parser.add_argument(
         "--position-encoding",

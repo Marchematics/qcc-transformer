@@ -257,6 +257,18 @@ negative result is recorded in
 and rules out a simple marker-to-successor overwrite as the missing ingredient;
 the 1M retrieval gate remains open.
 
+The optional `archive_lexical_landmark` mode is a separate addressing ablation:
+the exact local attention path still uses contextual, position-aware Q/K/V,
+while evicted archive events are keyed and queried from the raw token
+embedding.  Thus an identical marker has a position-independent archive
+address, while the bounded local ring remains unchanged.  It composes with
+`archive_persistent_landmark` and `archive_prefix_pair_landmark`, is disabled
+by default for checkpoint compatibility, and should be reported as a new
+trained variant rather than evaluated by reusing a checkpoint trained with
+contextual archive keys.  The implementation has dedicated forward,
+`decode_step`, and `decode_chunk` parity tests; no quality claim is made until
+strict all-value long-context evaluation passes.
+
 ### 1M-token T4 latency/state snapshot
 
 An end-to-end QCC-only stream on a Google Colab Tesla T4 processed one million
