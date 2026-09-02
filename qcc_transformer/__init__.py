@@ -7,7 +7,13 @@ from .model import (
     SinusoidalPositionEmbedding,
     count_archive_elements,
 )
-from .retrofit import HFQCCAttention, QCCCacheHandle, patch_hf_model
+from .retrofit import (
+    HFQCCAttention,
+    QCCCacheHandle,
+    load_retrofit_adapter,
+    patch_hf_model,
+    retrofit_adapter_state,
+)
 from .vllm import QCCVLLMState
 
 __all__ = [
@@ -18,6 +24,8 @@ __all__ = [
     "count_archive_elements",
     "HFQCCAttention",
     "QCCCacheHandle",
+    "load_retrofit_adapter",
     "patch_hf_model",
+    "retrofit_adapter_state",
     "QCCVLLMState",
 ]

@@ -18,6 +18,7 @@ model and a task-appropriate checkpoint.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Optional
 
 import torch
@@ -157,7 +158,18 @@ class HFQCCAttention(nn.Module):
         positions = self._positions(
             position_ids, batch, length, hidden_states.device, 0 if reset else seen
         )
-        if length == 1 and not reset:
+        if self.training and not use_cache:
+            # Expose a differentiable path for lightweight adapter
+            # calibration/fine-tuning.  Serving remains on the no-grad
+            # persistent-cache path below; callers must explicitly train with
+            # ``use_cache=False`` so recurrent state is not reused across
+            # optimizer steps.
+            output = self.qcc(
+                hidden_states,
+                reset_state=reset,
+                position_ids=positions,
+            )
+        elif length == 1 and not reset:
             output = self.qcc.step(
                 hidden_states[:, 0],
                 reset_cache=False,
@@ -254,4 +266,48 @@ def patch_hf_model(
     return replaced
 
 
-__all__ = ["HFQCCAttention", "QCCCacheHandle", "patch_hf_model"]
+def retrofit_adapter_state(model: nn.Module) -> dict[str, Tensor]:
+    """Extract only QCC archive/gate parameters from a patched model."""
+
+    state = {
+        name: parameter.detach().cpu()
+        for name, parameter in model.named_parameters()
+        if ".qcc.archive." in name or ".qcc.gate." in name
+    }
+    if not state:
+        raise ValueError("model has no QCC retrofit parameters; call patch_hf_model first")
+    return state
+
+
+def load_retrofit_adapter(
+    model: nn.Module,
+    checkpoint: str | Path,
+    **patch_kwargs: Any,
+) -> list[str]:
+    """Patch a HF model and load a QCC-only adapter checkpoint."""
+
+    replaced = patch_hf_model(model, **patch_kwargs)
+    payload = torch.load(checkpoint, map_location="cpu")
+    state = payload.get("state_dict", payload) if isinstance(payload, dict) else payload
+    if not isinstance(state, dict):
+        raise ValueError("retrofit checkpoint must contain a state_dict mapping")
+    missing, unexpected = model.load_state_dict(state, strict=False)
+    unexpected = [key for key in unexpected if ".qcc.archive." not in key and ".qcc.gate." not in key]
+    missing = [
+        key
+        for key in missing
+        if (".qcc.archive." in key and not key.endswith("archive.decay_rates"))
+        or ".qcc.gate." in key
+    ]
+    if unexpected or missing:
+        raise ValueError(f"adapter mismatch: missing={missing}, unexpected={unexpected}")
+    return replaced
+
+
+__all__ = [
+    "HFQCCAttention",
+    "QCCCacheHandle",
+    "load_retrofit_adapter",
+    "patch_hf_model",
+    "retrofit_adapter_state",
+]

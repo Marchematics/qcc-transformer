@@ -1,0 +1,14 @@
+{
+  "model": "hf-internal-testing/tiny-random-LlamaForCausalLM",
+  "tokens": 32,
+  "window_size": 4,
+  "num_codes": 8,
+  "steps": 120,
+  "trainable_parameters": "QCC archive and gate only; pretrained weights frozen",
+  "final_mse": 0.000006607729119423311,
+  "mean_logit_cosine": 0.9994851350784302,
+  "top1_agreement": 1.0,
+  "quality_gate": 0.99,
+  "fidelity_passed": true,
+  "note": "Calibration-sequence teacher distillation only; held-out RULER/LongBench and real language quality remain unverified."
+}

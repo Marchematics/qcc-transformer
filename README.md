@@ -50,6 +50,14 @@ top-1 agreement, so the 99% fidelity gate failed as expected. The raw record
 is `artifacts/hf/tiny_llama_retrofit_smoke.json`; calibration/fine-tuning and
 task-level RULER/LongBench evaluation remain required for real-model claims.
 
+`benchmarks/calibrate_hf_retrofit.py` freezes the pretrained model and trains
+only the QCC archive/gate against an unpatched teacher, saving a compact
+adapter loadable with `load_retrofit_adapter`. On the same tiny Llama smoke
+model, 120 calibration steps reached cosine `0.999485` and top-1 agreement
+`100%` on 32 tokens (99% fidelity gate passed). This is deliberately reported
+as calibration-only evidence; held-out RULER/LongBench quality is still
+required.
+
 For a vLLM custom attention backend, use the dependency-free
 `QCCVLLMState.forward(query, key, value)` primitive from
 `qcc_transformer.vllm` inside the backend's scheduler-managed per-sequence
