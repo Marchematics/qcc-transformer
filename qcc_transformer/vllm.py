@@ -117,15 +117,32 @@ class QCCVLLMState:
         combined_v = torch.cat((old_v, value), dim=2)
         length = query.shape[2]
         total_length = combined_k.shape[2]
-        positions = old_length + torch.arange(length, device=query.device)
-        key_positions = torch.arange(total_length, device=query.device)
-        valid = (key_positions[None, :] <= positions[:, None]) & (
-            key_positions[None, :] >= positions[:, None] - self.window_size + 1
-        )
-        local = F.scaled_dot_product_attention(
-            query.contiguous(), combined_k.contiguous(), combined_v.contiguous(),
-            attn_mask=valid, dropout_p=0.0,
-        )
+        local = None
+        if self.archive.use_triton and query.is_cuda:
+            from .triton_kernels import TRITON_AVAILABLE, triton_local_chunk_attention
+
+            if TRITON_AVAILABLE:
+                # Reuse the exact one-launch sliding-window kernel used by the
+                # HF/standalone serving path.  The key slice already contains
+                # only the bounded ring plus this block, so no unbounded KV
+                # allocation is introduced in the vLLM adapter.
+                local = triton_local_chunk_attention(
+                    query,
+                    combined_k,
+                    combined_v,
+                    old_length=old_length,
+                    window_size=self.window_size,
+                )
+        if local is None:
+            positions = old_length + torch.arange(length, device=query.device)
+            key_positions = torch.arange(total_length, device=query.device)
+            valid = (key_positions[None, :] <= positions[:, None]) & (
+                key_positions[None, :] >= positions[:, None] - self.window_size + 1
+            )
+            local = F.scaled_dot_product_attention(
+                query.contiguous(), combined_k.contiguous(), combined_v.contiguous(),
+                attn_mask=valid, dropout_p=0.0,
+            )
         archive_out = torch.zeros_like(local)
         event_start = max(0, self.window_size - old_length)
         event_count = length - event_start
