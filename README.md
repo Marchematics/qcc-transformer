@@ -595,10 +595,10 @@ available smoke evidence:
 |---|---|---|
 | State @128K/1M/4M | `0.1258%` / `0.0161%` / `0.0040%` | measured |
 | Full-KV quality | `0.9981–0.9990` logit cosine at 512–2,048 tokens | short-context only |
-| RULER @128K | no trained checkpoint/dataset in this checkout | missing |
-| Retrieval @1M | evaluator and gate exist; no scored checkpoint | missing |
-| TTFT/TPOT speedup | MPS matched control reaches `247.14x` TPOT at 16K; CUDA and 128K/1M TTFT remain unbenchmarked | short-context only |
-| FullAttention context @4M | hypothetical storage accounting only | configured, not executed |
+| RULER @128K | official scorer is implemented; Qwen2.5-0.5B NIAH smoke at 16K was `0/3` for both Full-KV and QCC | 128K result missing |
+| Retrieval @1M | independent strict random checkpoint: `56/58 = 96.55%` (two failures at query 900K) | below 98% |
+| TTFT/TPOT speedup | matched RTX 3090 at 128K: `2.47x` TTFT, `20.22x` TPOT; 1M QCC-only TPOT `1.049 ms` | TTFT target not met |
+| FullAttention context @4M | QCC stream executed 4M; Full-KV remains infeasible on the reference GPU | QCC execution/state only |
 
 No row marked `missing` or `short-context only` should be reported as a
 production or universal speedup claim.
