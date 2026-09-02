@@ -229,6 +229,23 @@ max-context=1M fixed-query checkpoint reached 5/5 at query 500K but only 1/5 at
 query 900K; therefore the 1M retrieval gate is still open and is not claimed as
 passed.
 
+### Persistent/prefix landmark diagnostic
+
+The optional `archive_persistent_landmark` mode stores a constant number of
+salient key/value slots outside the decayed response archive.  The
+`archive_prefix_landmark` variant keeps the first `num_codes` evicted keys and
+routes to them with direct key similarity.  It is an explicit long-tail
+ablation, not enabled by default.  The implementation and a T4 run are
+recorded in [`artifacts/colab_gpu/landmark_retrieval_summary.json`](artifacts/colab_gpu/landmark_retrieval_summary.json).
+
+The prefix checkpoint reached 10/10 on a 128K/query96K synthetic stream and
+5/5 on a 1M/query500K stream.  It scored 0/5 at query900K; a stress batch that
+covered every value id (3--31) scored 6/29.  This exposes a remaining
+multi-value/generalization failure, so the 1M retrieval ≥98% gate remains
+unmet.  The extra landmark state is still constant in sequence length; with
+the default 16 codes and 32-dimensional heads it adds only 2,304 fp32 state
+elements per batch/layer.
+
 For million-token serving, the default `position_encoding="sinusoidal"` is
 stateless: configuring `max_position_embeddings=4_000_000` does not allocate a
 four-million-row learned position table. `archive_scan_block_size` controls the

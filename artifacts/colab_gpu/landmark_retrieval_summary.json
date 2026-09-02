@@ -1,0 +1,53 @@
+{
+  "runtime": "Google Colab Tesla T4",
+  "code_commit": "97f2610",
+  "configuration": {
+    "d_model": 32,
+    "layers": 1,
+    "heads": 4,
+    "window_size": 16,
+    "num_codes": 16,
+    "max_position_embeddings": 1000001,
+    "position_encoding": "none",
+    "archive_content_threshold": 0.5,
+    "persistent_landmark": true,
+    "prefix_landmark": true,
+    "training": "800 steps, batch 8, length 128, query curriculum 32..120, seed 46"
+  },
+  "results": [
+    {
+      "context": 128000,
+      "query_position": 96000,
+      "examples": 10,
+      "correct": 10,
+      "accuracy": 1.0
+    },
+    {
+      "context": 1000000,
+      "query_position": 500000,
+      "examples": 5,
+      "correct": 5,
+      "accuracy": 1.0
+    },
+    {
+      "context": 1000000,
+      "query_position": 900000,
+      "examples": 5,
+      "correct": 0,
+      "accuracy": 0.0
+    },
+    {
+      "context": 1000000,
+      "query_position": 900000,
+      "values": "all token ids 3..31 in one batch",
+      "examples": 29,
+      "correct": 6,
+      "accuracy": 0.2068965517
+    }
+  ],
+  "interpretation": [
+    "The mechanism preserves constant-size state and improves the middle of a million-token stream.",
+    "The 1M tail and multi-value batch generalization gates remain failed; no 1M retrieval >=98% claim is made.",
+    "These are synthetic marker/value diagnostics, not RULER or pretrained-LM quality."
+  ]
+}
