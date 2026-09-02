@@ -16,3 +16,10 @@ random-weight microbenchmarks, not pretrained-LM quality results.
 
 The files intentionally preserve failed/short-context evidence rather than
 turning it into a universal acceleration claim.
+
+`scaling_decode_fused.txt` is a follow-up after adding a cached one-GEMM
+Q/K/V/gate projection and a one-launch Triton local decode reduction.  It
+measured `0.72×/0.68×/0.69×/0.91×` QCC-vs-Full-KV ratios at 1K/2K/4K/8K
+(2-step averages).  The modest change confirms that Python/module dispatch
+and the full model shell, rather than only local attention, dominate this
+reference implementation; it is retained as a negative systems ablation.
