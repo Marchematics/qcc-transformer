@@ -5,10 +5,11 @@
 set -euo pipefail
 
 PROJECT_DIR="${PROJECT_DIR:-/home/frankwang122222/zjh/zjh/工作文件/qcc-transformer-next}"
-MODEL_PATH="${MODEL_PATH:-$PROJECT_DIR/models/qwen2.5-1.5b}"
+MODEL_PATH="${MODEL_PATH:-$PROJECT_DIR/models/phi-4-mini-instruct}"
 OUTPUT_DIR="${OUTPUT_DIR:-$PROJECT_DIR/artifacts/hf_99/layerwise_10gpu}"
 RUN_ID="${RUN_ID:-layerwise10_$(date +%Y%m%d_%H%M%S)}"
 MAX_TOKENS="${MAX_TOKENS:-512}"
+NUM_TRAIN_CHUNKS="${NUM_TRAIN_CHUNKS:-4}"
 
 cd "$PROJECT_DIR"
 mkdir -p "$OUTPUT_DIR"
@@ -50,7 +51,9 @@ for config in "${CONFIGS[@]}"; do
       --lr "$lr" \
       --cosine-weight "$cosine_weight" \
       --max-tokens "$MAX_TOKENS" \
+      --num-train-chunks "$NUM_TRAIN_CHUNKS" \
       --kv-head-policy repeat \
+      --trust-remote-code \
       --run-id "$RUN_ID" \
       --quality-gate 0.99
   ) >"$log_file" 2>&1 &
