@@ -106,6 +106,13 @@ and fraction, together with a shared `run_id` and HF/vLLM zero-code integration
 flags, so the result can be audited by `gate_99.py` rather than inferred from
 the adapter file size.
 
+For layer-wise calibration on long-context checkpoints, use
+`benchmarks/calibrate_hf_layerwise.py`.  It supports multi-chunk held-out
+distillation via `--num-train-chunks`; adding `--cosine-weight 0.2` mixes a
+directional logit loss into the historical MSE objective, which is useful when
+top-1/ranking fidelity lags behind the training MSE.  Set the weight to `0` to
+reproduce prior runs exactly.
+
 For a real-model latency smoke (Full-KV teacher vs retrofit student), run:
 
 ```bash
