@@ -201,6 +201,8 @@ python benchmarks/gate_99.py --evidence artifacts/gates/<run_id>.json
 - `QCCSelfAttention` 新增可选 `archive_norm_gating`（参数量不变、O(1) 状态），
   按 local/archive 响应范数一致性抑制异常远程读；默认关闭，10 卡 sweep 的
   GPU9 打开该消融。
+- 新增 `benchmarks/assemble_gate_evidence.py`：从 11 个 section JSON 组装最终
+  bundle，并强制检查统一 `run_id`/`model_id`；它不会填充指标或伪造 provenance。
 
 ### 本地回归
 
