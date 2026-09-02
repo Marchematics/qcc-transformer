@@ -132,6 +132,17 @@ def test_model_forward_shapes_and_gradients() -> None:
     assert model.layers[0].attention.archive.codes.grad is not None
 
 
+def test_fused_qkv_gate_projection_matches_legacy_modules() -> None:
+    torch.manual_seed(11)
+    attention = QCCSelfAttention(d_model=16, num_heads=4, use_triton=False)
+    hidden = torch.randn(2, 3, 16)
+    q, k, v, gate = attention._project_qkv_gate(hidden)
+    torch.testing.assert_close(q, attention.q_proj(hidden))
+    torch.testing.assert_close(k, attention.k_proj(hidden))
+    torch.testing.assert_close(v, attention.v_proj(hidden))
+    torch.testing.assert_close(gate, attention.gate(hidden))
+
+
 def test_sinusoidal_positions_support_million_token_limits_without_table() -> None:
     model = QCCForCausalLM(
         vocab_size=11,
