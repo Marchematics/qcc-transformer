@@ -115,6 +115,10 @@ def main() -> None:
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--trust-remote-code", action="store_true")
     parser.add_argument("--kv-head-policy", choices=("reject", "repeat"), default="repeat")
+    parser.add_argument(
+        "--gate-bias-init", type=float, default=2.0,
+        help="initial local-path bias; use 0.0 for the historical 50/50 ablation",
+    )
     parser.add_argument("--run-id", default=None)
     parser.add_argument(
         "--gradient-checkpointing",
@@ -185,6 +189,7 @@ def main() -> None:
         num_codes=args.num_codes,
         archive_position_invariant=args.archive_position_invariant,
         kv_head_policy=args.kv_head_policy,
+        gate_bias_init=args.gate_bias_init,
     )
 
     if args.gradient_checkpointing and hasattr(patched, "gradient_checkpointing_enable"):
@@ -287,6 +292,7 @@ def main() -> None:
             "patched_layers": replaced,
             "calibrated_layers": calibrate_layers,
             "kv_head_policy": args.kv_head_policy,
+            "gate_bias_init": args.gate_bias_init,
         },
     )
 

@@ -151,6 +151,7 @@ class HFQCCAttention(nn.Module):
     archive_lexical_landmark: bool = False,
     archive_position_invariant: bool = True,
     kv_head_policy: str = "reject",
+    gate_bias_init: float = 2.0,
         kv_heads: Optional[int] = None,
     ) -> None:
         super().__init__()
@@ -203,6 +204,7 @@ class HFQCCAttention(nn.Module):
             archive_query_cosine_threshold=archive_query_cosine_threshold,
             archive_lexical_landmark=archive_lexical_landmark,
             archive_position_invariant=archive_position_invariant,
+            gate_bias_init=gate_bias_init,
         )
         # Share the loaded HF projections/output projection; no second copy of
         # the large model weights is created.  The archive/gate are new trainable
@@ -337,6 +339,7 @@ def patch_hf_model(
         archive_lexical_landmark: bool = False,
         archive_position_invariant: bool = True,
         kv_head_policy: str = "reject",
+        gate_bias_init: float = 2.0,
 ) -> list[str]:
     """Replace compatible HF attention modules and return their module paths.
 
@@ -400,6 +403,7 @@ def patch_hf_model(
             archive_lexical_landmark=archive_lexical_landmark,
             archive_position_invariant=archive_position_invariant,
             kv_head_policy=kv_head_policy,
+            gate_bias_init=gate_bias_init,
             kv_heads=kv_heads,
         )
         # Track layer index for selective calibration

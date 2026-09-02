@@ -955,6 +955,7 @@ class QCCSelfAttention(nn.Module):
         rope_theta: Optional[float] = None,
         max_position_embeddings: int = 4096,
         decay_rates: Optional[tuple[float, ...]] = None,
+        gate_bias_init: float = 0.0,
     ) -> None:
         super().__init__()
         if d_model % num_heads:
@@ -969,6 +970,8 @@ class QCCSelfAttention(nn.Module):
             raise ValueError("rope_theta must be positive")
         if max_position_embeddings <= 0:
             raise ValueError("max_position_embeddings must be positive")
+        if not math.isfinite(gate_bias_init):
+            raise ValueError("gate_bias_init must be finite")
         if decay_rates is not None and len(decay_rates) != num_scales:
             raise ValueError("decay_rates must contain exactly num_scales values")
         self.d_model = d_model
@@ -994,6 +997,9 @@ class QCCSelfAttention(nn.Module):
         self.v_proj = nn.Linear(d_model, d_model)
         self.out_proj = nn.Linear(d_model, d_model)
         self.gate = nn.Linear(d_model, num_heads)
+        # Keep an uncalibrated archive close to the exact local path. The
+        # bias remains trainable and 0.0 preserves the historical ablation.
+        nn.init.constant_(self.gate.bias, gate_bias_init)
         # Choose half-lives from the exact window to the configured context so
         # a 1M-token model does not silently forget everything after a few
         # thousand updates.  Explicit rates remain available for ablations.

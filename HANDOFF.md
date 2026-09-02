@@ -87,6 +87,12 @@ cd /home/frankwang122222/zjh/zjh/*/qcc-transformer-next
 - `scripts/test_single_layerwise.sh` 和 `scripts/run_layerwise_sweep.sh` 提供远程实验入口，但其中的结果尚未形成 gate 证据。
 - `scripts/run_layerwise_10gpu.sh` 可将 10 组配置分配到 10 张卡；最近一次 `layerwise10_20260903_021353` 有 9 组完成、1 组（`codes=64`）OOM，最佳 held-out cosine `0.8414`，全部 `held_out_gate_passed=false`。
 
+### 3.5 未校准安全 gate（已实现，待远程验证）
+
+- `QCCSelfAttention` 新增 `gate_bias_init`；HF retrofit 默认值为 `2.0`，让新 adapter 初始更接近 exact local path，避免随机 archive 以 50/50 比例污染 pretrained logits；
+- 传入 `--gate-bias-init 0.0` 可复现旧的 50/50 ablation；校准脚本和 adapter manifest 会记录该值；
+- 该改动只改善初始化稳定性，不等于长程质量或 99 gate 证据。
+
 ## 4. 已验证结果（严格区分证据等级）
 
 ### 本地回归
@@ -136,9 +142,10 @@ artifacts/remote_gpu/retrain_20260902/
 
 1. 当前 archive 主要保留 code-response statistics，真实 Qwen 长程 logits 与 Full-KV 差距仍大；简单增加 codes 会显著抬高反向峰值显存。
 2. calibration 已增加 CPU teacher logits 和词表分块损失，但 24GB 卡在 `max_tokens=512`、`codes=64` 时仍会 OOM；更长序列需要进一步分块 activation/逐层蒸馏。
-3. 尚无官方 RULER、LongBench、PG-19 的 matched Full-KV/QCC 结果；尚无真实 128K vLLM TPOT、吞吐、peak memory/concurrency 证据。
-4. 尚未完成正式 vLLM backend registration；当前 primitive 不能冒充零改动 upstream backend。
-5. 当前没有一个 `gate_99.py` evidence bundle 返回 `passed: true`；不得宣称“99 gate 已通过”“≥98% 全面质量”或“颠覆级加速”。
+3. gate 初始化虽已默认偏向 local path，但仍需在真实长程 held-out 数据上校准 archive，不能将初始化效果当作最终质量。
+4. 尚无官方 RULER、LongBench、PG-19 的 matched Full-KV/QCC 结果；尚无真实 128K vLLM TPOT、吞吐、peak memory/concurrency 证据。
+5. 尚未完成正式 vLLM backend registration；当前 primitive 不能冒充零改动 upstream backend。
+6. 当前没有一个 `gate_99.py` evidence bundle 返回 `passed: true`；不得宣称“99 gate 已通过”“≥98% 全面质量”或“颠覆级加速”。
 
 ## 7. 下一阶段目标（按优先级）
 
