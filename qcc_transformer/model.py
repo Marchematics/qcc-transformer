@@ -218,6 +218,12 @@ class QCCArchive(nn.Module):
 
         if not self.persistent_landmark:
             return
+        # Landmark slots are mutable serving state, not trainable activations.
+        # Detaching here prevents repeated prefix writes (including the
+        # successor-binding ablation) from invalidating autograd version
+        # counters during the short differentiable curriculum.
+        key = key.detach()
+        value = value.detach()
         if self.prefix_landmark:
             if self._landmark_count >= self.num_codes:
                 # Prefix mode is intentionally immutable after the fixed
