@@ -969,6 +969,7 @@ class QCCSelfAttention(nn.Module):
             scan_block_size=archive_scan_block_size,
             content_threshold=archive_content_threshold,
             persistent_landmark=archive_persistent_landmark,
+            prefix_landmark=archive_prefix_landmark,
             prefix_pair_landmark=archive_prefix_pair_landmark,
         )
         self.archive_read_stride = archive_read_stride
