@@ -1,7 +1,7 @@
 {
   "runtime": "tsinghua3090-X11DPG-OT",
   "gpus": 8,
-  "code_commit": "62186e1",
+  "code_commit": "c5df1e2",
   "configuration": {
     "d_model": 32,
     "layers": 1,
