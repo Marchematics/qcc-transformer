@@ -1,0 +1,3 @@
+device=cuda length=4000000 position_encoding=sinusoidal state_only=False
+qcc_state_bytes=82432 full_kv_bytes=2048000000 state_fraction=0.004025% reduction=24844.72x under_0.5pct=True under_0.1pct=True
+processed_tokens=4000000 prefill_seconds=24.007805 tpot_ms=1.073
