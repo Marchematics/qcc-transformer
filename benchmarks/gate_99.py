@@ -54,11 +54,11 @@ def _matched(section: Any, name: str, failures: list[str]) -> None:
     _require(isinstance(section, dict), f"{name} section is missing", failures)
     if not isinstance(section, dict):
         return
-    _require(bool(section.get("matched_full_kv")), f"{name} is not matched Full-KV", failures)
-    _require(bool(section.get("real_model")), f"{name} is not marked real_model", failures)
-    _require(bool(section.get("official")), f"{name} is not marked official", failures)
-    _require(not bool(section.get("synthetic")), f"{name} is synthetic", failures)
-    _require(not bool(section.get("qcc_only")), f"{name} is QCC-only", failures)
+    _require(section.get("matched_full_kv") is True, f"{name} is not matched Full-KV", failures)
+    _require(section.get("real_model") is True, f"{name} is not marked real_model", failures)
+    _require(section.get("official") is True, f"{name} is not marked official", failures)
+    _require(section.get("synthetic") is False, f"{name} is synthetic", failures)
+    _require(section.get("qcc_only") is False, f"{name} is QCC-only", failures)
 
 
 def audit(payload: dict[str, Any]) -> dict[str, Any]:
@@ -73,8 +73,8 @@ def audit(payload: dict[str, Any]) -> dict[str, Any]:
     _require(isinstance(run_id, str) and bool(run_id), "run_id is required", failures)
     _require(isinstance(model, dict), "model section is missing", failures)
     if isinstance(model, dict):
-        _require(bool(model.get("pretrained")), "model is not marked pretrained", failures)
-        _require(bool(model.get("real_checkpoint")), "real_checkpoint evidence is missing", failures)
+        _require(model.get("pretrained") is True, "model is not marked pretrained", failures)
+        _require(model.get("real_checkpoint") is True, "real_checkpoint evidence is missing", failures)
         _require(isinstance(model.get("model_id"), str) and bool(model.get("model_id")), "model_id is required", failures)
         params = _number(model.get("parameter_count"), "model.parameter_count", failures)
         if params is not None:
@@ -148,8 +148,8 @@ def audit(payload: dict[str, Any]) -> dict[str, Any]:
         if fraction is not None:
             calibration_summary["trainable_parameter_fraction"] = fraction
             _require(0.0 <= fraction <= CALIBRATION_FRACTION, f"trainable parameter fraction {fraction:.6f} > {CALIBRATION_FRACTION:.2f}", failures)
-        _require(bool(calibration.get("hf_zero_code_changes")), "HF zero-code retrofit evidence is missing", failures)
-        _require(bool(calibration.get("vllm_zero_code_changes")), "vLLM zero-code integration evidence is missing", failures)
+        _require(calibration.get("hf_zero_code_changes") is True, "HF zero-code retrofit evidence is missing", failures)
+        _require(calibration.get("vllm_zero_code_changes") is True, "vLLM zero-code integration evidence is missing", failures)
         _require(calibration.get("run_id") == run_id, "calibration.run_id does not match root run_id", failures)
 
     return {
