@@ -135,6 +135,22 @@ def main() -> None:
         default=True,
         help="use raw Q/K for archive; local attention keeps RoPE",
     )
+    parser.add_argument(
+        "--archive-persistent-landmark", action="store_true",
+        help="retain one exact max-salience key/value landmark per archive code",
+    )
+    parser.add_argument(
+        "--archive-prefix-landmark", action="store_true",
+        help="make persistent landmarks temporal prefix slots (requires persistent landmark)",
+    )
+    parser.add_argument(
+        "--archive-prefix-pair-landmark", action="store_true",
+        help="store paired prefix landmarks (requires prefix landmark)",
+    )
+    parser.add_argument(
+        "--archive-landmark-temperature", type=float, default=1.0,
+        help="routing temperature multiplier for persistent landmarks",
+    )
     parser.add_argument("--max-tokens", type=int, default=2048)
     parser.add_argument(
         "--num-train-chunks", type=int, default=1,
@@ -167,6 +183,10 @@ def main() -> None:
         raise ValueError("steps, lr, max-tokens, and num-train-chunks must be positive")
     if not 0.0 <= args.cosine_weight <= 1.0:
         raise ValueError("cosine-weight must lie in [0, 1]")
+    if args.archive_prefix_landmark and not args.archive_persistent_landmark:
+        raise ValueError("archive-prefix-landmark requires archive-persistent-landmark")
+    if args.archive_prefix_pair_landmark and not args.archive_prefix_landmark:
+        raise ValueError("archive-prefix-pair-landmark requires archive-prefix-landmark")
     if args.max_tokens <= args.window_size:
         raise ValueError("max-tokens must exceed window-size to exercise archive")
 
@@ -240,6 +260,10 @@ def main() -> None:
         window_size=args.window_size,
         num_codes=args.num_codes,
         archive_position_invariant=args.archive_position_invariant,
+        archive_persistent_landmark=args.archive_persistent_landmark,
+        archive_prefix_landmark=args.archive_prefix_landmark,
+        archive_prefix_pair_landmark=args.archive_prefix_pair_landmark,
+        archive_landmark_temperature=args.archive_landmark_temperature,
         kv_head_policy=args.kv_head_policy,
         gate_bias_init=args.gate_bias_init,
     )
