@@ -337,7 +337,15 @@ class QCCArchive(nn.Module):
         if not self.persistent_landmark:
             return response
         landmark, valid = self._landmark_read(query)
-        mix = torch.sigmoid(self.landmark_mix_logits).to(response.dtype)
+        # Prefix landmarks are an exact-key fallback, so always trust them in
+        # that mode.  The learned blend remains available for max-salience
+        # landmarks, where mixing can preserve the exponentially averaged
+        # archive's broader context.
+        mix = (
+            torch.ones_like(self.landmark_mix_logits)
+            if self.prefix_landmark
+            else torch.sigmoid(self.landmark_mix_logits)
+        ).to(response.dtype)
         mix_shape = (1, -1, 1) if response.ndim == 3 else (1, -1, 1, 1)
         mix = mix.view(*mix_shape)
         mixed = (1.0 - mix) * response + mix * landmark
@@ -1581,9 +1589,11 @@ class QCCSelfAttention(nn.Module):
                 (bsz, self.num_heads, length), device=hidden.device, dtype=torch.bool
             )
             landmark_valid[:, :, window:] = torch.cat(landmark_valid_outputs, dim=2)
-            landmark_mix = torch.sigmoid(self.archive.landmark_mix_logits).to(
-                archive_out.dtype
-            ).view(1, self.num_heads, 1, 1)
+            landmark_mix = (
+                torch.ones_like(self.archive.landmark_mix_logits)
+                if self.archive.prefix_landmark
+                else torch.sigmoid(self.archive.landmark_mix_logits)
+            ).to(archive_out.dtype).view(1, self.num_heads, 1, 1)
             archive_out = torch.where(
                 landmark_valid.unsqueeze(-1),
                 (1.0 - landmark_mix) * archive_out + landmark_mix * landmark_out,
@@ -1974,6 +1984,13 @@ def count_archive_elements(model: nn.Module) -> int:
         * layer.attention.archive.num_codes
         * layer.attention.archive.num_scales
         * (layer.attention.archive.head_dim + 1)
+        + (
+            layer.attention.archive.num_heads
+            * layer.attention.archive.num_codes
+            * (2 * layer.attention.archive.head_dim + 1)
+            if layer.attention.archive.persistent_landmark
+            else 0
+        )
         + (
             layer.attention.archive.num_heads
             * layer.attention.archive.num_codes
