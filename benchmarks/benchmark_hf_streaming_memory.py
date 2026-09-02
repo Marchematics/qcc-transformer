@@ -37,6 +37,8 @@ def _token_stream(tokenizer, total_tokens: int) -> torch.Tensor:
 
 
 def _run_stream(model, tokens: torch.Tensor, device: torch.device, chunk_size: int) -> dict:
+    if tokens.ndim != 2:
+        raise ValueError("tokens must have shape [batch, context]")
     model.eval()
     cache = None
     chunks = 0
@@ -46,8 +48,8 @@ def _run_stream(model, tokens: torch.Tensor, device: torch.device, chunk_size: i
     started = time.perf_counter()
     try:
         with torch.no_grad():
-            for start in range(0, tokens.numel(), chunk_size):
-                chunk = tokens[start : start + chunk_size].view(1, -1).to(device)
+            for start in range(0, tokens.shape[1], chunk_size):
+                chunk = tokens[:, start : start + chunk_size].to(device)
                 output = model(input_ids=chunk, past_key_values=cache, use_cache=True)
                 cache = getattr(output, "past_key_values", None)
                 chunks += 1
@@ -61,6 +63,8 @@ def _run_stream(model, tokens: torch.Tensor, device: torch.device, chunk_size: i
         return {
             "status": "ok",
             "tokens": int(tokens.numel()),
+            "tokens_per_request": int(tokens.shape[1]),
+            "batch_size": int(tokens.shape[0]),
             "chunks": chunks,
             "elapsed_seconds": elapsed,
             "tokens_per_second": tokens.numel() / max(elapsed, 1e-12),
@@ -72,6 +76,8 @@ def _run_stream(model, tokens: torch.Tensor, device: torch.device, chunk_size: i
         return {
             "status": "oom",
             "tokens": int(tokens.numel()),
+            "tokens_per_request": int(tokens.shape[1]),
+            "batch_size": int(tokens.shape[0]),
             "chunks_completed": chunks,
             "error": f"{type(exc).__name__}: {exc}",
             "peak_allocated_bytes": int(torch.cuda.max_memory_allocated(device)) if device.type == "cuda" else None,
@@ -83,6 +89,10 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", required=True)
     parser.add_argument("--total-tokens", type=int, default=131072)
+    parser.add_argument(
+        "--batch-size", type=int, default=1,
+        help="matched concurrent requests; multiply total work but retain this context per request",
+    )
     parser.add_argument("--chunk-size", type=int, default=512)
     parser.add_argument("--window-size", type=int, default=128)
     parser.add_argument("--num-codes", type=int, default=16)
@@ -91,14 +101,18 @@ def main() -> None:
     parser.add_argument("--trust-remote-code", action="store_true")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    if args.total_tokens <= 0 or args.chunk_size <= 0:
-        raise ValueError("total-tokens and chunk-size must be positive")
+    if args.total_tokens <= 0 or args.chunk_size <= 0 or args.batch_size <= 0:
+        raise ValueError("total-tokens, chunk-size, and batch-size must be positive")
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     device = torch.device(args.device)
     common = {"trust_remote_code": args.trust_remote_code}
     tokenizer = AutoTokenizer.from_pretrained(args.model, **common)
-    tokens = _token_stream(tokenizer, args.total_tokens)
+    stream = _token_stream(tokenizer, args.total_tokens)
+    # Make rows non-identical without changing context length or token count.
+    # This prevents an accidental future optimization from treating this as a
+    # shared-prefix workload when the goal is independent-request concurrency.
+    tokens = torch.stack([stream.roll(shifts=index) for index in range(args.batch_size)])
 
     baseline = AutoModelForCausalLM.from_pretrained(args.model, **common).to(device).eval()
     baseline_result = _run_stream(baseline, tokens, device, args.chunk_size)
@@ -114,12 +128,13 @@ def main() -> None:
         num_codes=args.num_codes,
         kv_head_policy=args.kv_head_policy,
     )
-    reset_hf_qcc_cache(patched, batch_size=1)
+    reset_hf_qcc_cache(patched, batch_size=args.batch_size)
     qcc_result = _run_stream(patched, tokens, device, args.chunk_size)
     result = {
         "model": args.model,
         "model_id": str(args.model),
         "total_tokens": args.total_tokens,
+        "batch_size": args.batch_size,
         "chunk_size": args.chunk_size,
         "window_size": args.window_size,
         "num_codes": args.num_codes,

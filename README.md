@@ -141,6 +141,12 @@ errors as failures, and stores per-record predictions.  The resulting score
 is task- and checkpoint-specific; it must not be generalized to all RULER
 tasks or lengths without matching runs.
 
+For independent-request memory/concurrency diagnostics, run
+`benchmarks/benchmark_hf_concurrency.py`. It sweeps `--batch-sizes` at a fixed
+per-request context and records Full-KV/QCC completion, peak memory, and the
+largest completed batch for each side. This is explicitly HF-only; `gate_99.py`
+still requires corresponding real-vLLM scheduler evidence.
+
 For a vLLM custom attention backend, use the dependency-free
 `QCCVLLMState.forward(query, key, value)` primitive from
 `qcc_transformer.vllm` inside the backend's scheduler-managed per-sequence
