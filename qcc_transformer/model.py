@@ -1129,6 +1129,37 @@ class QCCSelfAttention(nn.Module):
         )
         return q, k, v, gate
 
+    def _local_window_attention(
+        self, query: Tensor, keys: Tensor, values: Tensor, *, old_length: int
+    ) -> Tensor:
+        """Exact causal local attention over a bounded window.
+
+        Unlike SDPA over ``old_length + chunk_length`` keys, this path unfolds
+        only the fixed window and evaluates all queries in one batched set of
+        tensor operations.  It is used for CUDA chunks where hundreds of small
+        SDPA launches become the TTFT bottleneck; memory is O(chunk * window)
+        and never depends on historical context.
+        """
+
+        length = query.shape[2]
+        window = min(self.window_size, keys.shape[2])
+        key_pad = F.pad(keys.transpose(-1, -2), (window - 1, 0))
+        value_pad = F.pad(values.transpose(-1, -2), (window - 1, 0))
+        key_windows = key_pad.unfold(-1, window, 1).permute(0, 1, 3, 4, 2)
+        value_windows = value_pad.unfold(-1, window, 1).permute(0, 1, 3, 4, 2)
+        positions = old_length + torch.arange(length, device=query.device)
+        key_windows = key_windows[:, :, positions]
+        value_windows = value_windows[:, :, positions]
+        logits = torch.einsum("bhtd,bhtwd->bhtw", query, key_windows)
+        logits = logits / math.sqrt(self.head_dim)
+        valid = torch.arange(window, device=query.device)[None, :] >= (
+            window - 1 - positions[:, None]
+        )
+        logits = logits.masked_fill(~valid[None, None], torch.finfo(logits.dtype).min)
+        return torch.einsum(
+            "bhtw,bhtwd->bhtd", F.softmax(logits, dim=-1), value_windows
+        )
+
     def _lexical_archive_triplet(
         self, archive_hint: Optional[Tensor]
     ) -> tuple[Optional[Tensor], Optional[Tensor], Optional[Tensor]]:
@@ -1570,7 +1601,7 @@ class QCCSelfAttention(nn.Module):
                 head_out.transpose(1, 2).reshape(bsz, length, self.d_model)
             )
 
-        # Feed the finite causal band directly to SDPA.  Unlike materializing
+        # # Feed the finite causal band directly to SDPA.  Unlike materializing
         # an unfolded [batch, head, time, window, dim] tensor, this lets the
         # backend use its fused attention implementation while the mask keeps
         # work bounded to the exact local window.  ``combined_k`` is already
@@ -1580,13 +1611,18 @@ class QCCSelfAttention(nn.Module):
         valid = (key_positions[None, :] <= positions[:, None]) & (
             key_positions[None, :] >= positions[:, None] - self.window_size + 1
         )
-        local_out = _scaled_dot_product_attention(
-            q,
-            combined_k,
-            combined_v,
-            attn_mask=valid,
-            dropout_p=0.0,
-        )
+        if hidden.is_cuda and length >= self.archive.scan_block_size:
+            local_out = self._local_window_attention(
+                q, combined_k, combined_v, old_length=old_length
+            )
+        else:
+            local_out = _scaled_dot_product_attention(
+                q,
+                combined_k,
+                combined_v,
+                attn_mask=valid,
+                dropout_p=0.0,
+            )
 
         if self.use_archive:
             archive_out = torch.zeros_like(local_out)
