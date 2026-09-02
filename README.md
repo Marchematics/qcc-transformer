@@ -106,6 +106,22 @@ The script resets QCC state at the request boundary and reports matched TTFT,
 TPOT, and speedup.  It does not claim that a short prompt predicts 128K/1M
 behavior; use the long-context harness and task datasets for those gates.
 
+To run an official NVIDIA RULER split, first prepare it with RULER's own
+`scripts/data/prepare.py`, convert nothing, and invoke:
+
+```bash
+python benchmarks/benchmark_hf_ruler.py \
+  --model <model-id-or-local-snapshot> \
+  --ruler-jsonl ruler/niah_single_1/validation.jsonl \
+  --max-examples 10 --output artifacts/hf/ruler_niah.json \
+  --kv-head-policy repeat
+```
+
+The scorer runs Full-KV and QCC separately, counts generation/OOM/context
+errors as failures, and stores per-record predictions.  The resulting score
+is task- and checkpoint-specific; it must not be generalized to all RULER
+tasks or lengths without matching runs.
+
 For a vLLM custom attention backend, use the dependency-free
 `QCCVLLMState.forward(query, key, value)` primitive from
 `qcc_transformer.vllm` inside the backend's scheduler-managed per-sequence

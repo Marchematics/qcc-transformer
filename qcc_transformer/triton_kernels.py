@@ -1064,7 +1064,7 @@ def triton_update_archive(
     denominator = denominator.contiguous()
     key = key.contiguous()
     value = value.contiguous()
-    codes = codes.contiguous()
+    codes = codes.to(device=key.device, dtype=torch.float32).contiguous()
     rates = rates.to(device=key.device, dtype=torch.float32).contiguous()
     aged_rates = rates.pow(window_size).contiguous()
     bsz, heads, dim = key.shape
@@ -1113,8 +1113,10 @@ def triton_read_archive(
     query = query.contiguous()
     numerator = numerator.contiguous()
     denominator = denominator.contiguous()
-    codes = codes.contiguous()
-    mix = torch.softmax(mix_logits, dim=-1).to(torch.float32).contiguous()
+    codes = codes.to(device=query.device, dtype=torch.float32).contiguous()
+    mix = torch.softmax(
+        mix_logits.to(device=query.device), dim=-1
+    ).to(torch.float32).contiguous()
     batch, heads, dim = query.shape
     _, _, codes_count, scales, _ = numerator.shape
     block_dim = 1 << max(4, (dim - 1).bit_length())
@@ -1177,7 +1179,7 @@ def triton_lazy_update_archive(
     last_step = last_step.contiguous()
     key = key.contiguous()
     value = value.contiguous()
-    codes = codes.contiguous()
+    codes = codes.to(device=key.device, dtype=torch.float32).contiguous()
     indices = indices.to(device=key.device, dtype=torch.int32).contiguous()
     rates = rates.to(device=key.device, dtype=torch.float32).contiguous()
     aged_rates = rates.pow(window_size).contiguous()
@@ -1240,8 +1242,8 @@ def triton_sparse_read_archive(
     numerator = numerator.contiguous()
     denominator = denominator.contiguous()
     last_step = last_step.contiguous()
-    codes = codes.contiguous()
-    mix_logits = mix_logits.contiguous()
+    codes = codes.to(device=query.device, dtype=torch.float32).contiguous()
+    mix_logits = mix_logits.to(device=query.device, dtype=torch.float32).contiguous()
     indices = indices.to(device=query.device, dtype=torch.int32).contiguous()
     route_logits = route_logits.contiguous()
     rates = rates.to(device=query.device, dtype=torch.float32).contiguous()
@@ -1339,7 +1341,7 @@ def triton_update_read_archive_chunk(
     key = key.contiguous()
     value = value.contiguous()
     query = query.contiguous()
-    codes = codes.contiguous()
+    codes = codes.to(device=key.device, dtype=torch.float32).contiguous()
     rates = rates.to(device=key.device, dtype=torch.float32).contiguous()
     mix = torch.softmax(
         mix_logits.to(device=key.device), dim=-1

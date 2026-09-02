@@ -215,6 +215,11 @@ class HFQCCAttention(nn.Module):
         # projection path, so keep it in the backbone projection dtype;
         # recurrent archive accumulators remain fp32 for numerical stability.
         self.qcc.gate.to(device=q_proj.weight.device, dtype=q_proj.weight.dtype)
+        # ``patch_hf_model`` is commonly called after ``from_pretrained(...).
+        # to(device)``.  The newly-created archive therefore must be moved
+        # explicitly; otherwise Triton receives CPU codebook pointers while
+        # projected Q/K/V tensors live on CUDA.
+        self.qcc.archive.to(device=q_proj.weight.device)
         self.num_heads = num_heads
         self.d_model = d_model
         self.kv_head_policy = kv_head_policy
