@@ -103,6 +103,17 @@ def test_patch_hf_archive_norm_gating_is_explicit():
     assert model.attn.qcc.archive_norm_gating is True
 
 
+def test_archive_norm_gating_suppresses_scale_mismatch():
+    model = _Model()
+    patch_hf_model(model, window_size=4, num_codes=4, use_triton=False, archive_norm_gating=True)
+    qcc = model.attn.qcc
+    local = torch.ones(1, 4, 1, 4)
+    archive = torch.full_like(local, 100.0)
+    gate = torch.full_like(local, 0.5)
+    mixed = qcc._mix_local_archive(local, archive, gate)
+    assert mixed.max().item() < 2.0
+
+
 def test_patch_hf_supports_fused_qkv_attention():
     model = _FusedModel()
     assert patch_hf_model(model, window_size=4, num_codes=4, use_triton=False, kv_head_policy="repeat") == ["attn"]
