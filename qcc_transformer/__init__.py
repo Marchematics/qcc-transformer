@@ -1,6 +1,14 @@
 """QCC-Transformer research prototype."""
 
 from .associative import AssociativeLandmarkState, SetAssociativeLandmarkBank
+from .hybrid_archive import (
+    HybridQCCArchive,
+    LandmarkAdmissionPredictor,
+    enable_hybrid_retrofit,
+    load_hybrid_retrofit_adapter,
+    patch_hf_model_hybrid,
+    upgrade_qcc_attention,
+)
 from .model import (
     QCCArchive,
     QCCForCausalLM,
@@ -25,6 +33,12 @@ from .vllm_plugin import register_vllm_backend
 __all__ = [
     "AssociativeLandmarkState",
     "SetAssociativeLandmarkBank",
+    "HybridQCCArchive",
+    "LandmarkAdmissionPredictor",
+    "enable_hybrid_retrofit",
+    "load_hybrid_retrofit_adapter",
+    "patch_hf_model_hybrid",
+    "upgrade_qcc_attention",
     "QCCArchive",
     "QCCForCausalLM",
     "QCCSelfAttention",
