@@ -59,3 +59,12 @@ def test_vllm_backend_tracks_and_forks_logical_requests():
     assert backend._states["a"].seen_tokens == backend._states["b"].seen_tokens == 2
     backend.drop("a")
     assert "a" not in backend._states
+
+
+def test_vllm_quality_first_archive_mix_default():
+    state = QCCVLLMState(2, 4, window_size=3, num_codes=4, use_triton=False)
+    assert state.archive_mix == pytest.approx(0.125)
+    historical = QCCVLLMState(
+        2, 4, window_size=3, num_codes=4, archive_mix=0.5, use_triton=False
+    )
+    assert historical.archive_mix == pytest.approx(0.5)
