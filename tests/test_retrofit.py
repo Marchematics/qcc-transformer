@@ -64,6 +64,16 @@ def test_patch_hf_assigns_stable_layer_indices():
         "layers.1",
     ]
     assert [layer.qcc._qcc_layer_index for layer in model.layers] == [0, 1]
+    assert torch.allclose(
+        model.layers[0].qcc.gate.bias,
+        torch.full_like(model.layers[0].qcc.gate.bias, 2.0),
+    )
+
+
+def test_patch_hf_gate_bias_ablation_is_explicit():
+    model = _Model()
+    patch_hf_model(model, window_size=4, num_codes=4, use_triton=False, gate_bias_init=0.0)
+    assert torch.allclose(model.attn.qcc.gate.bias, torch.zeros_like(model.attn.qcc.gate.bias))
 
 
 def test_patch_hf_attention_preserves_prefill_and_decode_shapes():

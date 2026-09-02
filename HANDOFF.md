@@ -93,6 +93,13 @@ cd /home/frankwang122222/zjh/zjh/*/qcc-transformer-next
 - 传入 `--gate-bias-init 0.0` 可复现旧的 50/50 ablation；校准脚本和 adapter manifest 会记录该值；
 - 该改动只改善初始化稳定性，不等于长程质量或 99 gate 证据。
 
+### 3.6 最新远程诊断
+
+- CPU teacher logits + 分块损失修复后，单卡 3-step smoke 可完成且不 OOM；全层 20-step smoke 也可完成；
+- 10 卡 `layerwise10_20260903_021353`：9/10 配置完成，最佳 held-out cosine `0.8414`，`codes=64` 配置 OOM；所有配置均未通过 `0.99` fidelity gate；
+- 新增 gate-bias smoke（全层、3 steps、bias=2.0）：held-out cosine `0.8406`，仅作初始化诊断；
+- 远程当前仅有 Qwen2.5-0.5B/1.5B（原生 `max_position_embeddings=32768`）；已通过 HF Hub 元数据确认 `microsoft/Phi-4-mini-instruct` 为真实 3.8B、`131072` context，但它使用 Phi3 fused `qkv_proj` 和 partial/long RoPE，尚未接入 QCC retrofit。
+
 ## 4. 已验证结果（严格区分证据等级）
 
 ### 本地回归
