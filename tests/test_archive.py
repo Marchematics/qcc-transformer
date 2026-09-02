@@ -64,6 +64,29 @@ def test_persistent_landmark_survives_long_filler_updates() -> None:
     torch.testing.assert_close(out, value[0, 0], rtol=1e-5, atol=1e-5)
 
 
+def test_prefix_landmark_keeps_first_slots_and_uses_key_routing() -> None:
+    archive = QCCArchive(
+        num_heads=1,
+        head_dim=2,
+        num_codes=2,
+        decay_rates=(0.8,),
+        window_size=2,
+        use_triton=False,
+        persistent_landmark=True,
+        prefix_landmark=True,
+    )
+    keys = torch.tensor([[[[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0]]]])
+    values = torch.tensor([[[[2.0, 0.0], [0.0, 3.0], [9.0, 9.0]]]])
+    queries = keys.clone()
+    with torch.no_grad():
+        archive.update_read_chunk(keys, values, queries)
+        read = archive._landmark_read(keys[:, :, 0])[0]
+    assert archive._landmark_count == 2
+    # Direct key routing should prefer the first retained key for this query;
+    # the softmax remains intentionally non-one-hot.
+    assert float(read[0, 0, 0]) > float(read[0, 0, 1])
+
+
 def test_model_forward_shapes_and_gradients() -> None:
     torch.manual_seed(1)
     model = QCCForCausalLM(

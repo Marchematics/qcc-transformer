@@ -215,9 +215,13 @@ class QCCArchive(nn.Module):
             return
         if self.prefix_landmark and self._landmark_count < self.num_codes:
             slot = self._landmark_count
+            score = self._landmark_scores(key)
             self._landmark_key[:, :, slot] = key.to(self._landmark_key.dtype)
             self._landmark_value[:, :, slot] = value.to(self._landmark_value.dtype)
-            self._landmark_score[:, :, slot] = self._landmark_scores(key)
+            # Validity is tracked per retained slot; use the strongest code
+            # response as its scalar salience while routing itself uses the
+            # retained key directly at read time.
+            self._landmark_score[:, :, slot] = score.max(dim=-1).values
             self._landmark_count += 1
             return
         score = self._landmark_scores(key)
@@ -1694,7 +1698,7 @@ class QCCSelfAttention(nn.Module):
         q, k = self._apply_rope(q, k, position_ids)
         if not torch.is_grad_enabled():
             return self._forward_inference(hidden, q, k, v)
-        if hidden.is_cuda and length > self.window_size:
+        if hidden.is_cuda and length > self.window_size and not self.archive.prefix_landmark:
             # CUDA training uses the same bounded block equations as
             # inference, but keeps the scan differentiable.  This avoids the
             # O(sequence-length) Python/autograd loop for long retrieval
