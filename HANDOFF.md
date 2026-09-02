@@ -180,9 +180,14 @@ python benchmarks/gate_99.py --evidence artifacts/gates/<run_id>.json
 
 - `benchmarks/calibrate_hf_layerwise.py` 新增 `--cosine-weight`，可在词表分块 MSE 外加入方向一致性损失；默认 `0` 与历史目标兼容。
 - `scripts/run_layerwise_10gpu.sh` 已改为 10 卡 cosine-weight 消融矩阵（`0, 0.1, 0.3, 0.5, 1.0`）。
+- 该 sweep 默认模型已切换为原生 128K 的 `models/phi-4-mini-instruct`，并默认
+  `--trust-remote-code --num-train-chunks 4`；不再把 32K 的 Qwen2.5-1.5B 当作
+  128K gate 模型。
 - `qcc_transformer/vllm.py` 的默认 `archive_mix` 从 `0.5` 调整为 `0.125`，与 HF `gate_bias_init=2` 的质量优先初始化一致；复现实验时可显式传入 `archive_mix=0.5`。
 - 本地回归：`61 passed`（CUDA/Triton 条件测试按环境跳过）；最新提交 `e3d17a7` 已推送 GitHub。
 - 2026-09-03 复查时远程 SSH 与 Colab 均无可用活动会话；重新启动长任务前先检查连接和 GPU 占用。
+- 本地 tiny-random-Llama CPU smoke 已验证 `--cosine-weight 0.3` 与多 chunk
+  参数路径可运行（1 step，held-out cosine `0.99537`；仅 API smoke，不是 gate 证据）。
 
 ### 本地回归
 
