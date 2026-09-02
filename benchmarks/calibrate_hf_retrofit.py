@@ -36,6 +36,11 @@ def main() -> None:
     args = parser.parse_args()
     if args.steps <= 0 or args.lr <= 0 or args.max_tokens <= 0:
         raise ValueError("steps, lr, and max-tokens must be positive")
+    if args.max_tokens <= args.window_size:
+        raise ValueError(
+            "max-tokens must exceed window-size so calibration exercises the QCC archive; "
+            "otherwise all outputs stay on the exact local path and have no trainable QCC graph"
+        )
     text = args.text_file.read_text(encoding="utf-8")
     if not text.strip():
         raise ValueError("text-file must contain non-whitespace text")

@@ -210,6 +210,11 @@ class HFQCCAttention(nn.Module):
         self.qcc.k_proj = k_proj_for_qcc
         self.qcc.v_proj = v_proj_for_qcc
         self.qcc.out_proj = getattr(base_attention, "o_proj")
+        # HF checkpoints may be loaded in bf16/fp16 while the standalone QCC
+        # module defaults to fp32.  The gate participates in the fused
+        # projection path, so keep it in the backbone projection dtype;
+        # recurrent archive accumulators remain fp32 for numerical stability.
+        self.qcc.gate.to(device=q_proj.weight.device, dtype=q_proj.weight.dtype)
         self.num_heads = num_heads
         self.d_model = d_model
         self.kv_head_policy = kv_head_policy
