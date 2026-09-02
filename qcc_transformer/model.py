@@ -16,6 +16,22 @@ from torch import Tensor, nn
 import torch.nn.functional as F
 
 
+def _scaled_dot_product_attention(
+    query: Tensor, key: Tensor, value: Tensor, **kwargs: object
+) -> Tensor:
+    """Call SDPA with accelerator-safe contiguous Q/K/V strides.
+
+    Some CUDA flash/memory-efficient kernels reject the non-contiguous
+    head-major views produced by ``transpose`` (``query is not correctly
+    aligned``).  The bounded tensors are made contiguous once at this
+    boundary, preserving SDPA semantics while keeping all backends usable.
+    """
+
+    return F.scaled_dot_product_attention(
+        query.contiguous(), key.contiguous(), value.contiguous(), **kwargs
+    )
+
+
 @dataclass
 class QCCState:
     """Mutable state returned by :class:`QCCArchive` for inspection/checkpointing."""
@@ -1410,12 +1426,12 @@ class QCCSelfAttention(nn.Module):
                         q, local_keys, local_values, valid_length=self.window_size
                     )
                 else:
-                    local_out = F.scaled_dot_product_attention(
+                    local_out = _scaled_dot_product_attention(
                         q.unsqueeze(2), local_keys, local_values, dropout_p=0.0
                     ).squeeze(2)
             else:
                 # SDPA handles the small local window with one fused primitive.
-                local_out = F.scaled_dot_product_attention(
+                local_out = _scaled_dot_product_attention(
                     q.unsqueeze(2), local_keys, local_values, dropout_p=0.0
                 ).squeeze(2)
         else:
@@ -1425,7 +1441,7 @@ class QCCSelfAttention(nn.Module):
             valid = torch.ones(
                 (1, local_keys.shape[2]), device=hidden.device, dtype=torch.bool
             )
-            local_out = F.scaled_dot_product_attention(
+            local_out = _scaled_dot_product_attention(
                 q.unsqueeze(2),
                 local_keys,
                 local_values,
@@ -1542,7 +1558,7 @@ class QCCSelfAttention(nn.Module):
             key_positions = torch.arange(total_length, device=hidden.device)
             query_positions = old_length + torch.arange(length, device=hidden.device)
             causal_mask = key_positions[None, :] <= query_positions[:, None]
-            head_out = F.scaled_dot_product_attention(
+            head_out = _scaled_dot_product_attention(
                 q,
                 combined_k,
                 combined_v,
@@ -1564,7 +1580,7 @@ class QCCSelfAttention(nn.Module):
         valid = (key_positions[None, :] <= positions[:, None]) & (
             key_positions[None, :] >= positions[:, None] - self.window_size + 1
         )
-        local_out = F.scaled_dot_product_attention(
+        local_out = _scaled_dot_product_attention(
             q,
             combined_k,
             combined_v,
@@ -1650,7 +1666,7 @@ class QCCSelfAttention(nn.Module):
 
         if not self.use_archive:
             return self.out_proj(
-                F.scaled_dot_product_attention(q, k, v, is_causal=True)
+                _scaled_dot_product_attention(q, k, v, is_causal=True)
                 .transpose(1, 2)
                 .reshape(hidden.shape[0], hidden.shape[1], self.d_model)
             )
@@ -1671,7 +1687,7 @@ class QCCSelfAttention(nn.Module):
                 key_positions[None, :] >= query_positions[:, None] - window + 1
             )
             local_outputs.append(
-                F.scaled_dot_product_attention(
+                _scaled_dot_product_attention(
                     q[:, :, start:end],
                     k[:, :, key_start:end],
                     v[:, :, key_start:end],
@@ -1960,7 +1976,7 @@ class QCCSelfAttention(nn.Module):
                     key_positions[None, :] >= query_positions[:, None] - window + 1
                 )
                 local_outputs.append(
-                    F.scaled_dot_product_attention(
+                    _scaled_dot_product_attention(
                         q[:, :, start:end],
                         k[:, :, key_start:end],
                         v[:, :, key_start:end],
@@ -2011,7 +2027,7 @@ class QCCSelfAttention(nn.Module):
             head_out = torch.where(active, mixed_out, local_out)
         else:
             # Full-attention baseline uses PyTorch's fused causal kernel.
-            head_out = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+            head_out = _scaled_dot_product_attention(q, k, v, is_causal=True)
         return self.out_proj(head_out.transpose(1, 2).reshape(bsz, length, self.d_model))
 
     def forward(
