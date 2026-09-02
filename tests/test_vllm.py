@@ -68,3 +68,30 @@ def test_vllm_quality_first_archive_mix_default():
         2, 4, window_size=3, num_codes=4, archive_mix=0.5, use_triton=False
     )
     assert historical.archive_mix == pytest.approx(0.5)
+
+
+def test_vllm_backend_forward_batch_isolates_request_state():
+    torch.manual_seed(4)
+    backend = QCCVLLMBackend(2, 4, window_size=3, num_codes=4, use_triton=False)
+    query = torch.randn(2, 2, 5, 4)
+    batched = backend.forward_batch(["a", "b"], query, query, query)
+    single_a = QCCVLLMState(2, 4, window_size=3, num_codes=4, use_triton=False)
+    single_b = QCCVLLMState(2, 4, window_size=3, num_codes=4, use_triton=False)
+    single_a.archive.load_state_dict(backend._states["a"].archive.state_dict())
+    single_b.archive.load_state_dict(backend._states["b"].archive.state_dict())
+    expected = torch.cat(
+        [single_a.forward(query[:1], query[:1], query[:1]),
+         single_b.forward(query[1:], query[1:], query[1:])],
+        dim=0,
+    )
+    torch.testing.assert_close(batched, expected)
+
+
+def test_vllm_backend_forward_ragged_preserves_flattened_layout():
+    torch.manual_seed(5)
+    backend = QCCVLLMBackend(2, 4, window_size=3, num_codes=4, use_triton=False)
+    query = torch.randn(5, 2, 4)
+    output = backend.forward_ragged(["a", "b"], query, query, query, [2, 3])
+    assert output.shape == query.shape
+    assert backend._states["a"].seen_tokens == 2
+    assert backend._states["b"].seen_tokens == 3

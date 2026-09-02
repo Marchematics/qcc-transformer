@@ -151,6 +151,10 @@ state.  `QCCVLLMBackend` provides a minimal request registry with explicit
 from qcc_transformer.vllm import QCCVLLMBackend
 backend = QCCVLLMBackend(num_heads=32, head_dim=128, window_size=128, num_codes=64)
 out = backend.forward(request_id, query, key, value)  # [1, H, T, D]
+# Equal-length scheduler batch: [B, H, T, D]
+out = backend.forward_batch(request_ids, query, key, value)
+# vLLM-style flattened scheduler batch: [sum(query_lens), H, D]
+out = backend.forward_ragged(request_ids, query, key, value, query_lens)
 ```
 
 The vLLM primitive defaults to `archive_mix=0.125`, matching the

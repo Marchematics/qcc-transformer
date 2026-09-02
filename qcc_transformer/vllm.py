@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import math
 import copy
+from collections.abc import Sequence
 
 import torch
 from torch import Tensor
@@ -214,13 +215,75 @@ class QCCVLLMBackend:
         self._states[request_id] = state
         return state
 
-    def forward(self, request_id: str, query: Tensor, key: Tensor, value: Tensor) -> Tensor:
-        if query.ndim != 4 or query.shape[0] != 1:
-            raise ValueError("QCCVLLMBackend expects one [batch=1] logical request")
+    def _state_forward(self, request_id: str, query: Tensor, key: Tensor, value: Tensor) -> Tensor:
         state = self._states.get(request_id)
         if state is None:
             state = self.reset(request_id, device=query.device, dtype=query.dtype)
         return state.forward(query, key, value)
+
+    def forward(self, request_id: str, query: Tensor, key: Tensor, value: Tensor) -> Tensor:
+        """Serve one logical request (the historical API)."""
+        if query.ndim != 4 or query.shape[0] != 1:
+            raise ValueError("QCCVLLMBackend.forward expects one [batch=1] logical request")
+        return self._state_forward(request_id, query, key, value)
+
+    def forward_batch(
+        self,
+        request_ids: Sequence[str],
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+    ) -> Tensor:
+        """Serve equal-length blocks for several logical requests.
+
+        vLLM schedulers commonly batch decode blocks.  The archive state is
+        request-local, so processing each row independently is the safe
+        reference implementation; a version-specific adapter can fuse these
+        calls later without changing this contract.
+        """
+        if query.ndim != 4 or key.shape != query.shape or value.shape != query.shape:
+            raise ValueError("query/key/value must all have shape [batch, heads, tokens, dim]")
+        ids = list(request_ids)
+        if query.shape[0] != len(ids):
+            raise ValueError("request_ids length must equal query batch size")
+        outputs = [
+            self._state_forward(request_id, query[index : index + 1], key[index : index + 1], value[index : index + 1])
+            for index, request_id in enumerate(ids)
+        ]
+        return torch.cat(outputs, dim=0)
+
+    def forward_ragged(
+        self,
+        request_ids: Sequence[str],
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        query_lens: Sequence[int],
+    ) -> Tensor:
+        """Serve flattened variable-length blocks and preserve row order.
+
+        ``query/key/value`` are ``[sum(query_lens), heads, dim]``.  This is
+        the layout used by vLLM's token scheduler before an attention backend
+        reshapes per-request rows.  The returned tensor has the same layout.
+        """
+        if query.ndim != 3 or key.shape != query.shape or value.shape != query.shape:
+            raise ValueError("ragged query/key/value must have shape [tokens, heads, dim]")
+        ids = list(request_ids)
+        lens = [int(length) for length in query_lens]
+        if len(ids) != len(lens) or any(length <= 0 for length in lens):
+            raise ValueError("request_ids and query_lens must have equal positive entries")
+        if sum(lens) != query.shape[0]:
+            raise ValueError("sum(query_lens) must equal flattened token count")
+        outputs = []
+        offset = 0
+        for request_id, length in zip(ids, lens):
+            end = offset + length
+            q = query[offset:end].transpose(0, 1).unsqueeze(0)
+            k = key[offset:end].transpose(0, 1).unsqueeze(0)
+            v = value[offset:end].transpose(0, 1).unsqueeze(0)
+            outputs.append(self._state_forward(request_id, q, k, v).squeeze(0).transpose(0, 1))
+            offset = end
+        return torch.cat(outputs, dim=0)
 
     def fork(self, source_id: str, target_id: str) -> None:
         if source_id not in self._states:
