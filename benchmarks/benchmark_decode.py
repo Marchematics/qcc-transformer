@@ -106,7 +106,12 @@ def main() -> None:
         action="store_true",
         help="use a second bounded raw-token ring for position-free archive addressing",
     )
-    parser.add_argument("--archive-scan-block-size", type=int, default=256)
+    parser.add_argument(
+        "--archive-scan-block-size",
+        type=int,
+        default=1024,
+        help="bounded archive/local kernel block; 1024 amortizes CUDA launch overhead",
+    )
     parser.add_argument(
         "--position-encoding",
         choices=("sinusoidal", "learned", "rope"),

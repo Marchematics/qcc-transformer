@@ -138,6 +138,29 @@ This avoids pinning an unstable vLLM ABI while making the cache state and
 shape contract explicit; upstream vLLM still needs a version-specific backend
 registration and matched quality benchmark.
 
+### 99 gate (all five requirements must hold simultaneously)
+
+`benchmarks/gate_99.py` is the fail-closed acceptance test for a production
+claim. It consumes one JSON evidence bundle and exits non-zero unless the same
+`run_id` covers a real pretrained 1--7B checkpoint, official RULER / LongBench
+/ PG-19 scores each at least `0.98 * Full-KV`, a matched real-vLLM 128K run
+with TPOT speedup `>=5x` and throughput speedup `>=2x`, matched peak-memory
+reduction `>=80%` and concurrency speedup `>=4x`, and calibration of at most
+`1%` trainable parameters with explicit HF/vLLM zero-code evidence.
+Synthetic, random-weight, QCC-only, short-context, or unmatched records are
+rejected even when their numeric value looks favorable.
+
+```bash
+python benchmarks/gate_99.py --evidence artifacts/gates/run.json
+```
+
+The expected keys are `run_id`, `model`, `quality.ruler|longbench|pg19`,
+`vllm_latency`, `memory`, and `calibration`; each section records its own
+`run_id`, provenance flags, and raw Full-KV/QCC measurements. The current
+repository intentionally does **not** ship a passing bundle: real 1--7B
+quality, official long-context scores, and matched vLLM/memory/concurrency
+evidence are still missing and therefore the gate must fail closed.
+
 ## Run tests
 
 ```bash
@@ -151,10 +174,13 @@ python benchmarks/benchmark_decode.py --length 512 --mode decode --warmup 1 --st
 ```
 
 For block serving, set `--chunk-size 16` (or another positive block length) to
-use the vectorized persistent `decode_chunk` API.
-Its finite causal window is dispatched through fused SDPA with a band mask,
-so chunked serving avoids materializing an unfolded window tensor. The archive
-events remain ordered and stateful.
+use the vectorized persistent `decode_chunk` API. Its finite causal window is
+dispatched through a one-launch Triton sliding-window kernel when
+Triton/CUDA is available (with an exact unfolded/reference fallback), so
+chunked serving avoids materializing an unfolded window tensor. The archive
+events remain ordered and stateful. The default archive block is `1024`, which
+amortizes CUDA launch overhead while keeping temporary memory bounded; reduce
+it on memory-constrained devices.
 
 For the counterintuitive sparse-memory variant, keep an overcomplete landmark
 bank but touch only the highest-scoring slots at inference:
@@ -434,7 +460,7 @@ remain open gates.  Raw values are in
 For million-token serving, the default `position_encoding="sinusoidal"` is
 stateless: configuring `max_position_embeddings=4_000_000` does not allocate a
 four-million-row learned position table. `archive_scan_block_size` controls the
-temporary prefill working set (256 by default); reducing it lowers peak memory,
+temporary prefill working set (1024 by default); reducing it lowers peak memory,
 while increasing it can improve throughput on a larger device.
 Unless `archive_decay_rates` is supplied explicitly, each layer derives a
 log-spaced set of exponential half-lives from `window_size` to

@@ -222,7 +222,12 @@ def main() -> None:
     parser.add_argument("--window-size", type=int, default=128)
     parser.add_argument("--num-codes", type=int, default=16)
     parser.add_argument("--archive-content-threshold", type=float, default=None)
-    parser.add_argument("--archive-scan-block-size", type=int, default=256)
+    parser.add_argument(
+        "--archive-scan-block-size",
+        type=int,
+        default=1024,
+        help="bounded archive/local kernel block; 1024 amortizes CUDA launch overhead",
+    )
     parser.add_argument("--chunk-size", type=int, default=256)
     parser.add_argument("--decode-warmup", type=int, default=4)
     parser.add_argument("--decode-steps", type=int, default=16)

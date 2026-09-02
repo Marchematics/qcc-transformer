@@ -99,7 +99,7 @@ class QCCArchive(nn.Module):
         use_triton: bool = True,
         active_codes: Optional[int] = None,
         lazy_decay: bool = False,
-        scan_block_size: int = 256,
+        scan_block_size: int = 1024,
         content_threshold: Optional[float] = None,
         persistent_landmark: bool = False,
         prefix_landmark: bool = False,
@@ -944,7 +944,7 @@ class QCCSelfAttention(nn.Module):
         lazy_decay: bool = False,
         archive_read_stride: int = 1,
         archive_query_cosine_threshold: Optional[float] = None,
-        archive_scan_block_size: int = 256,
+        archive_scan_block_size: int = 1024,
         archive_content_threshold: Optional[float] = None,
         archive_persistent_landmark: bool = False,
         archive_prefix_landmark: bool = False,
@@ -975,6 +975,10 @@ class QCCSelfAttention(nn.Module):
         self.head_dim = d_model // num_heads
         self.window_size = window_size
         self.use_archive = use_archive
+        # Retain the dispatch policy on the attention module so optional
+        # accelerator kernels can be selected at serving time without
+        # changing the public constructor or consulting child modules.
+        self.use_triton = use_triton
         self.rope_theta = rope_theta
         rotary_dim = 2 * (self.head_dim // 2)
         half_dim = rotary_dim // 2
@@ -1158,6 +1162,36 @@ class QCCSelfAttention(nn.Module):
         logits = logits.masked_fill(~valid[None, None], torch.finfo(logits.dtype).min)
         return torch.einsum(
             "bhtw,bhtwd->bhtd", F.softmax(logits, dim=-1), value_windows
+        )
+
+    def _local_sdpa_attention(
+        self, query: Tensor, keys: Tensor, values: Tensor
+    ) -> Tensor:
+        """Exact bounded causal attention using the fused SDPA causal mask.
+
+        ``keys`` contains the previous ``window_size - 1`` tokens followed by
+        the current block.  A rectangular (bottom-right) causal mask is needed
+        because the query block is shorter than that key slice.  Newer
+        PyTorch versions expose this mask as a symbolic ``CausalBias``; the
+        small boolean fallback keeps older versions correct.  Because the key
+        slice is already bounded to the local window, this is algebraically
+        identical to the explicit sliding-window mask while allowing fused
+        SDPA kernels to run when the backend supports the bias.
+        """
+
+        query_len, key_len = query.shape[-2], keys.shape[-2]
+        try:
+            from torch.nn.attention.bias import causal_lower_right
+
+            mask = causal_lower_right(query_len, key_len)
+        except (ImportError, AttributeError):  # PyTorch < 2.5
+            key_positions = torch.arange(key_len, device=query.device)
+            query_positions = (key_len - query_len) + torch.arange(
+                query_len, device=query.device
+            )
+            mask = key_positions[None, :] <= query_positions[:, None]
+        return _scaled_dot_product_attention(
+            query, keys, values, attn_mask=mask, dropout_p=0.0
         )
 
     def _lexical_archive_triplet(
@@ -1611,10 +1645,37 @@ class QCCSelfAttention(nn.Module):
         valid = (key_positions[None, :] <= positions[:, None]) & (
             key_positions[None, :] >= positions[:, None] - self.window_size + 1
         )
-        if hidden.is_cuda and length >= self.archive.scan_block_size:
-            local_out = self._local_window_attention(
-                q, combined_k, combined_v, old_length=old_length
-            )
+        if hidden.is_cuda:
+            # Prefer the one-launch Triton sliding-window kernel.  It computes
+            # the exact lower *and* upper causal bounds directly, avoiding the
+            # large unfolded [time, window, dim] temporary used by the
+            # reference path.  Fall back to the readable implementation when
+            # Triton is unavailable (e.g. a CUDA build without Triton).
+            local_out = None
+            if self.use_triton:
+                from .triton_kernels import TRITON_AVAILABLE, triton_local_chunk_attention
+
+                if TRITON_AVAILABLE:
+                    local_out = triton_local_chunk_attention(
+                        q,
+                        combined_k,
+                        combined_v,
+                        old_length=old_length,
+                        window_size=self.window_size,
+                    )
+            if local_out is None:
+                if length >= self.archive.scan_block_size:
+                    local_out = self._local_window_attention(
+                        q, combined_k, combined_v, old_length=old_length
+                    )
+                else:
+                    local_out = _scaled_dot_product_attention(
+                        q,
+                        combined_k,
+                        combined_v,
+                        attn_mask=valid,
+                        dropout_p=0.0,
+                    )
         else:
             local_out = _scaled_dot_product_attention(
                 q,
@@ -2212,7 +2273,7 @@ class QCCForCausalLM(nn.Module):
         lazy_decay: bool = False,
         archive_read_stride: int = 1,
         archive_query_cosine_threshold: Optional[float] = None,
-        archive_scan_block_size: int = 256,
+        archive_scan_block_size: int = 1024,
         archive_content_threshold: Optional[float] = None,
         archive_persistent_landmark: bool = False,
         archive_prefix_landmark: bool = False,

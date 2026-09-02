@@ -6,12 +6,74 @@ from qcc_transformer import QCCArchive, QCCForCausalLM, QCCSelfAttention
 from qcc_transformer.triton_kernels import (
     TRITON_AVAILABLE,
     triton_lazy_update_archive,
+    triton_local_chunk_attention,
     triton_read_archive,
     triton_sparse_read_archive,
     triton_sparse_update_read_archive_chunk,
     triton_update_archive,
     triton_update_read_archive_chunk,
 )
+
+
+@pytest.mark.skipif(not TRITON_AVAILABLE or not torch.cuda.is_available(), reason="Triton CUDA unavailable")
+def test_triton_local_chunk_matches_unfolded_reference() -> None:
+    torch.manual_seed(123)
+    device = torch.device("cuda")
+    batch, heads, old_length, query_length, dim, window = 1, 2, 7, 13, 8, 8
+    query = torch.randn(batch, heads, query_length, dim, device=device)
+    keys = torch.randn(batch, heads, old_length + query_length, dim, device=device)
+    values = torch.randn_like(keys)
+    attention = QCCSelfAttention(
+        d_model=heads * dim,
+        num_heads=heads,
+        window_size=window,
+        use_triton=False,
+    ).to(device)
+    expected = attention._local_window_attention(
+        query, keys, values, old_length=old_length
+    )
+    actual = triton_local_chunk_attention(
+        query, keys, values, old_length=old_length, window_size=window
+    )
+    torch.testing.assert_close(actual, expected, rtol=2e-4, atol=2e-4)
+
+
+@pytest.mark.skipif(not TRITON_AVAILABLE or not torch.cuda.is_available(), reason="Triton CUDA unavailable")
+def test_decode_chunk_triton_local_dispatch_matches_reference() -> None:
+    torch.manual_seed(124)
+    device = torch.device("cuda")
+    kwargs = dict(
+        vocab_size=41,
+        d_model=32,
+        num_layers=2,
+        num_heads=4,
+        max_position_embeddings=256,
+        window_size=8,
+        num_codes=8,
+        archive_scan_block_size=16,
+    )
+    triton_model = QCCForCausalLM(**kwargs, use_triton=True).to(device).eval()
+    reference_model = QCCForCausalLM(**kwargs, use_triton=False).to(device).eval()
+    reference_model.load_state_dict(triton_model.state_dict())
+    tokens = torch.randint(0, kwargs["vocab_size"], (1, 97), device=device)
+    with torch.no_grad():
+        actual = torch.cat(
+            [
+                triton_model.decode_chunk(tokens[:, :16], reset_cache=True),
+                triton_model.decode_chunk(tokens[:, 16:64]),
+                triton_model.decode_chunk(tokens[:, 64:]),
+            ],
+            dim=1,
+        )
+        expected = torch.cat(
+            [
+                reference_model.decode_chunk(tokens[:, :16], reset_cache=True),
+                reference_model.decode_chunk(tokens[:, 16:64]),
+                reference_model.decode_chunk(tokens[:, 64:]),
+            ],
+            dim=1,
+        )
+    torch.testing.assert_close(actual, expected, rtol=2e-4, atol=2e-4)
 
 
 def test_archive_matches_exponential_response_for_single_code() -> None:

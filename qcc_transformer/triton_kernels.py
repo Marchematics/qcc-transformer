@@ -84,6 +84,102 @@ try:  # pragma: no cover - exercised only on a Triton-enabled GPU runner
         )
 
     @triton.jit
+    def _qcc_local_chunk_kernel(
+        output_ptr,
+        query_ptr,
+        key_ptr,
+        value_ptr,
+        query_length,
+        num_heads,
+        old_length,
+        window_size,
+        stride_ob,
+        stride_oh,
+        stride_ot,
+        stride_od,
+        stride_qb,
+        stride_qh,
+        stride_qt,
+        stride_qd,
+        stride_kb,
+        stride_kh,
+        stride_kt,
+        stride_kd,
+        stride_vb,
+        stride_vh,
+        stride_vt,
+        stride_vd,
+        BLOCK_D: tl.constexpr,
+        BLOCK_W: tl.constexpr,
+        HEAD_DIM: tl.constexpr,
+    ):
+        """Chunked local attention kernel (one program per query)."""
+
+        pid = tl.program_id(0)
+        batch = pid // (num_heads * query_length)
+        rem = pid % (num_heads * query_length)
+        head = rem // query_length
+        time = rem % query_length
+        offs_d = tl.arange(0, BLOCK_D)
+        offs_w = tl.arange(0, BLOCK_W)
+        mask_d = offs_d < HEAD_DIM
+        query = tl.load(
+            query_ptr
+            + batch * stride_qb
+            + head * stride_qh
+            + time * stride_qt
+            + offs_d * stride_qd,
+            mask=mask_d,
+            other=0.0,
+        ).to(tl.float32)
+        global_position = old_length + time
+        window_start = tl.maximum(global_position - window_size + 1, 0)
+        valid_length = tl.minimum(window_size, global_position + 1)
+        mask_w = offs_w < valid_length
+        logits = tl.zeros((BLOCK_W,), dtype=tl.float32)
+        for index in range(BLOCK_W):
+            key = tl.load(
+                key_ptr
+                + batch * stride_kb
+                + head * stride_kh
+                + (window_start + index) * stride_kt
+                + offs_d * stride_kd,
+                mask=mask_d & (index < valid_length),
+                other=0.0,
+            ).to(tl.float32)
+            dot = tl.sum(query * key, axis=0) / tl.sqrt(
+                tl.full((), HEAD_DIM, tl.float32)
+            )
+            logits = tl.where(offs_w == index, dot, logits)
+        logits = tl.where(mask_w, logits, -float("inf"))
+        max_logit = tl.max(logits, axis=0)
+        weights = tl.exp(logits - max_logit)
+        weights = tl.where(mask_w, weights, 0.0)
+        weights = weights / tl.sum(weights, axis=0)
+        result = tl.zeros((BLOCK_D,), dtype=tl.float32)
+        for index in range(BLOCK_W):
+            value = tl.load(
+                value_ptr
+                + batch * stride_vb
+                + head * stride_vh
+                + (window_start + index) * stride_vt
+                + offs_d * stride_vd,
+                mask=mask_d & (index < valid_length),
+                other=0.0,
+            ).to(tl.float32)
+            weight = tl.sum(tl.where(offs_w == index, weights, 0.0), axis=0)
+            result += weight * value
+        tl.store(
+            output_ptr
+            + batch * stride_ob
+            + head * stride_oh
+            + time * stride_ot
+            + offs_d * stride_od,
+            result,
+            mask=mask_d,
+        )
+
+    @triton.jit
     def _qcc_update_kernel(
         numerator_ptr,
         denominator_ptr,
@@ -1032,6 +1128,57 @@ def triton_local_decode_attention(
         output, query, keys, values, batch, heads, valid_length,
         *output.stride(), *query.stride(), *keys.stride(), *values.stride(),
         BLOCK_D=block_dim, BLOCK_W=block_window, HEAD_DIM=dim,
+    )
+    return output
+
+
+def triton_local_chunk_attention(
+    query: torch.Tensor,
+    keys: torch.Tensor,
+    values: torch.Tensor,
+    *,
+    old_length: int,
+    window_size: int,
+) -> torch.Tensor:
+    """Compute exact sliding-window attention for a whole decode block.
+
+    ``keys``/``values`` must contain the chronological ring prefix followed
+    by the new block, so their length is ``old_length + query_length``.  The
+    Triton kernel emits one output per query and never materializes an
+    unfolded window tensor.
+    """
+
+    if not TRITON_AVAILABLE or not query.is_cuda:
+        raise RuntimeError("Triton CUDA runtime is unavailable")
+    if query.ndim != 4 or keys.ndim != 4 or values.shape != keys.shape:
+        raise ValueError("query, keys, and values must be rank-4 tensors")
+    batch, heads, query_length, dim = query.shape
+    if keys.shape[:2] != (batch, heads) or keys.shape[2] != old_length + query_length:
+        raise ValueError("keys must contain old_length plus query_length tokens")
+    if keys.shape[3] != dim or old_length < 0 or window_size <= 0:
+        raise ValueError("invalid local attention dimensions")
+    query = query.contiguous()
+    keys = keys.contiguous()
+    values = values.contiguous()
+    output = torch.empty_like(query)
+    block_dim = 1 << max(4, (dim - 1).bit_length())
+    block_window = 1 << max(0, (min(window_size, old_length + query_length) - 1).bit_length())
+    _qcc_local_chunk_kernel[(batch * heads * query_length,)](
+        output,
+        query,
+        keys,
+        values,
+        query_length,
+        heads,
+        old_length,
+        window_size,
+        *output.stride(),
+        *query.stride(),
+        *keys.stride(),
+        *values.stride(),
+        BLOCK_D=block_dim,
+        BLOCK_W=block_window,
+        HEAD_DIM=dim,
     )
     return output
 
