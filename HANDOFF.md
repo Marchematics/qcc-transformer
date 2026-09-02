@@ -176,6 +176,14 @@ python benchmarks/gate_99.py --evidence artifacts/gates/<run_id>.json
 
 ## 8. 常用命令
 
+### 最新代码变更（2026-09-03）
+
+- `benchmarks/calibrate_hf_layerwise.py` 新增 `--cosine-weight`，可在词表分块 MSE 外加入方向一致性损失；默认 `0` 与历史目标兼容。
+- `scripts/run_layerwise_10gpu.sh` 已改为 10 卡 cosine-weight 消融矩阵（`0, 0.1, 0.3, 0.5, 1.0`）。
+- `qcc_transformer/vllm.py` 的默认 `archive_mix` 从 `0.5` 调整为 `0.125`，与 HF `gate_bias_init=2` 的质量优先初始化一致；复现实验时可显式传入 `archive_mix=0.5`。
+- 本地回归：`61 passed`（CUDA/Triton 条件测试按环境跳过）；最新提交 `e3d17a7` 已推送 GitHub。
+- 2026-09-03 复查时远程 SSH 与 Colab 均无可用活动会话；重新启动长任务前先检查连接和 GPU 占用。
+
 ### 本地回归
 
 ```bash
