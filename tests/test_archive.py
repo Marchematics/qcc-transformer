@@ -110,6 +110,8 @@ def test_prefix_pair_landmark_binds_key_to_successor_value() -> None:
     torch.testing.assert_close(
         archive._landmark_value[0, 0, 0], values[0, 0, 1] + 100.0, rtol=0, atol=0
     )
+    read = archive._landmark_read(keys[:, :, 0])[0]
+    assert float(read[0, 0, 0]) > float(read[0, 0, 1])
 
 
 def test_model_forward_shapes_and_gradients() -> None:
