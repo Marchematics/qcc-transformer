@@ -176,6 +176,13 @@ This avoids pinning an unstable vLLM ABI while making the cache state and
 shape contract explicit; upstream vLLM still needs a version-specific backend
 registration and matched quality benchmark.
 
+Once a version-specific `AttentionBackend` implementation is available, wire
+it into vLLM without changing application code by calling
+`qcc_transformer.register_vllm_backend("module.ClassName")`. The hook lazily
+uses vLLM v1's `AttentionBackendEnum.CUSTOM` registry and raises a clear error
+when vLLM is not installed; it does not misrepresent the state primitive as a
+complete backend.
+
 ### 99 gate (all requirements must hold simultaneously)
 
 `benchmarks/gate_99.py` is the fail-closed acceptance test for a production

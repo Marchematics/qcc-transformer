@@ -19,6 +19,7 @@ from .retrofit import (
     reset_hf_qcc_cache,
 )
 from .vllm import QCCVLLMBackend, QCCVLLMState
+from .vllm_plugin import register_vllm_backend
 
 __all__ = [
     "QCCArchive",
@@ -37,4 +38,5 @@ __all__ = [
     "reset_hf_qcc_cache",
     "QCCVLLMState",
     "QCCVLLMBackend",
+    "register_vllm_backend",
 ]
