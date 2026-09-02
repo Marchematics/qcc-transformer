@@ -214,6 +214,13 @@ a kernel-equivalence check, not RULER, retrieval, or pretrained-LM quality.
 The target retrieval gates remain `missing` until a trained checkpoint and
 JSONL evaluation set are supplied.
 
+An expanded random-address stress split (29 values at each of 128K and 1M,
+with marker and filler IDs randomized independently) was evaluated on the
+remote CUDA worker on 2026-09-02. The lexical-pair checkpoint got 55/58
+(`94.8276%`), below the configured `98%` gate; the result is recorded in
+`artifacts/remote_gpu/strict_random_allvalues_eval_seed915_summary.json` and
+must not be presented as RULER, LongBench, PG-19, or pretrained-LM quality.
+
 ### Colab synthetic retrieval diagnostic (STE content gate)
 
 The differentiable archive uses a straight-through content gate: the forward
