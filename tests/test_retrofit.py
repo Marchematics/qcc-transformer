@@ -10,6 +10,7 @@ from qcc_transformer.retrofit import (
     patch_hf_model,
     retrofit_adapter_state,
     save_retrofit_adapter,
+    reset_hf_qcc_cache,
 )
 
 
@@ -95,6 +96,7 @@ def test_patch_hf_gqa_repeat_policy_and_idempotence():
     replaced = patch_hf_model(model, use_triton=False, kv_head_policy="repeat")
     assert replaced == ["attn"]
     assert patch_hf_model(model, use_triton=False, kv_head_policy="repeat") == []
+    assert reset_hf_qcc_cache(model) == 1
 
 
 def test_fidelity_gate_and_adapter_manifest(tmp_path):

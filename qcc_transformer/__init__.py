@@ -16,6 +16,7 @@ from .retrofit import (
     retrofit_adapter_state,
     save_retrofit_adapter,
     compare_logits,
+    reset_hf_qcc_cache,
 )
 from .vllm import QCCVLLMBackend, QCCVLLMState
 
@@ -33,6 +34,7 @@ __all__ = [
     "retrofit_adapter_state",
     "save_retrofit_adapter",
     "compare_logits",
+    "reset_hf_qcc_cache",
     "QCCVLLMState",
     "QCCVLLMBackend",
 ]

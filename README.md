@@ -94,6 +94,18 @@ per-record and aggregate logit cosine/top-1 agreement.  Passing this gate is
 necessary for the retrofit claim, but is not a substitute for held-out RULER,
 LongBench, or perplexity measurements.
 
+For a real-model latency smoke (Full-KV teacher vs retrofit student), run:
+
+```bash
+python benchmarks/benchmark_hf_latency.py \
+  --model <model-id-or-local-snapshot> --device cuda \
+  --window-size 128 --num-codes 64 --kv-head-policy repeat
+```
+
+The script resets QCC state at the request boundary and reports matched TTFT,
+TPOT, and speedup.  It does not claim that a short prompt predicts 128K/1M
+behavior; use the long-context harness and task datasets for those gates.
+
 For a vLLM custom attention backend, use the dependency-free
 `QCCVLLMState.forward(query, key, value)` primitive from
 `qcc_transformer.vllm` inside the backend's scheduler-managed per-sequence

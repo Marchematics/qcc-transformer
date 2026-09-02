@@ -422,6 +422,27 @@ def save_retrofit_adapter(model: nn.Module, checkpoint: str | Path, **metadata: 
     return path
 
 
+def reset_hf_qcc_cache(model: nn.Module, *, batch_size: int = 1) -> int:
+    """Reset all adapted attention states before a new serving request.
+
+    Hugging Face's ``generate`` normally owns its cache object, whereas QCC
+    keeps historical state inside each patched attention module.  This helper
+    gives serving wrappers an explicit request boundary and returns the number
+    of layers reset.
+    """
+
+    if batch_size <= 0:
+        raise ValueError("batch_size must be positive")
+    count = 0
+    for module in model.modules():
+        if isinstance(module, HFQCCAttention):
+            module.qcc.reset_cache(batch_size, device=module.qcc.q_proj.weight.device)
+            count += 1
+    if count == 0:
+        raise ValueError("model has no HFQCCAttention modules; call patch_hf_model first")
+    return count
+
+
 def load_retrofit_adapter(
     model: nn.Module,
     checkpoint: str | Path,
@@ -456,4 +477,5 @@ __all__ = [
     "retrofit_adapter_state",
     "save_retrofit_adapter",
     "compare_logits",
+    "reset_hf_qcc_cache",
 ]
