@@ -32,7 +32,16 @@ def state_report(model: QCCForCausalLM, length: int, dtype_bytes: int = 4) -> di
     heads = model.layers[0].attention.num_heads
     head_dim = model.layers[0].attention.head_dim
     window = model.layers[0].attention.window_size
-    qcc_elements = count_archive_elements(model) + 2 * layers * heads * window * head_dim
+    # Lexical landmark addressing keeps a second bounded ring (raw token
+    # embeddings) alongside the contextual local K/V ring.  Include it in
+    # the reported persistent state; otherwise the lexical variant would
+    # appear artificially smaller than its actual serving footprint.
+    lexical_rings = sum(
+        int(layer.attention.archive_lexical_landmark) for layer in model.layers
+    )
+    qcc_elements = count_archive_elements(model) + 2 * heads * window * head_dim * (
+        layers + lexical_rings
+    )
     full_elements = 2 * layers * heads * length * head_dim
     qcc_bytes = qcc_elements * dtype_bytes
     full_bytes = full_elements * dtype_bytes
@@ -97,6 +106,11 @@ def main() -> None:
     parser.add_argument("--heads", type=int, default=8)
     parser.add_argument("--window-size", type=int, default=128)
     parser.add_argument("--num-codes", type=int, default=16)
+    parser.add_argument(
+        "--archive-lexical-landmark",
+        action="store_true",
+        help="keep a second bounded raw-token ring for position-free archive addressing",
+    )
     parser.add_argument("--archive-scan-block-size", type=int, default=256)
     parser.add_argument(
         "--position-encoding",
@@ -124,6 +138,7 @@ def main() -> None:
         max_position_embeddings=args.length + 1,
         window_size=args.window_size,
         num_codes=args.num_codes,
+        archive_lexical_landmark=args.archive_lexical_landmark,
         archive_scan_block_size=args.archive_scan_block_size,
         position_encoding=args.position_encoding,
         rope_theta=args.rope_theta,
