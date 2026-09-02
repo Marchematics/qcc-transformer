@@ -247,6 +247,16 @@ remains unmet.  The extra landmark state is still constant in sequence length;
 with the default 16 codes and 32-dimensional heads it adds only 2,304 fp32
 state elements per batch/layer.
 
+As a targeted diagnostic, the optional `archive_prefix_pair_landmark` mode
+delays each retained slot's value by one event, binding a marker key to its
+successor value.  A fresh no-position checkpoint trained for 1,800 steps on a
+10-way query curriculum achieved 100% training accuracy but only `1/58`
+(`1.72%`) on a strict all-value stress set spanning 128K and 1M contexts.  The
+negative result is recorded in
+[`artifacts/remote_gpu/prefix_pair_stress.json`](artifacts/remote_gpu/prefix_pair_stress.json)
+and rules out a simple marker-to-successor overwrite as the missing ingredient;
+the 1M retrieval gate remains open.
+
 ### 1M-token T4 latency/state snapshot
 
 An end-to-end QCC-only stream on a Google Colab Tesla T4 processed one million
