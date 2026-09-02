@@ -239,12 +239,13 @@ ablation, not enabled by default.  The implementation and a T4 run are
 recorded in [`artifacts/colab_gpu/landmark_retrieval_summary.json`](artifacts/colab_gpu/landmark_retrieval_summary.json).
 
 The prefix checkpoint reached 10/10 on a 128K/query96K synthetic stream and
-5/5 on a 1M/query500K stream.  It scored 0/5 at query900K; a stress batch that
-covered every value id (3--31) scored 6/29.  This exposes a remaining
-multi-value/generalization failure, so the 1M retrieval ≥98% gate remains
-unmet.  The extra landmark state is still constant in sequence length; with
-the default 16 codes and 32-dimensional heads it adds only 2,304 fp32 state
-elements per batch/layer.
+5/5 on a 1M/query500K stream.  After fixing prefix-slot immutability and
+retraining for 3,000 steps, the all-value stress batch (IDs 3--31) improved to
+16/29, while the 1M/query900K five-example probe remained 1/5.  This exposes a
+remaining multi-value/generalization failure, so the 1M retrieval ≥98% gate
+remains unmet.  The extra landmark state is still constant in sequence length;
+with the default 16 codes and 32-dimensional heads it adds only 2,304 fp32
+state elements per batch/layer.
 
 For million-token serving, the default `position_encoding="sinusoidal"` is
 stateless: configuring `max_position_embeddings=4_000_000` does not allocate a

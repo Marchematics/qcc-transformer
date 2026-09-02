@@ -41,13 +41,15 @@
       "query_position": 900000,
       "values": "all token ids 3..31 in one batch",
       "examples": 29,
-      "correct": 6,
-      "accuracy": 0.2068965517
+      "correct": 16,
+      "accuracy": 0.5517241379,
+      "checkpoint": "qcc_prefix_1m_fulltrain.pt",
+      "training_steps": 3000
     }
   ],
   "interpretation": [
     "The mechanism preserves constant-size state and improves the middle of a million-token stream.",
-    "The 1M tail and multi-value batch generalization gates remain failed; no 1M retrieval >=98% claim is made.",
+    "The 1M tail and multi-value batch generalization gates remain failed; no 1M retrieval >=98% claim is made. The immutable-prefix fix improved the all-value stress result from 6/29 to 16/29, but it is still far below target.",
     "These are synthetic marker/value diagnostics, not RULER or pretrained-LM quality."
   ]
 }
