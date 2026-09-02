@@ -5,6 +5,7 @@ def _evidence() -> dict:
     run_id = "qwen-1.5b-128k-20260902"
     quality = {
         name: {
+            "model_id": "org/qwen-1.5b",
             "qcc_score": 98.5,
             "full_kv_score": 99.0,
             "matched_full_kv": True,
@@ -26,6 +27,7 @@ def _evidence() -> dict:
         },
         "quality": quality,
         "vllm_latency": {
+            "model_id": "org/qwen-1.5b",
             "context_tokens": 128_000,
             "tpot_speedup": 5.1,
             "throughput_speedup": 2.1,
@@ -38,6 +40,7 @@ def _evidence() -> dict:
             "run_id": run_id,
         },
         "memory": {
+            "model_id": "org/qwen-1.5b",
             "full_kv_peak_bytes": 1000,
             "qcc_peak_bytes": 180,
             "full_kv_concurrency": 1,
@@ -50,6 +53,7 @@ def _evidence() -> dict:
             "run_id": run_id,
         },
         "calibration": {
+            "model_id": "org/qwen-1.5b",
             "trainable_parameter_fraction": 0.01,
             "hf_zero_code_changes": True,
             "vllm_zero_code_changes": True,

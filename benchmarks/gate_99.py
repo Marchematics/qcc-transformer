@@ -61,6 +61,16 @@ def _matched(section: Any, name: str, failures: list[str]) -> None:
     _require(section.get("qcc_only") is False, f"{name} is QCC-only", failures)
 
 
+def _same_model(section: Any, name: str, model_id: Any, failures: list[str]) -> None:
+    if not isinstance(section, dict):
+        return
+    _require(
+        isinstance(section.get("model_id"), str) and section.get("model_id") == model_id,
+        f"{name}.model_id does not match model.model_id",
+        failures,
+    )
+
+
 def audit(payload: dict[str, Any]) -> dict[str, Any]:
     """Return a complete gate decision and human-readable failure reasons."""
 
@@ -70,12 +80,13 @@ def audit(payload: dict[str, Any]) -> dict[str, Any]:
 
     run_id = payload.get("run_id")
     model = payload.get("model")
+    model_id = model.get("model_id") if isinstance(model, dict) else None
     _require(isinstance(run_id, str) and bool(run_id), "run_id is required", failures)
     _require(isinstance(model, dict), "model section is missing", failures)
     if isinstance(model, dict):
         _require(model.get("pretrained") is True, "model is not marked pretrained", failures)
         _require(model.get("real_checkpoint") is True, "real_checkpoint evidence is missing", failures)
-        _require(isinstance(model.get("model_id"), str) and bool(model.get("model_id")), "model_id is required", failures)
+        _require(isinstance(model_id, str) and bool(model_id), "model_id is required", failures)
         params = _number(model.get("parameter_count"), "model.parameter_count", failures)
         if params is not None:
             _require(
@@ -91,6 +102,7 @@ def audit(payload: dict[str, Any]) -> dict[str, Any]:
         for benchmark in ("ruler", "longbench", "pg19"):
             section = quality.get(benchmark)
             _matched(section, f"quality.{benchmark}", failures)
+            _same_model(section, f"quality.{benchmark}", model_id, failures)
             if isinstance(section, dict):
                 qcc = _number(section.get("qcc_score"), f"quality.{benchmark}.qcc_score", failures)
                 full = _number(section.get("full_kv_score"), f"quality.{benchmark}.full_kv_score", failures)
@@ -104,6 +116,7 @@ def audit(payload: dict[str, Any]) -> dict[str, Any]:
 
     latency = payload.get("vllm_latency")
     _matched(latency, "vllm_latency", failures)
+    _same_model(latency, "vllm_latency", model_id, failures)
     latency_summary: dict[str, float] = {}
     if isinstance(latency, dict):
         context = _number(latency.get("context_tokens"), "vllm_latency.context_tokens", failures)
@@ -122,6 +135,7 @@ def audit(payload: dict[str, Any]) -> dict[str, Any]:
 
     memory = payload.get("memory")
     _matched(memory, "memory", failures)
+    _same_model(memory, "memory", model_id, failures)
     memory_summary: dict[str, float] = {}
     if isinstance(memory, dict):
         full_peak = _number(memory.get("full_kv_peak_bytes"), "memory.full_kv_peak_bytes", failures)
@@ -155,7 +169,7 @@ def audit(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         "passed": not failures,
         "run_id": run_id,
-        "model_id": model.get("model_id") if isinstance(model, dict) else None,
+        "model_id": model_id,
         "quality_ratios": quality_ratios,
         "latency": latency_summary,
         "memory": memory_summary,
