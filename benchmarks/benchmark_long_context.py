@@ -18,6 +18,7 @@ import argparse
 import sys
 import time
 from pathlib import Path
+from statistics import median
 
 import torch
 
@@ -62,6 +63,8 @@ def run_stream(
     chunk_size: int,
     vocab_size: int,
     device: torch.device,
+    decode_warmup: int = 4,
+    decode_steps: int = 16,
 ) -> tuple[float, float, int]:
     """Prefill a synthetic stream and decode one next token.
 
@@ -71,8 +74,8 @@ def run_stream(
     tokens.
     """
 
-    if length <= 0 or chunk_size <= 0:
-        raise ValueError("length and chunk_size must be positive")
+    if length <= 0 or chunk_size <= 0 or decode_warmup < 0 or decode_steps <= 0:
+        raise ValueError("length/chunk_size/decode_steps must be positive and decode_warmup non-negative")
     model.eval()
     model.reset_cache(batch_size=1)
     remaining = length
@@ -88,11 +91,21 @@ def run_stream(
         torch.cuda.synchronize(device)
     prefill_seconds = time.perf_counter() - start
     next_token = torch.zeros(1, dtype=torch.long, device=device)
-    start = time.perf_counter()
-    model.decode_step(next_token)
+    # The first decode includes allocator/kernel/context warm-up and is not a
+    # steady-state TPOT measurement.  Warm up explicitly, then report the
+    # median of several synchronized one-token calls.
+    for _ in range(decode_warmup):
+        model.decode_step(next_token)
     if device.type == "cuda":
         torch.cuda.synchronize(device)
-    tpot_ms = (time.perf_counter() - start) * 1000.0
+    samples = []
+    for _ in range(decode_steps):
+        start = time.perf_counter()
+        model.decode_step(next_token)
+        if device.type == "cuda":
+            torch.cuda.synchronize(device)
+        samples.append((time.perf_counter() - start) * 1000.0)
+    tpot_ms = float(median(samples))
     return prefill_seconds, tpot_ms, length
 
 
@@ -121,6 +134,8 @@ def main() -> None:
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--run", action="store_true", help="process the full synthetic stream")
     parser.add_argument("--state-only", action="store_true", help="only print storage accounting")
+    parser.add_argument("--decode-warmup", type=int, default=4)
+    parser.add_argument("--decode-steps", type=int, default=16)
     args = parser.parse_args()
     if args.length <= args.window_size:
         raise ValueError("length must exceed window-size")
@@ -134,8 +149,8 @@ def main() -> None:
         d_model=args.d_model,
         num_layers=args.layers,
         num_heads=args.heads,
-        # Reserve one extra position for the post-prefill TPOT probe.
-        max_position_embeddings=args.length + 1,
+        # Reserve positions for all post-prefill warm-up and timing probes.
+        max_position_embeddings=args.length + args.decode_warmup + args.decode_steps,
         window_size=args.window_size,
         num_codes=args.num_codes,
         archive_lexical_landmark=args.archive_lexical_landmark,
@@ -156,7 +171,13 @@ def main() -> None:
     )
     if args.run:
         prefill, tpot, processed = run_stream(
-            model, args.length, args.chunk_size, args.vocab_size, device
+            model,
+            args.length,
+            args.chunk_size,
+            args.vocab_size,
+            device,
+            decode_warmup=args.decode_warmup,
+            decode_steps=args.decode_steps,
         )
         print(
             f"processed_tokens={processed} prefill_seconds={prefill:.6f} "
