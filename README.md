@@ -20,6 +20,43 @@ source .venv/bin/activate
 pip install -e '.[dev]'
 ```
 
+### Real-model retrofit (experimental)
+
+Load a compatible Hugging Face decoder first, then opt in to bounded QCC
+attention.  The current adapter accepts Llama/Qwen-style equal-head MHA
+modules exposing `q_proj`, `k_proj`, `v_proj`, and `o_proj`:
+
+```python
+from transformers import AutoModelForCausalLM
+from qcc_transformer import patch_hf_model
+
+model = AutoModelForCausalLM.from_pretrained("<model-id>")
+patched = patch_hf_model(model, window_size=128, num_codes=64)
+print("patched layers:", patched)
+```
+
+Install the optional dependency with `pip install -e '.[hf]'`.  GQA/MQA
+models are rejected until an explicit KV-head policy is supplied; silently
+replicating heads would invalidate a 99% Full-KV quality gate.  The adapter
+must be calibrated or fine-tuned and evaluated against the unpatched model on
+the same real RULER/LongBench records.  It does not expose exact historical
+attention weights.
+
+The adapter was smoke-tested on the real Hugging Face checkpoint
+`hf-internal-testing/tiny-random-LlamaForCausalLM`: both decoder layers were
+patched and `generate()` completed. On a 21-token prompt with a 4-token local
+window, uncalibrated QCC reached mean logit cosine `0.99735` but only `76.19%`
+top-1 agreement, so the 99% fidelity gate failed as expected. The raw record
+is `artifacts/hf/tiny_llama_retrofit_smoke.json`; calibration/fine-tuning and
+task-level RULER/LongBench evaluation remain required for real-model claims.
+
+For a vLLM custom attention backend, use the dependency-free
+`QCCVLLMState.forward(query, key, value)` primitive from
+`qcc_transformer.vllm` inside the backend's scheduler-managed per-sequence
+state.  This avoids pinning an unstable vLLM ABI while making the cache state
+and shape contract explicit; an upstream vLLM integration still requires a
+version-specific backend registration and matched quality benchmark.
+
 ## Run tests
 
 ```bash

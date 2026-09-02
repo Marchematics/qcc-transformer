@@ -1065,10 +1065,23 @@ class QCCSelfAttention(nn.Module):
                 (self.q_proj.weight, self.k_proj.weight, self.v_proj.weight, self.gate.weight),
                 dim=0,
             )
-            bias = torch.cat(
-                (self.q_proj.bias, self.k_proj.bias, self.v_proj.bias, self.gate.bias),
-                dim=0,
-            )
+            # Hugging Face Llama/Qwen checkpoints commonly disable projection
+            # biases, while the reference QCC gate keeps one.  Materialize
+            # zeros for bias-less projections so the fused retrofit path
+            # remains compatible without changing the loaded weights.
+            bias_parts = []
+            for projection in (self.q_proj, self.k_proj, self.v_proj, self.gate):
+                if projection.bias is None:
+                    bias_parts.append(
+                        torch.zeros(
+                            projection.out_features,
+                            device=projection.weight.device,
+                            dtype=projection.weight.dtype,
+                        )
+                    )
+                else:
+                    bias_parts.append(projection.bias)
+            bias = torch.cat(tuple(bias_parts), dim=0)
             if use_cache:
                 self._fused_projection_weight = weight
                 self._fused_projection_bias = bias

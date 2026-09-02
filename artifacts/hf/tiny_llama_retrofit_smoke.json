@@ -1,0 +1,17 @@
+{
+  "model": "hf-internal-testing/tiny-random-LlamaForCausalLM",
+  "model_revision": "local snapshot used for smoke test",
+  "tokens": 21,
+  "window_size": 4,
+  "num_codes": 8,
+  "patched_layers": [
+    "model.layers.0.self_attn",
+    "model.layers.1.self_attn"
+  ],
+  "mean_logit_cosine": 0.9973472356796265,
+  "top1_agreement": 0.761904776096344,
+  "quality_gate": 0.99,
+  "fidelity_passed": false,
+  "generation_smoke": "passed",
+  "note": "Real HF retrofit API smoke test only. The uncalibrated archive changes outputs once the bounded window is exceeded; no RULER/LongBench quality claim is made."
+}
