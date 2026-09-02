@@ -247,6 +247,21 @@ remains unmet.  The extra landmark state is still constant in sequence length;
 with the default 16 codes and 32-dimensional heads it adds only 2,304 fp32
 state elements per batch/layer.
 
+### 1M-token T4 latency/state snapshot
+
+An end-to-end QCC-only stream on a Google Colab Tesla T4 processed one million
+tokens with `d_model=64`, eight heads, 32 archive codes, and a 16-token local
+window.  Prefill took `11.5038 s`; after kernel warm-up, one-token decode TPOT
+was `1.9816 ms` median (`1.9995 ms` mean).  The recurrent/archive state was
+`54,272 B`, or `0.0212%` of the hypothetical 1M-token fp16 full-KV cache
+(`256,000,000 B`, a `4,721.5×` storage reduction).  The first decode token
+(`884.97 ms`) includes one-time kernel/warm-up overhead and is not representative
+of steady-state TPOT.  This is a QCC-only latency and storage measurement: no
+1M full-KV T4 baseline was attempted, so it does **not** establish a speedup
+factor.  Synthetic retrieval at the 1M tail and RULER/pretrained-LM quality
+remain open gates.  Raw values are in
+[`artifacts/colab_gpu/prefix_1m_latency_state.json`](artifacts/colab_gpu/prefix_1m_latency_state.json).
+
 For million-token serving, the default `position_encoding="sinusoidal"` is
 stateless: configuring `max_position_embeddings=4_000_000` does not allocate a
 four-million-row learned position table. `archive_scan_block_size` controls the
