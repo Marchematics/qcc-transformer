@@ -88,6 +88,7 @@ class QCCArchive(nn.Module):
         persistent_landmark: bool = False,
         prefix_landmark: bool = False,
         prefix_pair_landmark: bool = False,
+        landmark_temperature: float = 1.0,
     ) -> None:
         super().__init__()
         if num_heads <= 0 or head_dim <= 0 or num_codes <= 0:
@@ -130,10 +131,13 @@ class QCCArchive(nn.Module):
         self.persistent_landmark = persistent_landmark
         self.prefix_landmark = prefix_landmark
         self.prefix_pair_landmark = prefix_pair_landmark
+        self.landmark_temperature = landmark_temperature
         if prefix_landmark and not persistent_landmark:
             raise ValueError("prefix_landmark requires persistent_landmark")
         if prefix_pair_landmark and not prefix_landmark:
             raise ValueError("prefix_pair_landmark requires prefix_landmark")
+        if not math.isfinite(landmark_temperature) or landmark_temperature <= 0:
+            raise ValueError("landmark_temperature must be positive and finite")
         if persistent_landmark:
             self.landmark_mix_logits = nn.Parameter(torch.zeros(num_heads))
         self.register_buffer("decay_rates", rates, persistent=True)
@@ -331,12 +335,12 @@ class QCCArchive(nn.Module):
         if query.ndim == 3:
             routing_logits = torch.einsum(
                 "bhd,bhmd->bhm", query.to(self._landmark_key.dtype), self._landmark_key
-            ) / math.sqrt(self.head_dim)
+            ) / math.sqrt(self.head_dim) * self.landmark_temperature
             routing_equation = "bhm,bhmd->bhd"
         elif query.ndim == 4:
             routing_logits = torch.einsum(
                 "bhed,bhmd->bhem", query.to(self._landmark_key.dtype), self._landmark_key
-            ) / math.sqrt(self.head_dim)
+            ) / math.sqrt(self.head_dim) * self.landmark_temperature
             routing_equation = "bhem,bhemd->bhed"
         else:
             raise ValueError("query must have shape [batch, heads, dim] or [batch, heads, time, dim]")
@@ -921,6 +925,7 @@ class QCCSelfAttention(nn.Module):
         archive_persistent_landmark: bool = False,
         archive_prefix_landmark: bool = False,
         archive_prefix_pair_landmark: bool = False,
+        archive_landmark_temperature: float = 1.0,
         rope_theta: Optional[float] = None,
         max_position_embeddings: int = 4096,
         decay_rates: Optional[tuple[float, ...]] = None,
@@ -985,6 +990,7 @@ class QCCSelfAttention(nn.Module):
             persistent_landmark=archive_persistent_landmark,
             prefix_landmark=archive_prefix_landmark,
             prefix_pair_landmark=archive_prefix_pair_landmark,
+            landmark_temperature=archive_landmark_temperature,
         )
         self.archive_read_stride = archive_read_stride
         # Optional adaptive remote-read suppression. ``None`` keeps exact
@@ -1944,6 +1950,7 @@ class QCCForCausalLM(nn.Module):
         archive_persistent_landmark: bool = False,
         archive_prefix_landmark: bool = False,
         archive_prefix_pair_landmark: bool = False,
+        archive_landmark_temperature: float = 1.0,
         archive_decay_rates: Optional[tuple[float, ...]] = None,
     ) -> None:
         super().__init__()
@@ -1984,6 +1991,7 @@ class QCCForCausalLM(nn.Module):
                 archive_persistent_landmark=archive_persistent_landmark,
                 archive_prefix_landmark=archive_prefix_landmark,
                 archive_prefix_pair_landmark=archive_prefix_pair_landmark,
+                archive_landmark_temperature=archive_landmark_temperature,
                 rope_theta=rope_theta if position_encoding == "rope" else None,
                 max_position_embeddings=max_position_embeddings,
                 decay_rates=archive_decay_rates,

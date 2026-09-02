@@ -177,6 +177,7 @@ def main() -> None:
     parser.add_argument("--archive-persistent-landmark", action="store_true")
     parser.add_argument("--archive-prefix-landmark", action="store_true")
     parser.add_argument("--archive-prefix-pair-landmark", action="store_true")
+    parser.add_argument("--archive-landmark-temperature", type=float, default=1.0)
     parser.add_argument(
         "--position-encoding",
         choices=("sinusoidal", "learned", "rope", "none"),
@@ -211,6 +212,7 @@ def main() -> None:
         archive_persistent_landmark=args.archive_persistent_landmark,
         archive_prefix_landmark=args.archive_prefix_landmark,
         archive_prefix_pair_landmark=args.archive_prefix_pair_landmark,
+        archive_landmark_temperature=args.archive_landmark_temperature,
     ).to(device)
     state_dict = _load_checkpoint(args.checkpoint)
     model.load_state_dict(state_dict, strict=True)
