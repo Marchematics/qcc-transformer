@@ -37,12 +37,33 @@ class _Model(nn.Module):
         self.attn = _Attention(kv_heads=kv_heads)
 
 
+class _TwoLayerModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.config = SimpleNamespace(
+            max_position_embeddings=64,
+            rope_theta=None,
+            num_attention_heads=4,
+            num_key_value_heads=4,
+        )
+        self.layers = nn.ModuleList([_Attention(), _Attention()])
+
+
 def test_patch_hf_reads_transformers5_rope_parameters():
     model = _Model()
     model.config.rope_theta = None
     model.config.rope_parameters = {"rope_theta": 1_000_000.0}
     patch_hf_model(model, window_size=4, num_codes=4, use_triton=False)
     assert model.attn.qcc.rope_theta == 1_000_000.0
+
+
+def test_patch_hf_assigns_stable_layer_indices():
+    model = _TwoLayerModel()
+    assert patch_hf_model(model, window_size=4, num_codes=4, use_triton=False) == [
+        "layers.0",
+        "layers.1",
+    ]
+    assert [layer.qcc._qcc_layer_index for layer in model.layers] == [0, 1]
 
 
 def test_patch_hf_attention_preserves_prefill_and_decode_shapes():

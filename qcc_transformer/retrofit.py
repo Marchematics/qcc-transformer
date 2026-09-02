@@ -371,7 +371,7 @@ def patch_hf_model(
             "no compatible HF attention modules found (expected q_proj/k_proj/v_proj/o_proj)"
         )
     replaced: list[str] = []
-    for name, module in candidates:
+    for layer_index, (name, module) in enumerate(candidates):
         if getattr(module, "_qcc_retrofit", False) or getattr(module, "_qcc_retrofit_original", False):
             continue
         q_heads = int(
@@ -402,6 +402,8 @@ def patch_hf_model(
             kv_head_policy=kv_head_policy,
             kv_heads=kv_heads,
         )
+        # Track layer index for selective calibration
+        wrapper.qcc._qcc_layer_index = layer_index
         # The original module remains registered below the wrapper so its
         # projection parameters are shared.  Mark it to make patching
         # idempotent instead of recursively wrapping ``base_attention``.

@@ -115,7 +115,12 @@ def main() -> None:
             trainable.append(parameter)
     if not trainable:
         raise RuntimeError("no QCC parameters found after patching")
+    # The wrapper itself and its nested modules are both visited by
+    # ``Module.modules()`` in some HF architectures.  Optimizers reject
+    # duplicate parameters (and would otherwise apply an update twice), so
+    # canonicalize the parameter list before constructing AdamW.
     unique_trainable = {id(parameter): parameter for parameter in trainable}
+    trainable = list(unique_trainable.values())
     parameter_count = sum(parameter.numel() for parameter in patched.parameters())
     trainable_parameter_count = sum(parameter.numel() for parameter in unique_trainable.values())
     trainable_parameter_fraction = trainable_parameter_count / max(parameter_count, 1)

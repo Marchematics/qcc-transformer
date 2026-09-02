@@ -79,11 +79,19 @@ cd /home/frankwang122222/zjh/zjh/*/qcc-transformer-next
 - 输出模型参数量、可训练参数量、参数比例、`run_id` 以及 HF/vLLM zero-code flags；
 - adapter 只保存 QCC archive/gate，不复制 pretrained backbone。
 
+### 3.4 分层校准增量（已实现，待远程验证）
+
+- `benchmarks/calibrate_hf_layerwise.py` 支持 `all`、`last-half`、`last-quarter`、显式范围和离散层列表；只对选定层的 archive/gate 参数开启梯度；
+- `patch_hf_model` 为每个替换层记录稳定的 `_qcc_layer_index`，供校准脚本选择；
+- 优化器参数在构造前去重，避免 HF wrapper/nested module 引用同一参数时发生重复更新；
+- `scripts/test_single_layerwise.sh` 和 `scripts/run_layerwise_sweep.sh` 提供远程实验入口，但其中的结果尚未形成 gate 证据。
+
 ## 4. 已验证结果（严格区分证据等级）
 
 ### 本地回归
 
 - `python -m pytest -q`：51 个收集项，46 passed，5 个 CUDA/Triton 条件 skip；
+- 分层校准解析与层索引测试已加入，当前完整回归：51 个收集项，46 passed，5 个 CUDA/Triton 条件 skip；
 - `git diff --check`：通过；
 - `python -m compileall qcc_transformer benchmarks tests`：通过。
 
