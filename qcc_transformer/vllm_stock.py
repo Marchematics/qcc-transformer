@@ -1,7 +1,7 @@
 """Packed-state contract for a stock vLLM v1 QCC backend.
 
 The production target is one scheduler-owned physical cache block per logical request
-and attention layer.  This module is deliberately free of a vLLM import so byte
+and attention layer. This module is deliberately free of a vLLM import so byte
 accounting, alignment and raw typed views are testable on CPU and remain stable even
 when vLLM's Python ABI moves.
 
@@ -13,10 +13,14 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 import json
 import math
+import os
 from typing import Any
 
 import torch
 from torch import Tensor
+
+STOCK_CONFIG_ENV = "QCC_STOCK_VLLM_CONFIG"
+STOCK_ADAPTER_ENV = "QCC_STOCK_VLLM_ADAPTER"
 
 
 @dataclass(frozen=True)
@@ -34,7 +38,7 @@ class PackedStateSegment:
 
 @dataclass(frozen=True)
 class QCCStockVLLMConfig:
-    """Geometry of one QCC attention layer's per-request state."""
+    """Geometry and deployment policy of one QCC attention layer."""
 
     num_heads: int
     head_dim: int
@@ -43,8 +47,14 @@ class QCCStockVLLMConfig:
     num_scales: int = 4
     exact_num_sets: int = 32
     exact_ways: int = 4
+    max_position_embeddings: int = 1_000_000
     local_element_bytes: int = 2
     alignment: int = 16
+    archive_mix: float = 0.125
+    exact_confidence_threshold: float = 0.60
+    exact_confidence_temperature: float = 20.0
+    max_inserts_per_chunk: int = 8
+    admission_threshold: float = 0.0
 
     def __post_init__(self) -> None:
         positive = (
@@ -55,15 +65,26 @@ class QCCStockVLLMConfig:
             self.num_scales,
             self.exact_num_sets,
             self.exact_ways,
+            self.max_position_embeddings,
             self.local_element_bytes,
             self.alignment,
+            self.exact_confidence_temperature,
+            self.max_inserts_per_chunk,
         )
         if any(value <= 0 for value in positive):
-            raise ValueError("all QCC stock-vLLM geometry values must be positive")
+            raise ValueError("all positive QCC stock-vLLM values must be > 0")
+        if self.max_position_embeddings < self.window_size:
+            raise ValueError("max_position_embeddings must cover the local window")
         if self.local_element_bytes not in (1, 2, 4):
             raise ValueError("local_element_bytes must be 1, 2, or 4")
         if self.alignment & (self.alignment - 1):
             raise ValueError("alignment must be a power of two")
+        if not 0.0 <= self.archive_mix <= 1.0:
+            raise ValueError("archive_mix must lie in [0, 1]")
+        if not -1.0 <= self.exact_confidence_threshold <= 1.0:
+            raise ValueError("exact_confidence_threshold must lie in [-1, 1]")
+        if not math.isfinite(self.admission_threshold):
+            raise ValueError("admission_threshold must be finite")
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), sort_keys=True)
@@ -75,12 +96,49 @@ class QCCStockVLLMConfig:
             raise ValueError("packed-state config JSON must contain an object")
         return cls(**payload)
 
+    def decay_rates(self) -> tuple[float, ...]:
+        """Match the HF QCC logarithmic half-life schedule."""
+
+        horizons = torch.logspace(
+            math.log10(max(1.0, float(self.window_size))),
+            math.log10(
+                max(float(self.window_size), float(self.max_position_embeddings))
+            ),
+            self.num_scales,
+        )
+        return tuple(torch.exp(-math.log(2.0) / horizons).tolist())
+
+
+def stock_config_from_env() -> QCCStockVLLMConfig:
+    """Load the exact deployment geometry inherited by vLLM worker processes."""
+
+    text = os.environ.get(STOCK_CONFIG_ENV)
+    if not text:
+        raise RuntimeError(
+            f"{STOCK_CONFIG_ENV} is required for stock vLLM QCC; "
+            "use configure_stock_vllm_environment() before engine startup"
+        )
+    return QCCStockVLLMConfig.from_json(text)
+
+
+def configure_stock_vllm_environment(
+    config: QCCStockVLLMConfig,
+    *,
+    adapter_path: str,
+) -> None:
+    """Set worker-inherited configuration without touching application model code."""
+
+    if not adapter_path:
+        raise ValueError("adapter_path is required")
+    os.environ[STOCK_CONFIG_ENV] = config.to_json()
+    os.environ[STOCK_ADAPTER_ENV] = adapter_path
+
 
 class QCCPackedStateLayout:
     """Byte-exact packed layout for one layer/request state page.
 
     Recurrent statistics and exact landmarks use fp32 accumulation to preserve the
-    numerical policy of the existing HF/Triton path.  Logical counters use int64.
+    numerical policy of the existing HF/Triton path. Logical counters use int64.
     The local exact ring uses the configured cache element width (normally bf16/fp16).
     """
 
@@ -95,8 +153,7 @@ class QCCPackedStateLayout:
         def add(name: str, shape: tuple[int, ...], dtype: str, itemsize: int) -> None:
             nonlocal offset
             offset = align(offset)
-            count = math.prod(shape)
-            size = count * itemsize
+            size = math.prod(shape) * itemsize
             self._segments.append(
                 PackedStateSegment(name, offset, size, dtype, shape)
             )
@@ -118,8 +175,6 @@ class QCCPackedStateLayout:
         add("exact_values", (h, sets, ways, d), "float32", 4)
         add("exact_scores", (h, sets, ways), "float32", 4)
         add("exact_ages", (h, sets, ways), "int64", 8)
-        # Ring/archive scalar counters are part of request state and must not live in
-        # a Python-side registry in production.
         add("counters", (4,), "int64", 8)  # ring_start, ring_length, seen, step
         self.total_bytes = align(offset)
 
@@ -189,12 +244,7 @@ def typed_segment_view(
     layout: QCCPackedStateLayout,
     name: str,
 ) -> Tensor:
-    """Return a typed mutable view into one raw scheduler-owned page.
-
-    ``page`` may use any vLLM cache dtype. Its underlying bytes are reinterpreted, not
-    numerically converted. The caller must supply a single physical page whose byte
-    capacity is at least ``layout.total_bytes``.
-    """
+    """Return a typed mutable view into one raw scheduler-owned page."""
 
     if not page.is_contiguous():
         raise ValueError("packed QCC page must be contiguous")
@@ -232,10 +282,14 @@ def validate_layout(layout: QCCPackedStateLayout) -> None:
 
 
 def validate_stock_vllm_api() -> dict[str, str]:
-    """Validate the vLLM v1 ABI features QCC requires, imported lazily."""
+    """Validate the exact vLLM v1 ABI features QCC requires, imported lazily."""
 
     try:
-        from vllm.v1.attention.backend import AttentionBackend, AttentionImpl
+        from vllm.v1.attention.backend import (
+            AttentionBackend,
+            AttentionImpl,
+            CommonAttentionMetadata,
+        )
         from vllm.v1.kv_cache_interface import CircularBufferSpec, AttentionSpec
         from vllm.v1.attention.backends.registry import (
             AttentionBackendEnum,
@@ -245,18 +299,24 @@ def validate_stock_vllm_api() -> dict[str, str]:
         raise RuntimeError(
             "stock vLLM v1 integration requires qcc-transformer[vllm]"
         ) from exc
-    required = {
-        "AttentionBackend.customize_spec": getattr(AttentionBackend, "customize_spec", None),
-        "AttentionImpl.forward": getattr(AttentionImpl, "forward", None),
-        "CircularBufferSpec": CircularBufferSpec,
-        "AttentionSpec.state_content_bytes": getattr(AttentionSpec, "state_content_bytes", None),
-        "AttentionBackendEnum.CUSTOM": getattr(AttentionBackendEnum, "CUSTOM", None),
-        "register_backend": register_backend,
+    checks = {
+        "AttentionBackend.customize_spec": hasattr(AttentionBackend, "customize_spec"),
+        "AttentionImpl.forward": hasattr(AttentionImpl, "forward"),
+        "CircularBufferSpec.max_num_blocks_per_req": hasattr(
+            CircularBufferSpec, "max_num_blocks_per_req"
+        ),
+        "AttentionSpec.state_content_bytes": "state_content_bytes"
+        in getattr(AttentionSpec, "__dataclass_fields__", {}),
+        "CommonAttentionMetadata.token_to_req_indices": hasattr(
+            CommonAttentionMetadata, "token_to_req_indices"
+        ),
+        "AttentionBackendEnum.CUSTOM": hasattr(AttentionBackendEnum, "CUSTOM"),
+        "register_backend": callable(register_backend),
     }
-    missing = [name for name, value in required.items() if value is None]
+    missing = [name for name, present in checks.items() if not present]
     if missing:
         raise RuntimeError("unsupported vLLM v1 ABI; missing: " + ", ".join(missing))
-    return {name: getattr(value, "__name__", type(value).__name__) for name, value in required.items()}
+    return {name: "ok" for name in checks}
 
 
 def register_stock_vllm_backend() -> object:
@@ -279,7 +339,11 @@ __all__ = [
     "PackedStateSegment",
     "QCCPackedStateLayout",
     "QCCStockVLLMConfig",
+    "STOCK_ADAPTER_ENV",
+    "STOCK_CONFIG_ENV",
+    "configure_stock_vllm_environment",
     "register_stock_vllm_backend",
+    "stock_config_from_env",
     "typed_segment_view",
     "validate_layout",
     "validate_stock_vllm_api",
