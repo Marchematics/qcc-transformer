@@ -1004,6 +1004,30 @@ class QCCSelfAttention(nn.Module):
         self._archive_read_cache: Optional[Tensor] = None
         self._archive_query_cache: Optional[Tensor] = None
 
+    def _project_qkv_gate(self, hidden: Tensor) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+        """Project Q/K/V and the mixing gate with one GEMM.
+
+        The public/state-dict surface deliberately keeps the four historical
+        ``Linear`` modules, so existing checkpoints remain loadable.  At
+        inference/training time their weights are concatenated into one linear
+        operation; on small per-token decode this removes three launch and
+        dispatcher round trips that otherwise dominate the bounded-memory
+        archive work.
+        """
+        weight = torch.cat(
+            (self.q_proj.weight, self.k_proj.weight, self.v_proj.weight, self.gate.weight),
+            dim=0,
+        )
+        bias = torch.cat(
+            (self.q_proj.bias, self.k_proj.bias, self.v_proj.bias, self.gate.bias),
+            dim=0,
+        )
+        projected = F.linear(hidden, weight, bias)
+        q, k, v, gate = projected.split(
+            (self.d_model, self.d_model, self.d_model, self.num_heads), dim=-1
+        )
+        return q, k, v, gate
+
     def _apply_rope(
         self, query: Tensor, key: Tensor, positions: Optional[Tensor]
     ) -> tuple[Tensor, Tensor]:
@@ -1179,9 +1203,10 @@ class QCCSelfAttention(nn.Module):
             or self.archive._numerator.device != hidden.device
         ):
             self.reset_cache(bsz, device=hidden.device)
-        q = self._split_heads(self.q_proj(hidden[:, None]))[:, :, 0]
-        key = self._split_heads(self.k_proj(hidden[:, None]))[:, :, 0]
-        value = self._split_heads(self.v_proj(hidden[:, None]))[:, :, 0]
+        q_proj, k_proj, v_proj, gate_proj = self._project_qkv_gate(hidden[:, None])
+        q = self._split_heads(q_proj)[:, :, 0]
+        key = self._split_heads(k_proj)[:, :, 0]
+        value = self._split_heads(v_proj)[:, :, 0]
         if position_ids is None:
             position_ids = torch.full(
                 (bsz,), self._seen_tokens, device=hidden.device, dtype=torch.long
@@ -1276,9 +1301,9 @@ class QCCSelfAttention(nn.Module):
             assert self._archive_read_cache is not None
             archive_out = self._archive_read_cache
             gate = (
-                torch.zeros_like(self.gate(hidden)).unsqueeze(-1)
+                torch.zeros_like(gate_proj[:, 0]).unsqueeze(-1)
                 if self.archive.prefix_landmark
-                else torch.sigmoid(self.gate(hidden)).unsqueeze(-1)
+                else torch.sigmoid(gate_proj[:, 0]).unsqueeze(-1)
             )
             head_out = gate * local_out + (1.0 - gate) * archive_out
         else:
@@ -1312,9 +1337,10 @@ class QCCSelfAttention(nn.Module):
             or self.archive._numerator.device != hidden.device
         ):
             self.reset_cache(bsz, device=hidden.device)
-        q = self._split_heads(self.q_proj(hidden))
-        k = self._split_heads(self.k_proj(hidden))
-        v = self._split_heads(self.v_proj(hidden))
+        q_proj, k_proj, v_proj, gate_proj = self._project_qkv_gate(hidden)
+        q = self._split_heads(q_proj)
+        k = self._split_heads(k_proj)
+        v = self._split_heads(v_proj)
         if position_ids is None:
             position_ids = self._seen_tokens + torch.arange(
                 length, device=hidden.device, dtype=torch.long
@@ -1395,9 +1421,9 @@ class QCCSelfAttention(nn.Module):
                     output=archive_out[:, :, event_start:],
                 )
             gate = (
-                torch.zeros_like(self.gate(hidden)).transpose(1, 2).unsqueeze(-1)
+                torch.zeros_like(gate_proj).transpose(1, 2).unsqueeze(-1)
                 if self.archive.prefix_landmark
-                else torch.sigmoid(self.gate(hidden)).transpose(1, 2).unsqueeze(-1)
+                else torch.sigmoid(gate_proj).transpose(1, 2).unsqueeze(-1)
             )
             mixed_out = gate * local_out + (1.0 - gate) * archive_out
             active = (
@@ -1759,9 +1785,10 @@ class QCCSelfAttention(nn.Module):
         if hidden.ndim != 3 or hidden.shape[-1] != self.d_model:
             raise ValueError("hidden must have shape [batch, sequence, d_model]")
         bsz, length, _ = hidden.shape
-        q = self._split_heads(self.q_proj(hidden))
-        k = self._split_heads(self.k_proj(hidden))
-        v = self._split_heads(self.v_proj(hidden))
+        q_proj, k_proj, v_proj, _ = self._project_qkv_gate(hidden)
+        q = self._split_heads(q_proj)
+        k = self._split_heads(k_proj)
+        v = self._split_heads(v_proj)
         if position_ids is None:
             position_ids = torch.arange(length, device=hidden.device, dtype=torch.long)
         q, k = self._apply_rope(q, k, position_ids)
