@@ -166,6 +166,13 @@ class QCCModernAttentionImpl(AttentionImpl[QCCModernAttentionMetadata]):
             pages = kv_cache
         else:
             raise ValueError("QCC vLLM cache must be a tensor or one-tensor list")
+        # vLLM 0.28 binds MambaSpec pages as [blocks, 1, 1, bytes].  Collapse
+        # only those singleton dimensions so the packed runtime can address
+        # the same storage as [blocks, bytes] without a copy.
+        if pages.ndim == 4 and pages.shape[1:3] == (1, 1):
+            pages = pages[:, 0, 0, :]
+        elif pages.ndim == 3 and pages.shape[1] == 1:
+            pages = pages[:, 0, :]
         if pages.ndim != 2 or not pages.is_contiguous():
             raise ValueError("QCC state pages must be contiguous [blocks, bytes]")
         return pages

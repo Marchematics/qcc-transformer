@@ -35,41 +35,10 @@ from .stock_runtime import PackedHybridReferenceState
 from .vllm_stock import (
     QCCPackedStateLayout,
     STOCK_ADAPTER_ENV,
+    _tensor_parallel_rank,
     stock_config_from_env,
     typed_segment_view,
 )
-
-
-def _tensor_parallel_rank(size: int) -> int:
-    """Return this worker's TP rank without assuming one vLLM env spelling."""
-
-    if size == 1:
-        return 0
-    try:
-        from vllm.distributed import parallel_state
-
-        getter = getattr(parallel_state, "get_tensor_model_parallel_rank", None)
-        if callable(getter):
-            rank = int(getter())
-            if 0 <= rank < size:
-                return rank
-    except (ImportError, RuntimeError, AttributeError, TypeError, ValueError):
-        pass
-    for name in ("QCC_STOCK_VLLM_TP_RANK", "VLLM_TP_RANK"):
-        value = os.environ.get(name)
-        if value is None:
-            continue
-        try:
-            rank = int(value)
-        except ValueError as exc:
-            raise RuntimeError(f"{name} must be an integer") from exc
-        if not 0 <= rank < size:
-            raise RuntimeError(f"{name}={rank} is outside tensor-parallel size {size}")
-        return rank
-    raise RuntimeError(
-        "cannot determine tensor-parallel rank for QCC stock vLLM; "
-        "vLLM parallel state or QCC_STOCK_VLLM_TP_RANK is required"
-    )
 
 
 @dataclass

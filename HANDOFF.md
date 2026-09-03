@@ -214,6 +214,10 @@ python benchmarks/gate_99.py --evidence artifacts/gates/<run_id>.json
   伪造的字符串类型，保留上游默认值以兼容 worker/KV-transfer 路径。
 - `benchmarks/benchmark_hf_latency.py` 的每个 repeat 现在独立复制 decode
   `attention_mask`，避免前一个请求追加的 token 泄漏到后续 TPOT/p95/p99 样本。
+- 现代 vLLM worker 的 `MambaSpec` cache 实际绑定为
+  `[blocks, 1, 1, page_bytes]`；`QCCModernAttentionImpl` 现在零拷贝展平该视图，
+  并将 TP rank helper 放入 `vllm_stock.py` 供新旧 backend 共同复用。此前这两处
+  会分别导致运行时 page shape 拒绝和 modern backend 导入失败。
 - `QCCSelfAttention` 新增可选 `archive_norm_gating`（参数量不变、O(1) 状态），
   按 local/archive 响应范数一致性抑制异常远程读；默认关闭，10 卡 sweep 的
   GPU9 打开该消融。
