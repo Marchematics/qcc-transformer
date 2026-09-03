@@ -157,25 +157,35 @@ def _teacher_examples(
             hidden.shape[1], device=device, dtype=torch.long
         ).view(1, -1)
         rotated_q, rotated_k = qcc._apply_rope(qh, kh, positions)
-        # The deployed hybrid archive defaults to position-invariant addressing.
-        # Generate teacher labels in that same coordinate system; otherwise the
-        # predictor is optimized for rotary phases that the bank never stores.
-        if qcc.archive_position_invariant:
-            q_teacher, k_teacher = qh, kh
-        else:
-            q_teacher, k_teacher = rotated_q, rotated_k
-        salience = sampled_future_attention_salience(
-            q_teacher,
-            k_teacher,
+        # The teacher's actual attention uses rotary Q/K, while the deployed
+        # archive may use raw position-invariant Q/K.  A predictor trained in
+        # only one coordinate system can discard a token that is salient in the
+        # other.  Keep the union by taking the stronger per-position signal.
+        rotary_salience = sampled_future_attention_salience(
+            rotated_q,
+            rotated_k,
             window_size=window_size,
             num_queries=num_teacher_queries,
             topk=teacher_topk,
         )
+        if qcc.archive_position_invariant:
+            raw_salience = sampled_future_attention_salience(
+                qh,
+                kh,
+                window_size=window_size,
+                num_queries=num_teacher_queries,
+                topk=teacher_topk,
+            )
+            salience = torch.maximum(rotary_salience, raw_salience)
+        else:
+            salience = rotary_salience
         labels = salience_binary_labels(
             salience, positive_fraction=positive_fraction, min_positive=1
         )
         examples.append((kh.detach().cpu(), vh.detach().cpu(), labels.cpu()))
-        del hidden, q, k, v, qh, kh, vh, rotated_q, rotated_k, q_teacher, k_teacher, salience, labels
+        del hidden, q, k, v, qh, kh, vh, rotated_q, rotated_k, rotary_salience, salience, labels
+        if qcc.archive_position_invariant:
+            del raw_salience
         if device.type == "cuda":
             torch.cuda.empty_cache()
     return examples

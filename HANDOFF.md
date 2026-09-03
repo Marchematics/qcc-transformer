@@ -81,18 +81,22 @@
 - `scripts/run_layerwise_10gpu.sh` 可将 10 组配置分配到 10 张卡；最近一次 `layerwise10_20260903_021353` 有 9 组完成、1 组（`codes=64`）OOM，最佳 held-out cosine `0.8414`，全部 `held_out_gate_passed=false`。
 - `scripts/run_layerwise_sweep.sh` 与 `scripts/test_single_layerwise.sh` 已切换为终端可直接执行的默认值：项目目录 `/mnt/workspace/qcc-transformer`、模型 `models/phi-4-mini-instruct-ms`，并允许 `PROJECT_DIR`、`MODEL_PATH`、`OUTPUT_DIR`、`RUN_ID` 和 `HF_ENDPOINT` 环境变量覆盖；修复了未设置 `PYTHONPATH` 时在 `set -u` 下退出的问题。该修正已在提交 `10db081` 推送到 `main`。
 
-### 3.5 未校准安全 gate（已实现，待远程验证）
+### 3.5 Admission 标签坐标修正
+
+`benchmarks/calibrate_hf_admission.py` 的 predictor 标签现在同时计算真实教师 RoPE Q/K 与 position-invariant raw Q/K 的未来 salience，并按位置取较强信号。这样 hybrid exact tier 不会因训练坐标与部署坐标不一致而漏掉检索关键 token；该改动只影响校准标签，不增加推理状态或参数。
+
+### 3.6 未校准安全 gate（已实现，待远程验证）
 
 - `QCCSelfAttention` 新增 `gate_bias_init`；HF retrofit 默认值为 `2.0`，让新 adapter 初始更接近 exact local path，避免随机 archive 以 50/50 比例污染 pretrained logits；
 - 传入 `--gate-bias-init 0.0` 可复现旧的 50/50 ablation；校准脚本和 adapter manifest 会记录该值；
 - 该改动只改善初始化稳定性，不等于长程质量或 99 gate 证据。
 
-### 3.6 Phi 远程代码兼容
+### 3.7 Phi 远程代码兼容
 
 - `qcc_transformer.hf_loading.load_hf_causal_lm` 在 `trust_remote_code=True` 时为旧版 Phi3/Phi4 远程代码补充缺失的 `transformers.utils.LossKwargs` 类型别名。
 - 该补丁只影响远程代码导入的类型注解，不改变模型权重或注意力计算；现有校准测试覆盖了该兼容路径。
 
-### 3.7 最新远程诊断
+### 3.8 最新远程诊断
 
 - CPU teacher logits + 分块损失修复后，单卡 3-step smoke 可完成且不 OOM；全层 20-step smoke 也可完成；
 - 10 卡 `layerwise10_20260903_021353`：9/10 配置完成，最佳 held-out cosine `0.8414`，`codes=64` 配置 OOM；所有配置均未通过 `0.99` fidelity gate；
