@@ -123,6 +123,12 @@ def main() -> None:
         points.append(point)
     full_ok = [p["batch_size"] for p in points if p.get("full_kv_within_sla") is True]
     qcc_ok = [p["batch_size"] for p in points if p.get("qcc_within_sla") is True]
+    native_contexts: set[int] = set()
+    for point in points:
+        result = point.get("result")
+        if isinstance(result, dict) and isinstance(result.get("native_context_tokens"), int):
+            native_contexts.add(result["native_context_tokens"])
+    native_context_tokens = native_contexts.pop() if len(native_contexts) == 1 else None
     summary = {
         "model": args.model,
         "model_id": args.model_id or args.model,
@@ -132,6 +138,7 @@ def main() -> None:
         "protocol_locked": args.protocol_locked,
         "qcc_only": False,
         "total_tokens_per_request": args.total_tokens,
+        "native_context_tokens": native_context_tokens,
         "decode_steps": args.decode_steps,
         "sla_seconds": args.sla_seconds,
         "fixed_sla": args.sla_seconds is not None,

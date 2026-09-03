@@ -11,6 +11,7 @@ def _custom(run_id: str, model_id: str) -> dict:
         "synthetic": False,
         "qcc_only": False,
         "run_id": run_id,
+        "native_context_tokens": 131_072,
     }
 
 
@@ -28,6 +29,7 @@ def _evidence() -> dict:
             "synthetic": False,
             "qcc_only": False,
             "run_id": run_id,
+            "native_context_tokens": 131_072,
             "task_ratios": {"task:all": 0.99, "length:128K+": 0.99},
         }
         for name in ("ruler", "longbench", "pg19")

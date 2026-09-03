@@ -13,6 +13,8 @@ import math
 from pathlib import Path
 from typing import Any
 
+MIN_QUALITY_CONTEXT = 128_000
+
 
 def load_json(path: Path) -> dict[str, Any]:
     try:
@@ -51,7 +53,16 @@ def _metadata(report: dict[str, Any], name: str) -> tuple[str, str]:
     return model_id, run_id
 
 
-def _ruler_scores(report: dict[str, Any]) -> tuple[float, float, dict[str, float]]:
+def _native_context(report: dict[str, Any], name: str) -> int:
+    value = report.get("native_context_tokens")
+    if isinstance(value, bool) or not isinstance(value, int) or value < MIN_QUALITY_CONTEXT:
+        raise ValueError(
+            f"{name}.native_context_tokens must be an integer >= {MIN_QUALITY_CONTEXT}"
+        )
+    return value
+
+
+def _ruler_scores(report: dict[str, Any]) -> tuple[float, float, dict[str, float], int]:
     if report.get("benchmark") != "ruler":
         raise ValueError("RULER report has the wrong benchmark name")
     qcc = report.get("qcc_score")
@@ -67,12 +78,17 @@ def _ruler_scores(report: dict[str, Any]) -> tuple[float, float, dict[str, float
         str(key): _finite(value, f"ruler.task_ratios.{key}")
         for key, value in raw_ratios.items()
     }
-    return _finite(qcc, "ruler.qcc_score"), _finite(full, "ruler.full_kv_score"), task_ratios
+    return (
+        _finite(qcc, "ruler.qcc_score"),
+        _finite(full, "ruler.full_kv_score"),
+        task_ratios,
+        _native_context(report, "ruler"),
+    )
 
 
 def _paired_scores(
     full: dict[str, Any], qcc: dict[str, Any], benchmark: str
-) -> tuple[float, float, dict[str, float]]:
+) -> tuple[float, float, dict[str, float], int]:
     full_model, full_run = _metadata(full, f"{benchmark}.full_kv")
     qcc_model, qcc_run = _metadata(qcc, f"{benchmark}.qcc")
     if (full_model, full_run) != (qcc_model, qcc_run):
@@ -100,10 +116,13 @@ def _paired_scores(
             if task_full <= 0:
                 raise ValueError(f"{benchmark}.{task} Full-KV score must be positive")
             task_ratios[task] = task_qcc / task_full
-    for field in ("split", "native_context_tokens"):
-        if full.get(field) != qcc.get(field):
-            raise ValueError(f"{benchmark} reports disagree on {field}")
-    return qcc_score, full_score, task_ratios
+    full_context = _native_context(full, f"{benchmark}.full_kv")
+    qcc_context = _native_context(qcc, f"{benchmark}.qcc")
+    if full_context != qcc_context:
+        raise ValueError(f"{benchmark} reports disagree on native_context_tokens")
+    if full.get("split") != qcc.get("split"):
+        raise ValueError(f"{benchmark} reports disagree on split")
+    return qcc_score, full_score, task_ratios, full_context
 
 
 def assemble_quality(
@@ -114,11 +133,11 @@ def assemble_quality(
     pg19_qcc: dict[str, Any],
 ) -> dict[str, Any]:
     ruler_model, ruler_run = _metadata(ruler, "ruler")
-    ruler_qcc, ruler_full, ruler_tasks = _ruler_scores(ruler)
-    longbench_qcc_score, longbench_full_score, longbench_tasks = _paired_scores(
+    ruler_qcc, ruler_full, ruler_tasks, ruler_context = _ruler_scores(ruler)
+    longbench_qcc_score, longbench_full_score, longbench_tasks, longbench_context = _paired_scores(
         longbench_full, longbench_qcc, "longbench"
     )
-    pg19_qcc_score, pg19_full_score, pg19_tasks = _paired_scores(
+    pg19_qcc_score, pg19_full_score, pg19_tasks, pg19_context = _paired_scores(
         pg19_full, pg19_qcc, "pg19"
     )
     for report, name in (
@@ -128,6 +147,8 @@ def assemble_quality(
         model_id, run_id = _metadata(report, name)
         if (model_id, run_id) != (ruler_model, ruler_run):
             raise ValueError(f"{name} provenance does not match ruler")
+    if len({ruler_context, longbench_context, pg19_context}) != 1:
+        raise ValueError("RULER, LongBench and PG-19 native contexts do not match")
 
     common = {
         "model_id": ruler_model,
@@ -135,9 +156,12 @@ def assemble_quality(
         "matched_full_kv": True,
         "real_model": True,
         "official": True,
+        "full_suite": True,
         "synthetic": False,
         "qcc_only": False,
+        "native_context_tokens": ruler_context,
     }
+
     def section(benchmark: str, qcc: float, full: float, tasks: dict[str, float]) -> dict[str, Any]:
         if full <= 0:
             raise ValueError(f"{benchmark} Full-KV score must be positive")
@@ -151,9 +175,10 @@ def assemble_quality(
         }
 
     return {
-        "schema": "qcc-quality-comparison-v1",
+        "schema": "qcc-quality-comparison-v2",
         "model_id": ruler_model,
         "run_id": ruler_run,
+        "native_context_tokens": ruler_context,
         "quality": {
             "ruler": section("ruler", ruler_qcc, ruler_full, ruler_tasks),
             "longbench": section("longbench", longbench_qcc_score, longbench_full_score, longbench_tasks),

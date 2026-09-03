@@ -84,6 +84,13 @@ def compare_reports(memory: dict[str, Any], concurrency: dict[str, Any]) -> dict
         raise ValueError("concurrency report is not measured under a fixed SLA")
     if memory.get("protocol_locked") is not True or concurrency.get("protocol_locked") is not True:
         raise ValueError("memory and concurrency protocols must be locked before execution")
+    native_context = _same(memory, concurrency, "native_context_tokens")
+    if (
+        isinstance(native_context, bool)
+        or not isinstance(native_context, int)
+        or native_context < total_tokens
+    ):
+        raise ValueError("memory evidence requires native context >= requested context")
 
     baseline = _status_ok(memory, "baseline_full_kv")
     qcc = _status_ok(memory, "qcc_retrofit")
@@ -118,6 +125,7 @@ def compare_reports(memory: dict[str, Any], concurrency: dict[str, Any]) -> dict
         "schema": "qcc-memory-comparison-v1",
         **provenance,
         "context_tokens": total_tokens,
+        "native_context_tokens": native_context,
         "full_kv_attention_state_bytes": full_state,
         "qcc_attention_state_bytes": qcc_state,
         "full_kv_concurrency": full_concurrency,

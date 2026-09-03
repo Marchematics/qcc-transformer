@@ -160,6 +160,21 @@ class QCCArchive(nn.Module):
         self.codes = nn.Parameter(torch.randn(num_heads, num_codes, head_dim) / math.sqrt(head_dim))
         self.mix_logits = nn.Parameter(torch.zeros(num_heads, num_codes, self.num_scales))
         self.reset_state(batch_size=1, device=rates.device, dtype=torch.float32)
+        self._triton_mix_cache: Tensor | None = None
+        self._triton_mix_cache_key: tuple[torch.device, int] | None = None
+
+    def _prepared_triton_mix(self, device: torch.device) -> Tensor:
+        """Return cached fp32 scale weights for the current inference parameters."""
+
+        key = (device, int(self.mix_logits._version))
+        if self._triton_mix_cache is not None and self._triton_mix_cache_key == key:
+            return self._triton_mix_cache
+        prepared = F.softmax(
+            self.mix_logits.to(device=device, dtype=torch.float32), dim=-1
+        ).contiguous()
+        self._triton_mix_cache = prepared
+        self._triton_mix_cache_key = key
+        return prepared
 
     def reset_state(
         self,
@@ -764,6 +779,7 @@ class QCCArchive(nn.Module):
                     block_size=self.scan_block_size,
                     output=output,
                     content_threshold=self.content_threshold,
+                    prepared_mix=self._prepared_triton_mix(key.device),
                 )
                 combined = (
                     self._combine_landmark(query, result)
@@ -1027,6 +1043,7 @@ class QCCArchive(nn.Module):
                     self._denominator,
                     self.codes,
                     self.mix_logits,
+                    prepared_mix=self._prepared_triton_mix(query.device),
                 )
                 return self._combine_landmark(query, result)
 
@@ -1439,28 +1456,51 @@ class QCCSelfAttention(nn.Module):
             else:
                 positions = torch.arange(query.shape[0], device=query.device)
         positions = positions.to(device=query.device)
-        inv_freq = self.rope_inv_freq
-        if (
+        has_long_rope = bool(
             self.rope_inv_freq_long.numel()
             and self._rope_original_max_position_embeddings is not None
-            and int(positions.max().item()) + 1 > self._rope_original_max_position_embeddings
-        ):
-            inv_freq = self.rope_inv_freq_long
+        )
         if query.ndim == 4:
             if positions.ndim == 1:
                 positions = positions.unsqueeze(0)
-            angles = positions.to(torch.float32).unsqueeze(-1) * inv_freq
+            position_values = positions.to(torch.float32).unsqueeze(-1)
+            if has_long_rope:
+                short_angles = position_values * self.rope_inv_freq.to(
+                    device=query.device
+                )
+                long_angles = position_values * self.rope_inv_freq_long.to(
+                    device=query.device
+                )
+                use_long = (
+                    positions >= self._rope_original_max_position_embeddings
+                ).unsqueeze(-1)
+                angles = torch.where(use_long, long_angles, short_angles)
+            else:
+                angles = position_values * self.rope_inv_freq.to(device=query.device)
             cos = angles.cos().unsqueeze(1).to(query.dtype)
             sin = angles.sin().unsqueeze(1).to(query.dtype)
         elif query.ndim == 3:
             if positions.ndim == 0:
                 positions = positions.expand(query.shape[0])
-            angles = positions.to(torch.float32).unsqueeze(-1) * inv_freq
+            position_values = positions.to(torch.float32).unsqueeze(-1)
+            if has_long_rope:
+                short_angles = position_values * self.rope_inv_freq.to(
+                    device=query.device
+                )
+                long_angles = position_values * self.rope_inv_freq_long.to(
+                    device=query.device
+                )
+                use_long = (
+                    positions >= self._rope_original_max_position_embeddings
+                ).unsqueeze(-1)
+                angles = torch.where(use_long, long_angles, short_angles)
+            else:
+                angles = position_values * self.rope_inv_freq.to(device=query.device)
             cos = angles.cos().unsqueeze(1).to(query.dtype)
             sin = angles.sin().unsqueeze(1).to(query.dtype)
         else:
             raise ValueError("q/k tensors must have rank 3 or 4")
-        rotary_dim = inv_freq.numel() * 2
+        rotary_dim = self.rope_inv_freq.numel() * 2
 
         # Hugging Face Llama/Qwen checkpoints use the ``rotate_half``
         # convention (the first half of each rotary vector is paired with the

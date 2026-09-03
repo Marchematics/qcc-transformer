@@ -1,3 +1,5 @@
+import pytest
+
 from benchmarks.compare_quality_reports import assemble_quality
 
 
@@ -52,3 +54,8 @@ def test_quality_join_preserves_task_ratios():
     assert result["quality"]["ruler"]["qcc_full_kv_ratio"] == 0.99
     assert result["quality"]["longbench"]["task_ratios"]["qa"] == 0.95
     assert result["quality"]["pg19"]["qcc_full_kv_ratio"] == 0.95
+    assert result["native_context_tokens"] == 131_072
+
+    ruler["native_context_tokens"] = 64_000
+    with pytest.raises(ValueError, match="native_context_tokens"):
+        assemble_quality(ruler, longbench_full, longbench_qcc, pg19_full, pg19_qcc)

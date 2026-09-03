@@ -14,6 +14,7 @@ from typing import Any
 
 MIN_PARAMS = 1_000_000_000
 MAX_PARAMS = 7_000_000_000
+MIN_QUALITY_CONTEXT = 128_000
 QUALITY_RATIO = 0.98
 RETRIEVAL_RATE = 0.99
 TAIL_RATIO = 0.95
@@ -96,10 +97,15 @@ def audit(payload: dict[str, Any]) -> dict[str, Any]:
     quality = payload.get("quality")
     _require(isinstance(quality, dict), "quality section is missing", failures)
     quality_ratios: dict[str, float] = {}
+    quality_contexts: set[int] = set()
     if isinstance(quality, dict):
         for benchmark in ("ruler", "longbench", "pg19"):
             section = quality.get(benchmark)
             if _common(section, f"quality.{benchmark}", model_id=model_id, run_id=run_id, failures=failures, official=True):
+                context = _number(section.get("native_context_tokens"), f"quality.{benchmark}.native_context_tokens", failures)
+                if context is not None:
+                    _require(context >= MIN_QUALITY_CONTEXT, f"quality.{benchmark} native context is below 128K", failures)
+                    quality_contexts.add(int(context))
                 qcc = _number(section.get("qcc_score"), f"quality.{benchmark}.qcc_score", failures)
                 full = _number(section.get("full_kv_score"), f"quality.{benchmark}.full_kv_score", failures)
                 if qcc is not None and full is not None:
@@ -109,25 +115,29 @@ def audit(payload: dict[str, Any]) -> dict[str, Any]:
                         quality_ratios[benchmark] = ratio
                         _require(ratio >= QUALITY_RATIO, f"quality.{benchmark} ratio {ratio:.6f} < {QUALITY_RATIO:.2f}", failures)
                 task_ratios = section.get("task_ratios")
-                if task_ratios is not None:
-                    _require(
-                        isinstance(task_ratios, dict) and bool(task_ratios),
-                        f"quality.{benchmark}.task_ratios is missing",
-                        failures,
-                    )
-                    if isinstance(task_ratios, dict):
-                        for task, value in task_ratios.items():
-                            task_ratio = _number(
-                                value,
-                                f"quality.{benchmark}.task_ratios.{task}",
+                _require(
+                    isinstance(task_ratios, dict) and bool(task_ratios),
+                    f"quality.{benchmark}.task_ratios is missing",
+                    failures,
+                )
+                if isinstance(task_ratios, dict):
+                    for task, value in task_ratios.items():
+                        task_ratio = _number(
+                            value,
+                            f"quality.{benchmark}.task_ratios.{task}",
+                            failures,
+                        )
+                        if task_ratio is not None:
+                            _require(
+                                task_ratio >= TAIL_RATIO,
+                                f"quality.{benchmark} task {task} ratio {task_ratio:.6f} < {TAIL_RATIO:.2f}",
                                 failures,
                             )
-                            if task_ratio is not None:
-                                _require(
-                                    task_ratio >= TAIL_RATIO,
-                                    f"quality.{benchmark} task {task} ratio {task_ratio:.6f} < {TAIL_RATIO:.2f}",
-                                    failures,
-                                )
+        _require(
+            len(quality_contexts) == 1,
+            "quality reports must share one native context",
+            failures,
+        )
     summary["quality_ratios"] = quality_ratios
 
     # 3: 128K stock-vLLM real serving gains.

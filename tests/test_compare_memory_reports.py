@@ -12,6 +12,7 @@ def test_memory_comparison_exports_fixed_sla_metrics():
         "matched": True,
         "protocol_locked": True,
         "total_tokens": 128_000,
+        "native_context_tokens": 131_072,
         "baseline_full_kv": {"status": "ok", "attention_state_bytes": 1000},
         "qcc_retrofit": {"status": "ok", "attention_state_bytes": 180},
     }
@@ -23,6 +24,7 @@ def test_memory_comparison_exports_fixed_sla_metrics():
         "qcc_only": False,
         "protocol_locked": True,
         "total_tokens_per_request": 128_000,
+        "native_context_tokens": 131_072,
         "fixed_sla": True,
         "sla_seconds": 20.0,
         "max_full_kv_batch": 1,

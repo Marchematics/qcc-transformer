@@ -1788,6 +1788,8 @@ def triton_read_archive(
     denominator: torch.Tensor,
     codes: torch.Tensor,
     mix_logits: torch.Tensor,
+    *,
+    prepared_mix: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Fuse routing, scale mixing, and response normalization for one read."""
 
@@ -1797,9 +1799,14 @@ def triton_read_archive(
     numerator = numerator.contiguous()
     denominator = denominator.contiguous()
     codes = codes.to(device=query.device, dtype=torch.float32).contiguous()
-    mix = torch.softmax(
-        mix_logits.to(device=query.device), dim=-1
-    ).to(torch.float32).contiguous()
+    if prepared_mix is None:
+        mix = torch.softmax(
+            mix_logits.to(device=query.device), dim=-1
+        ).to(torch.float32).contiguous()
+    else:
+        if prepared_mix.shape != mix_logits.shape or prepared_mix.device != query.device:
+            raise ValueError("prepared_mix must match mix_logits on the query device")
+        mix = prepared_mix.to(dtype=torch.float32).contiguous()
     batch, heads, dim = query.shape
     _, _, codes_count, scales, _ = numerator.shape
     block_dim = 1 << max(4, (dim - 1).bit_length())
@@ -1981,6 +1988,7 @@ def triton_update_read_archive_chunk(
     block_size: int = 256,
     output: torch.Tensor | None = None,
     content_threshold: float | None = None,
+    prepared_mix: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Fuse dense archive update/read for a block of evicted tokens.
 
@@ -2026,9 +2034,14 @@ def triton_update_read_archive_chunk(
     query = query.contiguous()
     codes = codes.to(device=key.device, dtype=torch.float32).contiguous()
     rates = rates.to(device=key.device, dtype=torch.float32).contiguous()
-    mix = torch.softmax(
-        mix_logits.to(device=key.device), dim=-1
-    ).to(dtype=torch.float32).contiguous()
+    if prepared_mix is None:
+        mix = torch.softmax(
+            mix_logits.to(device=key.device), dim=-1
+        ).to(dtype=torch.float32).contiguous()
+    else:
+        if prepared_mix.shape != mix_logits.shape or prepared_mix.device != key.device:
+            raise ValueError("prepared_mix must match mix_logits on the key device")
+        mix = prepared_mix.to(dtype=torch.float32).contiguous()
     aged_rates = rates.pow(window_size).contiguous()
     block_dim = 1 << max(4, (dim - 1).bit_length())
     block_scales = 1 << max(0, (num_scales - 1).bit_length())
