@@ -10,6 +10,7 @@ def _common(benchmark: str, mode: str) -> dict:
         "real_model": True,
         "synthetic": False,
         "official": True,
+        "full_suite": True,
         "native_context_tokens": 131_072,
     }
 

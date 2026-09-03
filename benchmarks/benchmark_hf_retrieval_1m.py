@@ -34,6 +34,8 @@ _HEADER = (
     "similar. Use the exact entity name in the final query and return only its eight "
     "digit access code. Ignore codes belonging to other entities.\n"
 )
+_MIN_REAL_PARAMS = 1_000_000_000
+_MAX_REAL_PARAMS = 7_000_000_000
 
 
 def load_manifest(path: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
@@ -57,6 +59,8 @@ def load_manifest(path: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         raise ValueError("retrieval manifest must contain multiple needles")
     if header.get("semantic_distractor") is not True or int(header.get("semantic_distractors", 0)) < 1:
         raise ValueError("retrieval manifest must contain semantic distractors")
+    expected_needles = int(header["needles"])
+    expected_distractors = int(header["semantic_distractors"])
     seen_trials: set[int] = set()
     for trial in trials:
         if not isinstance(trial, dict):
@@ -73,8 +77,14 @@ def load_manifest(path: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
             record for record in records
             if isinstance(record, dict) and record.get("kind") == "semantic_distractor"
         ]
-        if len(needles) < 2 or not distractors:
+        if len(needles) != expected_needles or len(distractors) != expected_distractors:
             raise ValueError(f"trial {index} is missing multiple needles or semantic distractors")
+        if trial.get("random_depth") is not True or trial.get("multi_needle") is not True or trial.get("semantic_distractor") is not True:
+            raise ValueError(f"trial {index} is missing required protocol markers")
+        entities = [record.get("entity") for record in records]
+        codes = [record.get("code") for record in records]
+        if len(set(entities)) != len(entities) or len(set(codes)) != len(codes):
+            raise ValueError(f"trial {index} contains duplicate entity or code records")
         target = trial.get("target_entity")
         matches = [record for record in needles if record.get("entity") == target]
         if len(matches) != 1 or matches[0].get("code") != trial.get("expected"):
@@ -89,6 +99,8 @@ def load_manifest(path: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
             depths.append(float(depth))
         if len(set(depths)) < 2:
             raise ValueError(f"trial {index} does not contain varied depths")
+    if seen_trials != set(range(len(trials))):
+        raise ValueError("retrieval manifest trial ids must be the contiguous registered range")
     return header, trials
 
 
@@ -224,6 +236,11 @@ def main() -> None:
             f"model native context {native_context} is below locked {context_tokens}; "
             "use a checkpoint that natively declares the target context"
         )
+    parameter_count = sum(parameter.numel() for parameter in model.parameters())
+    if not _MIN_REAL_PARAMS <= parameter_count <= _MAX_REAL_PARAMS:
+        raise RuntimeError(
+            f"real retrieval requires a 1B..7B pretrained checkpoint; observed {parameter_count} parameters"
+        )
     patched_layers = []
     if args.mode == "qcc":
         patched_layers = load_hybrid_retrofit_adapter(
@@ -316,7 +333,6 @@ def main() -> None:
         name: {**counts, "success_rate": counts["correct"] / counts["trials"]}
         for name, counts in sorted(buckets.items())
     }
-    parameter_count = sum(parameter.numel() for parameter in model.parameters())
     summary = {
         "schema": "qcc-real-retrieval-result-v1",
         "mode": args.mode,

@@ -46,6 +46,8 @@ def _metadata(report: dict[str, Any], name: str) -> tuple[str, str]:
         raise ValueError(f"{name} is marked synthetic or lacks the field")
     if report.get("official") is not True:
         raise ValueError(f"{name} is not marked official")
+    if report.get("full_suite") is not True:
+        raise ValueError(f"{name} is not a complete benchmark suite")
     return model_id, run_id
 
 

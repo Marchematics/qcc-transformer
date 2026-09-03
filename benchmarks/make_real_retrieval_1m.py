@@ -27,6 +27,7 @@ def make_trial(index: int, seed: int, needles: int, distractors: int) -> dict:
     base_number = rng.randrange(1000, 9000)
     records = []
     used_codes: set[str] = set()
+    used_entities: set[str] = set()
 
     def unique_code() -> str:
         while True:
@@ -41,6 +42,7 @@ def make_trial(index: int, seed: int, needles: int, distractors: int) -> dict:
             f"{base_number + 17 * needle_index}"
         )
         code = unique_code()
+        used_entities.add(entity)
         records.append(
             {
                 "kind": "needle",
@@ -57,9 +59,14 @@ def make_trial(index: int, seed: int, needles: int, distractors: int) -> dict:
     # carry different codes. They are intentionally lexical near-neighbors.
     for distractor_index in range(distractors):
         near = base_number + rng.randrange(-12, 13)
-        entity = (
-            f"{family} {rng.choice(_ADJECTIVES)} {rng.choice(_NOUNS)} {near}"
-        )
+        while True:
+            entity = (
+                f"{family} {rng.choice(_ADJECTIVES)} {rng.choice(_NOUNS)} {near}"
+            )
+            if entity not in used_entities:
+                used_entities.add(entity)
+                break
+            near = base_number + rng.randrange(-12, 13)
         code = unique_code()
         records.append(
             {

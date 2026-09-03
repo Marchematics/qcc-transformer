@@ -236,7 +236,7 @@ def main() -> None:
         "official_evaluator": str(eval_path),
         "official_eval_stdout": proc.stdout,
         "native_context_tokens": max_context,
-        "full_suite": True,
+        "full_suite": args.limit_per_dataset is None,
         "datasets": datasets,
         "dataset_scores": scores,
         "quality_score": macro,

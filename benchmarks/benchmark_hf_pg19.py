@@ -239,6 +239,7 @@ def main() -> None:
         "real_model": True,
         "synthetic": False,
         "official": True,
+        "full_suite": args.limit is None,
         "qcc_only": args.mode == "qcc",
         "official_source": args.official_source,
         "split": "test",

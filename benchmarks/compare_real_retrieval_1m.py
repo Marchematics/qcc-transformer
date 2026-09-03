@@ -7,6 +7,9 @@ import json
 from pathlib import Path
 from typing import Any
 
+_MIN_REAL_PARAMS = 1_000_000_000
+_MAX_REAL_PARAMS = 7_000_000_000
+
 
 def load(path: Path) -> dict[str, Any]:
     payload = json.loads(path.read_text())
@@ -37,6 +40,11 @@ def load_manifest_targets(path: Path) -> dict[int, tuple[str, str]]:
         raise ValueError("unsupported retrieval manifest schema")
     if header.get("protocol_locked") is not True:
         raise ValueError("retrieval manifest is not protocol-locked")
+    if int(header.get("trials", 0)) < 1000 or int(header.get("context_tokens", 0)) < 1_000_000:
+        raise ValueError("retrieval manifest must contain >=1000 trials at >=1M context")
+    for field in ("random_depth", "multi_needle", "semantic_distractor"):
+        if header.get(field) is not True:
+            raise ValueError(f"retrieval manifest is missing {field}")
     rows: dict[int, tuple[str, str]] = {}
     for line in lines[1:]:
         trial = json.loads(line)
@@ -50,6 +58,8 @@ def load_manifest_targets(path: Path) -> dict[int, tuple[str, str]]:
         rows[index] = (target, expected)
     if len(rows) != int(header.get("trials", -1)):
         raise ValueError("retrieval manifest trial count does not match its header")
+    if set(rows) != set(range(len(rows))):
+        raise ValueError("retrieval manifest trial ids must be the contiguous registered range")
     return rows
 
 
@@ -71,6 +81,8 @@ def main() -> None:
             raise ValueError(f"invalid {mode} summary")
         if payload.get("real_model") is not True or payload.get("synthetic") is not False:
             raise ValueError(f"{mode} summary is not real non-synthetic evidence")
+        if payload.get("pretrained") is not True or payload.get("real_checkpoint") is not True:
+            raise ValueError(f"{mode} summary is not a pretrained real checkpoint")
         if payload.get("protocol_locked") is not True:
             raise ValueError(f"{mode} protocol is not locked")
         if payload.get("run_id") != args.run_id:
@@ -78,11 +90,25 @@ def main() -> None:
         for field in ("random_depth", "multi_needle", "semantic_distractor"):
             if payload.get(field) is not True:
                 raise ValueError(f"{mode} summary is missing {field} evidence")
-    for field in ("model_id", "context_tokens", "trials"):
+    for field in ("model_id", "context_tokens", "trials", "parameter_count", "native_context_tokens"):
         if full.get(field) != qcc.get(field):
             raise ValueError(f"matched retrieval mismatch for {field}")
     if int(full["trials"]) < 1000 or int(full["context_tokens"]) < 1_000_000:
         raise ValueError("strict comparison requires >=1000 trials at >=1M context")
+    parameter_count = full.get("parameter_count")
+    if (
+        isinstance(parameter_count, bool)
+        or not isinstance(parameter_count, int)
+        or not _MIN_REAL_PARAMS <= parameter_count <= _MAX_REAL_PARAMS
+    ):
+        raise ValueError("strict comparison requires a 1B..7B pretrained checkpoint")
+    native_context = full.get("native_context_tokens")
+    if (
+        isinstance(native_context, bool)
+        or not isinstance(native_context, int)
+        or native_context < int(full["context_tokens"])
+    ):
+        raise ValueError("strict comparison requires native context >= locked context")
     if qcc.get("oracle_admission") is not False:
         raise ValueError("QCC 1M evidence must use learned, non-oracle admission")
 
@@ -160,6 +186,8 @@ def main() -> None:
             **common,
             "trials": trials,
             "context_tokens": full["context_tokens"],
+            "parameter_count": parameter_count,
+            "native_context_tokens": native_context,
             "qcc_success_rate": qcc_rate,
             "full_kv_success_rate": full_rate,
             "qcc_full_kv_ratio": qcc_rate / full_rate if full_rate > 0 else 0.0,

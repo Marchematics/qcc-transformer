@@ -54,6 +54,10 @@ def compare_pareto(qcc: dict[str, Any], baselines: list[dict[str, Any]]) -> dict
             )
         names.add(name)
         paired = compare_reports(qcc, baseline)
+        if paired["provenance"].get("run_id") != qcc.get("run_id"):
+            raise ValueError(
+                f"baseline {name} is not from the same matched run as QCC"
+            )
         memory_reduction = paired["derived"].get("server_peak_gpu_memory_reduction")
         memory_dominates = (
             isinstance(memory_reduction, (int, float)) and memory_reduction >= 0.0

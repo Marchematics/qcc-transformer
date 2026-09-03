@@ -260,6 +260,7 @@ def main() -> None:
         "real_model": True,
         "synthetic": False,
         "official": True,
+        "full_suite": args.max_examples is None,
         "qcc_only": False,
         "qcc_score": qcc_correct / len(records),
         "full_kv_score": baseline_correct / len(records),
