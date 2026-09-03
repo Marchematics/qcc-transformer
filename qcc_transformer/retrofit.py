@@ -369,10 +369,62 @@ class HFQCCAttention(nn.Module):
         if position_ids is None:
             return start + torch.arange(length, device=device, dtype=torch.long).view(1, -1).expand(batch, -1)
         if position_ids.ndim == 1:
-            return position_ids.view(1, -1).expand(batch, -1)
-        if position_ids.ndim != 2:
+            positions = position_ids.view(1, -1).expand(batch, -1)
+        elif position_ids.ndim == 2:
+            positions = position_ids.to(device=device)
+            if positions.shape[0] == 1 and batch != 1:
+                positions = positions.expand(batch, -1)
+            elif positions.shape[0] != batch:
+                raise ValueError("position_ids batch dimension must match hidden_states")
+        else:
             raise ValueError("position_ids must have shape [sequence] or [batch, sequence]")
-        return position_ids.to(device=device)
+        if positions.shape[1] != length:
+            raise ValueError("position_ids sequence dimension must match hidden_states")
+        return positions.to(device=device)
+
+    def _bind_generation_cache(self, cache: Any) -> None:
+        """Expose QCC's logical length through a framework-owned HF cache.
+
+        Modern Transformers keeps one ``DynamicCache`` object even when an
+        attention implementation owns a different persistent state.  Leaving
+        that object empty makes the next generation step start RoPE and input
+        slicing from position zero.  Replacing only its length methods keeps
+        the cache object/API intact while avoiding any physical K/V writes.
+        """
+
+        if cache is None or isinstance(cache, QCCCacheHandle):
+            return
+        if getattr(cache, "_qcc_length_owner", None) is not None:
+            return
+        get_seq_length = getattr(cache, "get_seq_length", None)
+        if not callable(get_seq_length):
+            return
+        attention = self.qcc
+        try:
+            setattr(cache, "_qcc_length_owner", attention)
+            setattr(cache, "_qcc_original_get_seq_length", get_seq_length)
+
+            def logical_length(layer_idx: int = 0) -> int:
+                del layer_idx
+                return int(attention._seen_tokens)
+
+            setattr(cache, "get_seq_length", logical_length)
+            original_usable = getattr(cache, "get_usable_length", None)
+            if callable(original_usable):
+                setattr(cache, "_qcc_original_get_usable_length", original_usable)
+
+                def logical_usable_length(
+                    new_seq_length: int, layer_idx: int = 0
+                ) -> int:
+                    del new_seq_length, layer_idx
+                    return int(attention._seen_tokens)
+
+                setattr(cache, "get_usable_length", logical_usable_length)
+        except (AttributeError, TypeError):
+            # Some specialized cache implementations use slots or immutable
+            # methods.  The adapter still works through its own counter; this
+            # fallback simply leaves that external object untouched.
+            return
 
     def _bounded_prefill(
         self,
@@ -451,6 +503,8 @@ class HFQCCAttention(nn.Module):
         reset = seen == 0
         if isinstance(cache, QCCCacheHandle) and cache.attention is not self.qcc:
             raise ValueError("past_key_value belongs to a different QCC attention layer")
+        if modern_cache_call:
+            self._bind_generation_cache(cache)
         archive_hint = hidden_states if self.qcc.archive_lexical_landmark else None
         positions = self._positions(
             position_ids, batch, length, hidden_states.device, 0 if reset else seen

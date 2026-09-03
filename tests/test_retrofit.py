@@ -73,6 +73,19 @@ class _FusedModel(nn.Module):
         self.attn = _FusedAttention()
 
 
+class _ModernCache:
+    def __init__(self):
+        self.length = 0
+
+    def get_seq_length(self, layer_idx=0):
+        del layer_idx
+        return self.length
+
+    def get_usable_length(self, new_seq_length, layer_idx=0):
+        del new_seq_length, layer_idx
+        return self.length
+
+
 def test_patch_hf_reads_transformers5_rope_parameters():
     model = _Model()
     model.config.rope_theta = None
@@ -193,6 +206,24 @@ def test_modern_generation_without_physical_cache_keeps_qcc_state():
     )
     assert len(second) == 2
     assert model.attn.qcc._seen_tokens == 5
+
+
+def test_modern_cache_reports_logical_qcc_length_without_physical_kv():
+    model = _Model()
+    patch_hf_model(model, window_size=4, num_codes=4, use_triton=False)
+    cache = _ModernCache()
+    first = model.attn(
+        torch.randn(1, 4, 16), past_key_values=cache, use_cache=True
+    )
+    assert len(first) == 2
+    assert cache.get_seq_length() == 4
+    assert cache.get_usable_length(1) == 4
+    second = model.attn(
+        torch.randn(1, 1, 16), past_key_values=cache, use_cache=True
+    )
+    assert len(second) == 2
+    assert cache.get_seq_length() == 5
+    assert cache.get_usable_length(1) == 5
 
 
 def test_patch_hf_exposes_differentiable_calibration_path():
