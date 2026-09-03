@@ -215,13 +215,15 @@ This keeps the dependency-free primitive available for custom integrations while
 the stock adapter below handles the current upstream vLLM state-cache ABI.
 Matched quality and serving benchmarks are still required for performance claims.
 
-The package includes a stock vLLM v1 adapter. With vLLM 0.11 or newer, the
-entry point registers `QCCModernAttentionBackend` and maps each QCC attention
-layer to vLLM's stateful `MambaSpec` cache, which gives the scheduler one opaque
-packed state page per request. Older deployments that expose the experimental
-`CircularBufferSpec` use `QCCV1AttentionBackend` instead. Configure the page and
-adapter through `prepare_stock_vllm` or `QCC_STOCK_VLLM_CONFIG`/
-`QCC_STOCK_VLLM_ADAPTER`; application model code remains unchanged.
+The package includes a stock vLLM v1 adapter. On the modern vLLM ABI (including
+0.28), the entry point registers `QCCModernAttentionBackend` and maps each QCC
+attention layer to vLLM's stateful `MambaSpec` cache, giving the scheduler one
+opaque packed state page per request. The adapter retains an import fallback for
+older 0.11--0.27 deployments that expose the legacy registry paths; deployments
+that expose the experimental `CircularBufferSpec` use `QCCV1AttentionBackend`
+instead. Configure the page and adapter through `prepare_stock_vllm` or
+`QCC_STOCK_VLLM_CONFIG`/`QCC_STOCK_VLLM_ADAPTER`; application model code remains
+unchanged.
 
 ### 99 gate (all requirements must hold simultaneously)
 

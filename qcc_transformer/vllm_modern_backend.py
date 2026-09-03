@@ -15,11 +15,18 @@ from typing import ClassVar
 
 import torch
 
-from vllm.attention.backends.abstract import (
-    AttentionBackend,
-    AttentionImpl,
-    AttentionType,
-)
+try:  # vLLM 0.28+ keeps the ABI under vllm.v1.
+    from vllm.v1.attention.backend import (
+        AttentionBackend,
+        AttentionImpl,
+        AttentionType,
+    )
+except ImportError:  # vLLM 0.11-0.27 used the legacy abstract module.
+    from vllm.attention.backends.abstract import (
+        AttentionBackend,
+        AttentionImpl,
+        AttentionType,
+    )
 from vllm.config import VllmConfig
 from vllm.v1.attention.backends.utils import (
     AttentionCGSupport,

@@ -148,7 +148,7 @@ teacher 特征现在通过未 patch attention 模块的 forward-pre-hook 直接�
 - 远程曾发生磁盘 100% 满；已清理可重建的 `~/.cache/pip`（约 3.7GB）、过期 Hugging Face `.incomplete` 文件和本次同步产生的 `._*` 文件，释放约 4.5GB。
 - 未删除 HOTC2026、biohub、其它用户项目或用户已有 QCC artifacts。
 - Colab CLI 当前没有活动 session；本次通过已认证 OAuth 重新分配 `qcc-terminal` 时，Colab assignment API 返回 `503 Service Unavailable`。认证 scopes 正常，属于服务端资源阻塞；恢复前不要循环重试或假定 GPU 已分配。
-- 远程尚未完成正式 vLLM 端到端运行；当前代码已提供 `vllm_modern_backend.py`，针对 vLLM 0.11+ 用 `MambaSpec` 分配每请求单页状态，并保留旧 `CircularBufferSpec` 适配。`qcc_transformer/vllm.py` 仍是 dependency-free primitive，不能替代真实 serving 测量；远程项目顶层还有同名 `vllm.py`，测试时要先确认 import 来源，避免 shadowing。
+- 远程尚未完成正式 vLLM 端到端运行；当前代码已提供 `vllm_modern_backend.py`，在现代 vLLM ABI（含 0.28）用 `MambaSpec` 分配每请求单页状态，并保留 0.11--0.27 的旧导入回退与 `CircularBufferSpec` 适配。`qcc_transformer/vllm.py` 仍是 dependency-free primitive，不能替代真实 serving 测量；远程项目顶层还有同名 `vllm.py`，测试时要先确认 import 来源，避免 shadowing。
 
 本地以下未跟踪文件是有意保留的实验结果，不要误删：
 
@@ -206,9 +206,10 @@ python benchmarks/gate_99.py --evidence artifacts/gates/<run_id>.json
 - `benchmarks/gate_99.py` 已扩展为严格 11 项验收：1M retrieval、tail safety、
   Pareto baseline、p95/p99 latency、scaling law、跨模型/GPU 复现均为必填；
   缺失任何 section 都 fail-closed。
-- `register_stock_vllm_backend()` 现在按 ABI 选择旧 `CircularBufferSpec` 或 vLLM
-  0.11+ 的 `MambaSpec` 适配；后者通过插件自动 patch `Attention.get_kv_cache_spec`，
-  仍需在真实 GPU 环境完成端到端 benchmark，不能把本地 API 检查当作 serving 结果。
+- `register_stock_vllm_backend()` 现在按 ABI 选择旧 `CircularBufferSpec` 或现代
+  vLLM（含 0.28）的 `MambaSpec` 适配；后者通过插件自动 patch
+  `Attention.get_kv_cache_spec`，仍需在真实 GPU 环境完成端到端 benchmark，不能
+  把本地 API 检查当作 serving 结果。
 - `QCCSelfAttention` 新增可选 `archive_norm_gating`（参数量不变、O(1) 状态），
   按 local/archive 响应范数一致性抑制异常远程读；默认关闭，10 卡 sweep 的
   GPU9 打开该消融。

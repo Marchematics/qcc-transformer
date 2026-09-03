@@ -380,17 +380,25 @@ def _register_modern_vllm_backend() -> object:
     """Register the state-page adapter used by vLLM 0.11 and newer."""
 
     try:
-        from vllm.attention.backends.registry import (
+        from vllm.v1.attention.backends.registry import (
             AttentionBackendEnum,
             register_backend,
         )
-        from vllm.attention.layer import Attention
+        from vllm.model_executor.layers.attention.attention import Attention
         from vllm.v1.kv_cache_interface import MambaSpec
     except ImportError as exc:  # pragma: no cover - optional dependency
-        raise RuntimeError(
-            "QCC stock backend requires a vLLM release with either "
-            "CircularBufferSpec or MambaSpec"
-        ) from exc
+        try:
+            from vllm.attention.backends.registry import (
+                AttentionBackendEnum,
+                register_backend,
+            )
+            from vllm.attention.layer import Attention
+            from vllm.v1.kv_cache_interface import MambaSpec
+        except ImportError:
+            raise RuntimeError(
+                "QCC stock backend requires a vLLM release with either "
+                "CircularBufferSpec or MambaSpec"
+            ) from exc
 
     marker = "_qcc_stock_spec_patched"
     if not getattr(Attention, marker, False):
