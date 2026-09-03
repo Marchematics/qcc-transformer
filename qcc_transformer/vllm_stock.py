@@ -56,6 +56,10 @@ class QCCStockVLLMConfig:
     exact_confidence_temperature: float = 20.0
     max_inserts_per_chunk: int = 8
     admission_threshold: float = 0.0
+    # ``num_heads`` is the local query-head count seen by one vLLM worker.  The
+    # adapter checkpoint remains global and is sliced by tensor-parallel rank at
+    # load time when this value is greater than one.
+    tensor_parallel_size: int = 1
 
     def __post_init__(self) -> None:
         positive = (
@@ -71,6 +75,7 @@ class QCCStockVLLMConfig:
             self.alignment,
             self.exact_confidence_temperature,
             self.max_inserts_per_chunk,
+            self.tensor_parallel_size,
         )
         if any(value <= 0 for value in positive):
             raise ValueError("all positive QCC stock-vLLM values must be > 0")

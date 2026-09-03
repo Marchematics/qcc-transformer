@@ -5,6 +5,7 @@ from qcc_transformer.stock_adapter import (
     checkpoint_state_dict,
     extract_archive_parameters,
     layer_index_from_name,
+    load_archive_parameters,
 )
 
 
@@ -47,3 +48,37 @@ def test_incomplete_hybrid_adapter_fails_closed():
 def test_checkpoint_state_dict_unwraps_payload():
     payload = {"state_dict": {"x": torch.ones(1)}, "metadata": {"model": "x"}}
     assert checkpoint_state_dict(payload)["x"].item() == 1
+
+
+def test_load_archive_parameters_slices_global_heads_for_tensor_parallelism():
+    class Archive:
+        num_heads = 2
+
+        def load_state_dict(self, state, strict=False):
+            del strict
+            self.loaded = state
+            return [], []
+
+    prefix = "model.layers.3.self_attn.qcc.archive."
+    state = {
+        prefix + "codes": torch.arange(4 * 3).reshape(4, 3),
+        prefix + "mix_logits": torch.arange(4 * 2 * 5).reshape(4, 2, 5),
+        prefix + "exact_bank.set_codes": torch.arange(4 * 3 * 2).reshape(4, 3, 2),
+        prefix + "admission.key_weight": torch.arange(4 * 3).reshape(4, 3),
+        prefix + "admission.value_weight": torch.arange(4 * 3).reshape(4, 3),
+        prefix + "admission.bias": torch.arange(4),
+        prefix + "exact_mix_logits": torch.arange(4),
+    }
+    archive = Archive()
+    load_archive_parameters(
+        archive,
+        state,
+        "model.layers.3.self_attn",
+        tensor_parallel_rank=1,
+        tensor_parallel_size=2,
+    )
+    assert torch.equal(archive.loaded["codes"], state[prefix + "codes"][2:4])
+    assert torch.equal(
+        archive.loaded["exact_bank.set_codes"], state[prefix + "exact_bank.set_codes"][2:4]
+    )
+    assert torch.equal(archive.loaded["admission.bias"], state[prefix + "admission.bias"][2:4])

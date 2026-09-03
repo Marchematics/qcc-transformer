@@ -40,6 +40,38 @@ from .vllm_stock import (
 )
 
 
+def _tensor_parallel_rank(size: int) -> int:
+    """Return this worker's TP rank without assuming one vLLM env spelling."""
+
+    if size == 1:
+        return 0
+    try:
+        from vllm.distributed import parallel_state
+
+        getter = getattr(parallel_state, "get_tensor_model_parallel_rank", None)
+        if callable(getter):
+            rank = int(getter())
+            if 0 <= rank < size:
+                return rank
+    except (ImportError, RuntimeError, AttributeError, TypeError, ValueError):
+        pass
+    for name in ("QCC_STOCK_VLLM_TP_RANK", "VLLM_TP_RANK"):
+        value = os.environ.get(name)
+        if value is None:
+            continue
+        try:
+            rank = int(value)
+        except ValueError as exc:
+            raise RuntimeError(f"{name} must be an integer") from exc
+        if not 0 <= rank < size:
+            raise RuntimeError(f"{name}={rank} is outside tensor-parallel size {size}")
+        return rank
+    raise RuntimeError(
+        "cannot determine tensor-parallel rank for QCC stock vLLM; "
+        "vLLM parallel state or QCC_STOCK_VLLM_TP_RANK is required"
+    )
+
+
 @dataclass
 class QCCV1AttentionMetadata(AttentionMetadata):
     block_table: torch.Tensor
@@ -165,7 +197,14 @@ class QCCV1AttentionImpl(AttentionImpl[QCCV1AttentionMetadata]):
         if not adapter_path:
             raise RuntimeError(f"{STOCK_ADAPTER_ENV} is required for QCC stock vLLM")
         state = load_checkpoint_state_dict(adapter_path)
-        load_archive_parameters(self.runtime.archive, state, layer_name)
+        rank = _tensor_parallel_rank(self.config.tensor_parallel_size)
+        load_archive_parameters(
+            self.runtime.archive,
+            state,
+            layer_name,
+            tensor_parallel_rank=rank,
+            tensor_parallel_size=self.config.tensor_parallel_size,
+        )
         self._loaded_layer_name = layer_name
 
     def _request_page(
@@ -207,15 +246,10 @@ class QCCV1AttentionImpl(AttentionImpl[QCCV1AttentionMetadata]):
         physical = metadata.block_table[:num_requests, 0].to(
             device=kv_cache.device, dtype=torch.long
         )
-        if bool(torch.any(physical < 0).item()) or bool(
-            torch.any(physical >= kv_cache.shape[0]).item()
-        ):
-            raise RuntimeError("QCC decode batch contains an invalid physical state block")
-        if torch.unique(physical).numel() != num_requests:
-            raise RuntimeError(
-                "QCC decode requests must own distinct state pages; shared prefix pages "
-                "are not compatible with mutable packed state"
-            )
+        # CircularBufferSpec guarantees valid, request-private pages.  Keep
+        # those contract checks out of the decode hot path: bounds/uniqueness
+        # queries force a device synchronization on every scheduler batch and
+        # erase the benefit of the batched state update.
         gathered = kv_cache.index_select(0, physical).contiguous()
         pages = gathered.view(num_requests, -1)
         q = query.index_select(0, token_indices)

@@ -65,6 +65,19 @@ def _trust_remote_code(arguments: list[str]) -> bool:
     return _has_option(arguments, "--trust-remote-code")
 
 
+def _tensor_parallel_size(arguments: list[str]) -> int:
+    value = _option_value(arguments, "--tensor-parallel-size")
+    if value is None:
+        return 1
+    try:
+        size = int(value)
+    except ValueError as exc:
+        raise ValueError("--tensor-parallel-size must be an integer") from exc
+    if size <= 0:
+        raise ValueError("--tensor-parallel-size must be positive")
+    return size
+
+
 def build_launch(
     *,
     model: str,
@@ -83,6 +96,11 @@ def build_launch(
     if not adapter.is_file():
         raise FileNotFoundError(adapter)
     query_heads, head_dim = infer_attention_geometry(config)
+    tensor_parallel_size = _tensor_parallel_size(passthrough)
+    if query_heads % tensor_parallel_size:
+        raise ValueError(
+            "checkpoint query heads must divide --tensor-parallel-size for stock QCC"
+        )
     target_context = context_length or native_context(config)
     if target_context is None or target_context <= 0:
         raise ValueError("context-length is required when the checkpoint has no native context")
@@ -92,7 +110,7 @@ def build_launch(
         raise ValueError("local-dtype must be float16, bfloat16, or float32")
     local_bytes = {"float16": 2, "bfloat16": 2, "float32": 4}[local_dtype]
     qcc_config = QCCStockVLLMConfig(
-        num_heads=query_heads,
+        num_heads=query_heads // tensor_parallel_size,
         head_dim=head_dim,
         window_size=window_size,
         num_codes=num_codes,
@@ -102,6 +120,7 @@ def build_launch(
         exact_probe_sets=exact_probe_sets,
         max_position_embeddings=target_context,
         local_element_bytes=local_bytes,
+        tensor_parallel_size=tensor_parallel_size,
     )
     configured_max_len = _option_value(passthrough, "--max-model-len")
     if configured_max_len is not None:

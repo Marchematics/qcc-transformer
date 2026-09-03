@@ -23,6 +23,29 @@ def test_stock_launcher_parses_remote_code_and_option_forms():
     assert _option_value(arguments, "--dtype") == "bfloat16"
 
 
+def test_stock_launcher_shards_query_heads_for_tensor_parallelism(tmp_path: Path):
+    adapter = tmp_path / "adapter.pt"
+    adapter.write_bytes(b"adapter")
+    config = SimpleNamespace(hidden_size=256, num_attention_heads=8, max_position_embeddings=131072)
+    command, _, packed = build_launch(
+        model="org/model-1b",
+        adapter=adapter,
+        config=config,
+        context_length=128000,
+        window_size=128,
+        num_codes=16,
+        num_scales=4,
+        exact_num_sets=32,
+        exact_ways=2,
+        exact_probe_sets=None,
+        local_dtype="bfloat16",
+        passthrough=["--tensor-parallel-size", "2"],
+    )
+    assert command[:3] == ["vllm", "serve", "org/model-1b"]
+    assert packed.num_heads == 4
+    assert packed.tensor_parallel_size == 2
+
+
 def test_stock_launcher_builds_worker_environment_and_preserves_server_args(tmp_path: Path):
     adapter = tmp_path / "adapter.pt"
     adapter.write_bytes(b"adapter")

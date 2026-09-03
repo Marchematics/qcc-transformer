@@ -20,6 +20,15 @@ _REQUIRED = {
     "admission.bias",
     "exact_mix_logits",
 }
+_HEAD_PARAMETER_KEYS = {
+    "codes",
+    "mix_logits",
+    "exact_bank.set_codes",
+    "admission.key_weight",
+    "admission.value_weight",
+    "admission.bias",
+    "exact_mix_logits",
+}
 
 
 def layer_index_from_name(name: str) -> int:
@@ -77,9 +86,48 @@ def load_archive_parameters(
     archive: torch.nn.Module,
     state_dict: Mapping[str, Tensor],
     layer_name: str,
+    *,
+    tensor_parallel_rank: int = 0,
+    tensor_parallel_size: int = 1,
 ) -> None:
-    """Load only learned HybridQCCArchive tensors; mutable request state is untouched."""
+    """Load learned archive tensors, slicing global heads for tensor parallelism.
+
+    HF adapters are saved once with the complete model head dimension.  A stock
+    vLLM worker owns only its tensor-parallel head slice, so loading the global
+    tensors unchanged would either fail on shape or silently use the wrong heads.
+    Mutable request state is never part of this operation.
+    """
+    if tensor_parallel_size <= 0:
+        raise ValueError("tensor_parallel_size must be positive")
+    if not 0 <= tensor_parallel_rank < tensor_parallel_size:
+        raise ValueError("tensor_parallel_rank must lie within tensor_parallel_size")
     layer_state = extract_archive_parameters(state_dict, layer_name, strict=True)
+    local_heads = int(getattr(archive, "num_heads", 0))
+    if local_heads <= 0:
+        raise ValueError("archive must expose a positive num_heads")
+    if tensor_parallel_size > 1:
+        global_heads = local_heads * tensor_parallel_size
+        start = tensor_parallel_rank * local_heads
+        end = start + local_heads
+        sharded: dict[str, Tensor] = {}
+        for name, tensor in layer_state.items():
+            if name not in _HEAD_PARAMETER_KEYS:
+                sharded[name] = tensor
+                continue
+            if tensor.ndim == 0:
+                raise ValueError(f"head parameter {name} is scalar")
+            if tensor.shape[0] == local_heads:
+                # Accept an already-local adapter for explicit per-rank
+                # deployments; the normal global adapter is sliced below.
+                sharded[name] = tensor
+            elif tensor.shape[0] == global_heads:
+                sharded[name] = tensor[start:end]
+            else:
+                raise ValueError(
+                    f"adapter parameter {name} has {tensor.shape[0]} heads; "
+                    f"expected {local_heads} or global {global_heads}"
+                )
+        layer_state = sharded
     missing, unexpected = archive.load_state_dict(layer_state, strict=False)
     unexpected = [name for name in unexpected if name not in {"decay_rates"}]
     if unexpected:
