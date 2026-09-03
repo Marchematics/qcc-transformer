@@ -1738,9 +1738,12 @@ class QCCSelfAttention(nn.Module):
                 self.archive.update(archive_key, archive_value)
                 # A token eviction changes the recurrent archive state.  Any
                 # read cached from an earlier state is therefore invalid even
-                # when the optional read stride would otherwise reuse it.
-                self._archive_read_cache = None
-                self._archive_query_cache = None
+                # when the optional read stride would otherwise reuse it.  An
+                # explicit query-stability threshold opts into stale-read
+                # reuse, so preserve that documented approximation mode.
+                if self.archive_query_cosine_threshold is None:
+                    self._archive_read_cache = None
+                    self._archive_query_cache = None
                 self._cache_start = (self._cache_start + 1) % self.window_size
             self._local_key_cache[:, :, write_index] = key
             self._local_value_cache[:, :, write_index] = value
