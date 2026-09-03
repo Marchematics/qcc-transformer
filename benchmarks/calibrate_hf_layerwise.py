@@ -301,6 +301,14 @@ def main() -> None:
         kv_head_policy=args.kv_head_policy,
         gate_bias_init=args.gate_bias_init,
     )
+    # Keep trainable adapter gates in fp32 when the frozen backbone is loaded
+    # in fp16/bf16.  The attention projection path casts the gate back to the
+    # backbone dtype, preserving inference behavior while avoiding half-
+    # precision AdamW updates during calibration.
+    for module in patched.modules():
+        qcc = getattr(module, "qcc", None)
+        if qcc is not None:
+            qcc.gate.float()
 
     if args.gradient_checkpointing and hasattr(patched, "gradient_checkpointing_enable"):
         patched.config.use_cache = False

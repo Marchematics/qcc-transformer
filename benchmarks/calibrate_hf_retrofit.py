@@ -159,6 +159,14 @@ def main() -> None:
         kv_head_policy=args.kv_head_policy,
         gate_bias_init=args.gate_bias_init,
     )
+    # The backbone may be fp16/bf16 on a single GPU, but AdamW should not
+    # update a trainable gate in half precision.  Keep the tiny adapter gate
+    # in fp32; QCCSelfAttention casts it back to the projection dtype for the
+    # fused QKV operation, so this does not change the deployed interface.
+    for module in patched.modules():
+        qcc = getattr(module, "qcc", None)
+        if qcc is not None:
+            qcc.gate.float()
     if args.gradient_checkpointing and hasattr(patched, "gradient_checkpointing_enable"):
         # Only the small QCC archive/gate is trainable.  Checkpointing the
         # frozen backbone avoids retaining every MLP activation, while input

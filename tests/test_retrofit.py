@@ -229,6 +229,15 @@ def test_gqa_projection_fuses_raw_qkv_before_repeat():
     assert gate.shape == (1, 3, 4)
 
 
+def test_fused_projection_casts_fp32_adapter_gate_to_backbone_dtype():
+    model = _Model()
+    patch_hf_model(model, window_size=4, num_codes=4, use_triton=False)
+    model.attn.qcc.gate.double()
+    hidden = torch.randn(1, 3, 16)
+    q, k, v, gate = model.attn.qcc._project_qkv_gate(hidden)
+    assert q.dtype == k.dtype == v.dtype == gate.dtype == hidden.dtype
+
+
 def test_fidelity_gate_and_adapter_manifest(tmp_path):
     reference = torch.randn(2, 3, 7)
     assert compare_logits(reference, reference).passed

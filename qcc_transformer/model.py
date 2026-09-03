@@ -1160,7 +1160,11 @@ class QCCSelfAttention(nn.Module):
             q = self.q_proj(hidden)
             k = self.k_proj(hidden)
             v = self.v_proj(hidden)
-            gate = self.gate(hidden)
+            gate_weight = getattr(self.gate, "weight", None)
+            if isinstance(gate_weight, Tensor) and gate_weight.dtype != hidden.dtype:
+                gate = self.gate(hidden.to(dtype=gate_weight.dtype)).to(hidden.dtype)
+            else:
+                gate = self.gate(hidden)
             if k.shape[-1] != self.d_model or v.shape[-1] != self.d_model:
                 raise ValueError(
                     "retrofit K/V projections must expand to hidden size; "
@@ -1186,8 +1190,12 @@ class QCCSelfAttention(nn.Module):
             weight = self._fused_projection_weight
             bias = self._fused_projection_bias
         else:
+            projection_dtype = hidden.dtype
             weight = torch.cat(
-                tuple(source.weight for source in projection_sources),
+                tuple(
+                    source.weight.to(device=hidden.device, dtype=projection_dtype)
+                    for source in projection_sources
+                ),
                 dim=0,
             )
             # Hugging Face Llama/Qwen checkpoints commonly disable projection
@@ -1200,12 +1208,14 @@ class QCCSelfAttention(nn.Module):
                     bias_parts.append(
                         torch.zeros(
                             projection.out_features,
-                            device=projection.weight.device,
-                            dtype=projection.weight.dtype,
+                            device=hidden.device,
+                            dtype=projection_dtype,
                         )
                     )
                 else:
-                    bias_parts.append(projection.bias)
+                    bias_parts.append(
+                        projection.bias.to(device=hidden.device, dtype=projection_dtype)
+                    )
             bias = torch.cat(tuple(bias_parts), dim=0)
             if use_cache:
                 self._fused_projection_weight = weight
