@@ -29,3 +29,13 @@ def test_assemble_rejects_mismatched_section(tmp_path):
     paths["memory"].write_text(json.dumps({"run_id": "r2", "model_id": "m1"}), encoding="utf-8")
     with pytest.raises(ValueError, match="memory.run_id"):
         assemble("r1", "m1", paths)
+
+
+def test_assemble_unwraps_comparison_section(tmp_path):
+    paths = _write_sections(tmp_path)
+    paths["memory"].write_text(
+        json.dumps({"schema": "comparison", "memory": {"run_id": "r1", "model_id": "m1"}}),
+        encoding="utf-8",
+    )
+    bundle = assemble("r1", "m1", paths)
+    assert bundle["memory"] == {"run_id": "r1", "model_id": "m1"}

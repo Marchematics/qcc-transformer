@@ -34,6 +34,12 @@ def assemble(run_id: str, model_id: str, paths: dict[str, Path]) -> dict[str, An
             raise ValueError(f"cannot read {section}: {exc}") from exc
         if not isinstance(value, dict):
             raise ValueError(f"{section} evidence must be a JSON object")
+        # Comparison tools may add a schema/provenance wrapper around one or
+        # more sections.  Accept that direct output while keeping the bundle
+        # itself flat and preserving the section's own metadata.
+        nested = value.get(section)
+        if isinstance(nested, dict):
+            value = nested
         if section != "model":
             if value.get("run_id") != run_id:
                 raise ValueError(f"{section}.run_id does not match {run_id}")
