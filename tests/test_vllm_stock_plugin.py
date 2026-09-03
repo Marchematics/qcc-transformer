@@ -108,4 +108,4 @@ def test_stock_plugin_registers_modern_vllm_028_paths(monkeypatch):
     attention.attn_backend = types.SimpleNamespace(get_name=lambda: "CUSTOM")
     spec = Attention.get_kv_cache_spec(attention, types.SimpleNamespace())
     assert spec.kwargs["dtypes"]
-    assert spec.kwargs["mamba_type"] == "qcc"
+    assert "mamba_type" not in spec.kwargs

@@ -420,7 +420,6 @@ def _register_modern_vllm_backend() -> object:
                     dtypes=(torch.uint8,),
                     block_size=block_size,
                     page_size_padded=layout.total_bytes,
-                    mamba_type="qcc",
                 )
             return original(self, vllm_config)
 
