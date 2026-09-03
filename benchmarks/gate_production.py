@@ -198,6 +198,29 @@ def audit(payload: dict[str, Any]) -> dict[str, Any]:
             ratio = qcc / full
             summary["retrieval_ratio"] = ratio
             _require(ratio >= RETRIEVAL_RATE, f"1M retrieval ratio {ratio:.6f} < {RETRIEVAL_RATE:.2f}", failures)
+        _require(
+            retrieval.get("all_needles_required") is True,
+            "retrieval_1m must score every needle in each trial",
+            failures,
+        )
+        needle_qcc = _number(
+            retrieval.get("needle_success_rate"),
+            "retrieval_1m.needle_success_rate",
+            failures,
+        )
+        needle_full = _number(
+            retrieval.get("full_kv_needle_success_rate"),
+            "retrieval_1m.full_kv_needle_success_rate",
+            failures,
+        )
+        if needle_qcc is not None:
+            _require(needle_qcc >= RETRIEVAL_RATE, f"1M needle retrieval rate {needle_qcc:.6f} < {RETRIEVAL_RATE:.2f}", failures)
+        if needle_full is not None:
+            _require(needle_full >= RETRIEVAL_RATE, f"Full-KV needle retrieval rate {needle_full:.6f} < {RETRIEVAL_RATE:.2f}", failures)
+        if needle_qcc is not None and needle_full is not None and needle_full > 0:
+            needle_ratio = needle_qcc / needle_full
+            summary["needle_retrieval_ratio"] = needle_ratio
+            _require(needle_ratio >= RETRIEVAL_RATE, f"1M needle retrieval ratio {needle_ratio:.6f} < {RETRIEVAL_RATE:.2f}", failures)
         for field in ("random_depth", "multi_needle", "semantic_distractor"):
             _require(retrieval.get(field) is True, f"retrieval_1m.{field} evidence is missing", failures)
         _require(retrieval.get("oracle_admission") is False, "retrieval_1m uses oracle admission", failures)
@@ -219,6 +242,13 @@ def audit(payload: dict[str, Any]) -> dict[str, Any]:
                 "catastrophic retrieval miss rate over all trials must be < 1%",
                 failures,
             )
+        needle_miss = _number(
+            tail.get("catastrophic_retrieval_needle_miss_rate"),
+            "tail_safety.catastrophic_retrieval_needle_miss_rate",
+            failures,
+        )
+        if needle_miss is not None:
+            _require(needle_miss < 0.01, "catastrophic needle retrieval miss rate must be < 1%", failures)
         buckets = tail.get("critical_buckets")
         _require(isinstance(buckets, list) and bool(buckets), "tail_safety.critical_buckets is missing", failures)
         if isinstance(buckets, list):

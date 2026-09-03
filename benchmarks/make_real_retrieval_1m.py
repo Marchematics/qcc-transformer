@@ -52,8 +52,15 @@ def make_trial(index: int, seed: int, needles: int, distractors: int) -> dict:
                 "depth": rng.uniform(0.01, 0.97),
             }
         )
-    target_index = rng.randrange(needles)
-    target = records[target_index]
+    # The query must require every needle. Shuffle the requested order so a
+    # model cannot learn that the answer is always emitted in construction
+    # order, while retaining a single canonical order for paired scoring.
+    target_indices = list(range(needles))
+    rng.shuffle(target_indices)
+    targets = [
+        {"entity": records[index]["entity"], "code": records[index]["code"]}
+        for index in target_indices
+    ]
 
     # Semantic distractors share the family/category and nearby identifiers but
     # carry different codes. They are intentionally lexical near-neighbors.
@@ -81,8 +88,11 @@ def make_trial(index: int, seed: int, needles: int, distractors: int) -> dict:
     return {
         "trial": index,
         "seed": seed + 1_000_003 * index,
-        "target_entity": target["entity"],
-        "expected": target["code"],
+        # Keep the first target fields for readers of the original protocol;
+        # strict scoring uses the complete ordered target list below.
+        "target_entity": targets[0]["entity"],
+        "expected": targets[0]["code"],
+        "targets": targets,
         "records": records,
         "random_depth": True,
         "multi_needle": needles >= 2,
@@ -107,7 +117,7 @@ def main() -> None:
         raise ValueError("strict manifest context must be at least 1M tokens")
 
     header = {
-        "schema": "qcc-real-retrieval-manifest-v1",
+        "schema": "qcc-real-retrieval-manifest-v2",
         "protocol_locked": True,
         "trials": args.trials,
         "seed": args.seed,
@@ -117,7 +127,8 @@ def main() -> None:
         "random_depth": True,
         "multi_needle": args.needles >= 2,
         "semantic_distractor": args.semantic_distractors > 0,
-        "scoring": "exact normalized access-code match in generated continuation",
+        "all_needles_required": True,
+        "scoring": "exact ordered normalized access-code match for every needle in generated continuation",
     }
     rows = [json.dumps(header, sort_keys=True)]
     rows.extend(

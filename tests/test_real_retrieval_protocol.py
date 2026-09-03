@@ -25,6 +25,13 @@ def test_locked_trial_is_deterministic_unique_and_has_required_stressors():
     assert left["random_depth"] is True
     assert left["multi_needle"] is True
     assert left["semantic_distractor"] is True
+    assert len(left["targets"]) == 4
+    needle_pairs = {
+        (item["entity"], item["code"])
+        for item in records
+        if item["kind"] == "needle"
+    }
+    assert {(target["entity"], target["code"]) for target in left["targets"]} == needle_pairs
     assert all(0.01 <= float(item["depth"]) <= 0.97 for item in records)
     targets = [
         item for item in records
@@ -32,6 +39,10 @@ def test_locked_trial_is_deterministic_unique_and_has_required_stressors():
     ]
     assert len(targets) == 1
     assert targets[0]["code"] == left["expected"]
+    assert left["targets"][0] == {
+        "entity": targets[0]["entity"],
+        "code": targets[0]["code"],
+    }
 
 
 def test_trial_seed_changes_every_trial_without_changing_protocol_shape():

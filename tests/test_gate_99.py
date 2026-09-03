@@ -71,6 +71,9 @@ def _evidence() -> dict:
             "context_tokens": 1_000_000,
             "qcc_success_rate": 0.995,
             "full_kv_success_rate": 1.0,
+            "all_needles_required": True,
+            "needle_success_rate": 0.997,
+            "full_kv_needle_success_rate": 1.0,
             "random_depth": True,
             "multi_needle": True,
             "semantic_distractor": True,
@@ -80,6 +83,7 @@ def _evidence() -> dict:
             **custom,
             "catastrophic_retrieval_miss_rate": 0.005,
             "catastrophic_retrieval_miss_rate_trials": 0.004,
+            "catastrophic_retrieval_needle_miss_rate": 0.005,
             "critical_buckets": [
                 {"name": "0-25%", "qcc_full_kv_ratio": 0.99},
                 {"name": "75-100%", "qcc_full_kv_ratio": 0.98},

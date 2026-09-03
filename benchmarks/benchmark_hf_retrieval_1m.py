@@ -45,7 +45,7 @@ def load_manifest(path: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         raise ValueError("manifest requires header plus trials")
     header = json.loads(lines[0])
     trials = [json.loads(line) for line in lines[1:]]
-    if header.get("schema") != "qcc-real-retrieval-manifest-v1":
+    if header.get("schema") != "qcc-real-retrieval-manifest-v2":
         raise ValueError("unsupported retrieval manifest schema")
     if header.get("protocol_locked") is not True:
         raise ValueError("retrieval manifest is not protocol-locked")
@@ -57,6 +57,8 @@ def load_manifest(path: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         raise ValueError("retrieval manifest must enable random depth")
     if header.get("multi_needle") is not True or int(header.get("needles", 0)) < 2:
         raise ValueError("retrieval manifest must contain multiple needles")
+    if header.get("all_needles_required") is not True:
+        raise ValueError("retrieval manifest must require every needle in the answer")
     if header.get("semantic_distractor") is not True or int(header.get("semantic_distractors", 0)) < 1:
         raise ValueError("retrieval manifest must contain semantic distractors")
     expected_needles = int(header["needles"])
@@ -85,10 +87,25 @@ def load_manifest(path: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         codes = [record.get("code") for record in records]
         if len(set(entities)) != len(entities) or len(set(codes)) != len(codes):
             raise ValueError(f"trial {index} contains duplicate entity or code records")
-        target = trial.get("target_entity")
-        matches = [record for record in needles if record.get("entity") == target]
-        if len(matches) != 1 or matches[0].get("code") != trial.get("expected"):
-            raise ValueError(f"trial {index} has an invalid target/expected code pair")
+        targets = trial.get("targets")
+        if not isinstance(targets, list) or len(targets) != expected_needles:
+            raise ValueError(f"trial {index} must register every needle target")
+        target_pairs = []
+        for target in targets:
+            if not isinstance(target, dict):
+                raise ValueError(f"trial {index} contains an invalid needle target")
+            entity = target.get("entity")
+            code = target.get("code")
+            if not isinstance(entity, str) or not isinstance(code, str):
+                raise ValueError(f"trial {index} contains an invalid needle target pair")
+            matches = [record for record in needles if record.get("entity") == entity]
+            if len(matches) != 1 or matches[0].get("code") != code:
+                raise ValueError(f"trial {index} target is not an authoritative needle")
+            target_pairs.append((entity, code))
+        if len(set(target_pairs)) != len(target_pairs):
+            raise ValueError(f"trial {index} repeats a needle target")
+        if trial.get("target_entity") != target_pairs[0][0] or trial.get("expected") != target_pairs[0][1]:
+            raise ValueError(f"trial {index} has an invalid compatibility target pair")
         depths = []
         for record in records:
             if not isinstance(record, dict) or not isinstance(record.get("text"), str):
@@ -119,8 +136,17 @@ def build_trial_ids(tokenizer, trial: dict[str, Any], context_tokens: int) -> tu
     filler_pattern = encode(_FILLER)
     if filler_pattern.numel() == 0:
         raise RuntimeError("tokenizer produced empty filler")
+    targets = trial.get("targets")
+    if not isinstance(targets, list) or len(targets) < 2:
+        raise ValueError("strict retrieval trials must contain at least two query targets")
+    target_lines = "\n".join(
+        f"{index}. {target['entity']}" for index, target in enumerate(targets, start=1)
+    )
     query = encode(
-        "\nFinal query: What is the access code for " + trial["target_entity"] + "? Return only the eight digits.\nAnswer:"
+        "\nFinal query: Return the eight-digit access codes for every needle entity below "
+        "in the listed order, one code per line and no other text.\n"
+        + target_lines
+        + "\nAnswer:"
     )
     blocks = []
     for record in trial["records"]:
@@ -169,9 +195,13 @@ def _dtype(name: str) -> torch.dtype:
     return {"float16": torch.float16, "bfloat16": torch.bfloat16, "float32": torch.float32}[name]
 
 
+def normalize_predictions(text: str) -> list[str]:
+    return _CODE_RE.findall(text)
+
+
 def normalize_prediction(text: str) -> str | None:
-    matches = _CODE_RE.findall(text)
-    return matches[0] if matches else None
+    predictions = normalize_predictions(text)
+    return predictions[0] if predictions else None
 
 
 def depth_bucket(depth: float) -> str:
@@ -193,7 +223,7 @@ def main() -> None:
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--dtype", choices=("float16", "bfloat16", "float32"), default="bfloat16")
     parser.add_argument("--load-in-4bit", action="store_true", help="load the real checkpoint through bitsandbytes NF4")
-    parser.add_argument("--max-new-tokens", type=int, default=16)
+    parser.add_argument("--max-new-tokens", type=int, default=64)
     parser.add_argument("--window-size", type=int, default=128)
     parser.add_argument("--num-codes", type=int, default=64)
     parser.add_argument("--exact-num-sets", type=int, default=128)
@@ -273,23 +303,43 @@ def main() -> None:
             index = int(spec["trial"])
             if index in completed:
                 continue
+            targets = [
+                {"entity": str(target["entity"]), "code": str(target["code"])}
+                for target in spec["targets"]
+            ]
+            expected_codes = [target["code"] for target in targets]
             row: dict[str, Any] = {
                 "trial": index,
-                "expected": spec["expected"],
-                "target_entity": spec["target_entity"],
+                "expected": expected_codes[0],
+                "target_entity": targets[0]["entity"],
+                "targets": targets,
+                "expected_codes": expected_codes,
+                "needle_count": len(targets),
+                "predictions": [],
+                "needle_results": [
+                    {
+                        "entity": target["entity"],
+                        "expected": target["code"],
+                        "prediction": None,
+                        "correct": False,
+                    }
+                    for target in targets
+                ],
+                "needle_correct": 0,
             }
             try:
                 ids, actual_depths = build_trial_ids(tokenizer, spec, context_tokens)
-                target_record = next(
-                    record for record in spec["records"]
-                    if record["kind"] == "needle" and record["entity"] == spec["target_entity"]
-                )
                 # actual_depths follows records sorted by requested depth.
                 sorted_records = sorted(spec["records"], key=lambda item: float(item["depth"]))
-                target_sorted_index = sorted_records.index(target_record)
-                target_depth = actual_depths[target_sorted_index]
-                row["target_depth"] = target_depth
-                row["depth_bucket"] = depth_bucket(target_depth)
+                depth_by_entity = {
+                    record["entity"]: actual_depths[index]
+                    for index, record in enumerate(sorted_records)
+                }
+                target_depths = [depth_by_entity[target["entity"]] for target in targets]
+                row["target_depths"] = target_depths
+                row["depth_buckets"] = [depth_bucket(depth) for depth in target_depths]
+                row["target_depth"] = target_depths[0]
+                row["depth_bucket"] = row["depth_buckets"][0]
                 encoded = ids.to(model_device)
                 if args.mode == "qcc":
                     reset_hf_qcc_cache(model, batch_size=1)
@@ -303,11 +353,27 @@ def main() -> None:
                     )
                 continuation = generated[0, context_tokens:]
                 text = tokenizer.decode(continuation, skip_special_tokens=True)
-                prediction = normalize_prediction(text)
+                predictions = normalize_predictions(text)
+                needle_results = [
+                    {
+                        "entity": target["entity"],
+                        "expected": target["code"],
+                        "prediction": predictions[index] if index < len(predictions) else None,
+                        "correct": index < len(predictions) and predictions[index] == target["code"],
+                        "depth": target_depths[index],
+                        "depth_bucket": row["depth_buckets"][index],
+                    }
+                    for index, target in enumerate(targets)
+                ]
+                needle_correct = sum(int(result["correct"]) for result in needle_results)
+                all_needles_correct = len(predictions) == len(expected_codes) and needle_correct == len(targets)
                 row.update(
-                    prediction=prediction,
+                    prediction=predictions[0] if predictions else None,
+                    predictions=predictions,
                     raw_prediction=text,
-                    correct=prediction == spec["expected"],
+                    correct=all_needles_correct,
+                    needle_results=needle_results,
+                    needle_correct=needle_correct,
                     input_tokens=context_tokens,
                 )
             except Exception as exc:
@@ -323,6 +389,8 @@ def main() -> None:
     if len(ordered) != len(trials):
         raise RuntimeError("run is incomplete; resume before producing strict summary")
     correct = sum(bool(row.get("correct")) for row in ordered)
+    needle_count = sum(int(row.get("needle_count", 0)) for row in ordered)
+    needle_correct = sum(int(row.get("needle_correct", 0)) for row in ordered)
     buckets: dict[str, dict[str, int]] = {}
     for row in ordered:
         bucket = row.get("depth_bucket", "execution-failure")
@@ -352,6 +420,11 @@ def main() -> None:
         "trials": len(ordered),
         "correct": correct,
         "success_rate": correct / len(ordered),
+        "all_needles_required": True,
+        "needles_per_trial": int(header["needles"]),
+        "needle_count": needle_count,
+        "needle_correct": needle_correct,
+        "needle_success_rate": needle_correct / needle_count if needle_count else 0.0,
         "random_depth": header["random_depth"],
         "multi_needle": header["multi_needle"],
         "semantic_distractor": header["semantic_distractor"],
