@@ -151,7 +151,14 @@ def _teacher_examples(
         positions = torch.arange(
             hidden.shape[1], device=device, dtype=torch.long
         ).view(1, -1)
-        q_teacher, k_teacher = qcc._apply_rope(qh, kh, positions)
+        rotated_q, rotated_k = qcc._apply_rope(qh, kh, positions)
+        # The deployed hybrid archive defaults to position-invariant addressing.
+        # Generate teacher labels in that same coordinate system; otherwise the
+        # predictor is optimized for rotary phases that the bank never stores.
+        if qcc.archive_position_invariant:
+            q_teacher, k_teacher = qh, kh
+        else:
+            q_teacher, k_teacher = rotated_q, rotated_k
         salience = sampled_future_attention_salience(
             q_teacher,
             k_teacher,
@@ -163,7 +170,7 @@ def _teacher_examples(
             salience, positive_fraction=positive_fraction, min_positive=1
         )
         examples.append((kh.detach().cpu(), vh.detach().cpu(), labels.cpu()))
-        del hidden, q, k, v, qh, kh, vh, q_teacher, k_teacher, salience, labels
+        del hidden, q, k, v, qh, kh, vh, rotated_q, rotated_k, q_teacher, k_teacher, salience, labels
         if device.type == "cuda":
             torch.cuda.empty_cache()
     return examples
@@ -251,7 +258,7 @@ def main() -> None:
     parser.add_argument("--num-held-chunks", type=int, default=2)
     parser.add_argument("--window-size", type=int, default=128)
     parser.add_argument("--num-codes", type=int, default=16)
-    parser.add_argument("--exact-num-sets", type=int, default=32)
+    parser.add_argument("--exact-num-sets", type=int, default=128)
     parser.add_argument("--exact-ways", type=int, default=4)
     parser.add_argument("--max-inserts-per-chunk", type=int, default=8)
     parser.add_argument("--layers", default="all")

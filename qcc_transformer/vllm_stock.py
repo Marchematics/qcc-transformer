@@ -45,8 +45,9 @@ class QCCStockVLLMConfig:
     window_size: int = 128
     num_codes: int = 16
     num_scales: int = 4
-    exact_num_sets: int = 32
+    exact_num_sets: int = 128
     exact_ways: int = 4
+    exact_probe_sets: int = 4
     max_position_embeddings: int = 1_000_000
     local_element_bytes: int = 2
     alignment: int = 16
@@ -65,6 +66,7 @@ class QCCStockVLLMConfig:
             self.num_scales,
             self.exact_num_sets,
             self.exact_ways,
+            self.exact_probe_sets,
             self.max_position_embeddings,
             self.local_element_bytes,
             self.alignment,
@@ -75,6 +77,8 @@ class QCCStockVLLMConfig:
             raise ValueError("all positive QCC stock-vLLM values must be > 0")
         if self.max_position_embeddings < self.window_size:
             raise ValueError("max_position_embeddings must cover the local window")
+        if self.exact_probe_sets > self.exact_num_sets:
+            raise ValueError("exact_probe_sets cannot exceed exact_num_sets")
         if self.local_element_bytes not in (1, 2, 4):
             raise ValueError("local_element_bytes must be 1, 2, or 4")
         if self.alignment & (self.alignment - 1):

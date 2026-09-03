@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import gc
-import hashlib
 import json
 import math
 import re
@@ -36,9 +35,8 @@ _HEADER = (
 )
 
 
-def load_manifest(path: Path) -> tuple[dict[str, Any], list[dict[str, Any]], str]:
+def load_manifest(path: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     content = path.read_bytes()
-    digest = hashlib.sha256(content).hexdigest()
     lines = [line for line in content.decode().splitlines() if line.strip()]
     if len(lines) < 2:
         raise ValueError("manifest requires header plus trials")
@@ -50,7 +48,7 @@ def load_manifest(path: Path) -> tuple[dict[str, Any], list[dict[str, Any]], str
         raise ValueError("retrieval manifest is not protocol-locked")
     if len(trials) != int(header.get("trials", -1)) or len(trials) < 1000:
         raise ValueError("strict retrieval manifest must contain at least 1000 trials")
-    return header, trials, digest
+    return header, trials
 
 
 def _tile(pattern: torch.Tensor, count: int) -> torch.Tensor:
@@ -144,7 +142,7 @@ def main() -> None:
     parser.add_argument("--max-new-tokens", type=int, default=16)
     parser.add_argument("--window-size", type=int, default=128)
     parser.add_argument("--num-codes", type=int, default=64)
-    parser.add_argument("--exact-num-sets", type=int, default=32)
+    parser.add_argument("--exact-num-sets", type=int, default=128)
     parser.add_argument("--exact-ways", type=int, default=4)
     parser.add_argument("--archive-mix", type=float, default=0.125)
     parser.add_argument("--kv-head-policy", choices=("reject", "repeat"), default="repeat")
@@ -157,7 +155,7 @@ def main() -> None:
     if args.mode == "qcc" and args.adapter is None:
         raise ValueError("--adapter is required for qcc mode")
 
-    header, trials, manifest_hash = load_manifest(args.manifest)
+    header, trials = load_manifest(args.manifest)
     context_tokens = int(header["context_tokens"])
     try:
         from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -276,7 +274,6 @@ def main() -> None:
         "oracle_admission": False if args.mode == "qcc" else None,
         "official": False,
         "protocol_locked": True,
-        "manifest_sha256": manifest_hash,
         "context_tokens": context_tokens,
         "native_context_tokens": native_context,
         "native_context_required": args.require_native_context,

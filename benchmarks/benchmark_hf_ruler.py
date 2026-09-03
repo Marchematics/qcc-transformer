@@ -19,6 +19,8 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from qcc_transformer import patch_hf_model, reset_hf_qcc_cache
+from qcc_transformer.hybrid_archive import load_hybrid_retrofit_adapter
+from qcc_transformer.production_profile import enable_qkv_only_deployment_profile
 
 
 def _records(path: Path, max_examples: int | None):
@@ -86,6 +88,9 @@ def main() -> None:
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--window-size", type=int, default=128)
     parser.add_argument("--num-codes", type=int, default=64)
+    parser.add_argument("--adapter", type=Path, default=None)
+    parser.add_argument("--exact-num-sets", type=int, default=128)
+    parser.add_argument("--exact-ways", type=int, default=4)
     parser.add_argument(
         "--archive-position-invariant",
         action=argparse.BooleanOptionalAction,
@@ -115,13 +120,28 @@ def main() -> None:
     if device.type == "cuda":
         torch.cuda.empty_cache()
     patched = AutoModelForCausalLM.from_pretrained(args.model, **common).to(device).eval()
-    replaced = patch_hf_model(
-        patched,
-        window_size=args.window_size,
-        num_codes=args.num_codes,
-        archive_position_invariant=args.archive_position_invariant,
-        kv_head_policy=args.kv_head_policy,
-    )
+    if args.adapter is None:
+        replaced = patch_hf_model(
+            patched,
+            window_size=args.window_size,
+            num_codes=args.num_codes,
+            archive_position_invariant=args.archive_position_invariant,
+            kv_head_policy=args.kv_head_policy,
+        )
+    else:
+        replaced = load_hybrid_retrofit_adapter(
+            patched,
+            args.adapter,
+            hybrid_kwargs={
+                "exact_num_sets": args.exact_num_sets,
+                "exact_ways": args.exact_ways,
+            },
+            window_size=args.window_size,
+            num_codes=args.num_codes,
+            archive_position_invariant=args.archive_position_invariant,
+            kv_head_policy=args.kv_head_policy,
+        )
+        enable_qkv_only_deployment_profile(patched)
     reset_hf_qcc_cache(patched, batch_size=1)
     qcc_results = _run_model(patched, tokenizer, records, device, args.max_new_tokens)
     baseline_correct = sum(bool(item["correct"]) for item in baseline_results)
