@@ -144,9 +144,11 @@ python benchmarks/benchmark_hf_latency.py \
   --window-size 128 --num-codes 64 --kv-head-policy repeat
 ```
 
-The script resets QCC state at the request boundary and reports matched TTFT,
-TPOT, and speedup.  It does not claim that a short prompt predicts 128K/1M
-behavior; use the long-context harness and task datasets for those gates.
+The script resets QCC state at each request boundary and reports matched TTFT,
+TPOT, p50/p95/p99 tails, and speedup.  Use `--repeats 5 --warmup 1` for a
+small serving-tail sample.  It does not claim that a short prompt predicts
+128K/1M behavior; use the long-context harness and task datasets for those
+measurements.
 
 To run an official NVIDIA RULER split, first prepare it with RULER's own
 `scripts/data/prepare.py`, convert nothing, and invoke:

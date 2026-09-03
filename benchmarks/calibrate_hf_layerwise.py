@@ -372,6 +372,10 @@ def main() -> None:
             train_teachers[batch_index],
             cosine_weight=args.cosine_weight,
         )
+        if not torch.isfinite(loss):
+            raise FloatingPointError(
+                "calibration diverged; lower --lr or reduce --max-tokens"
+            )
         loss.backward()
         torch.nn.utils.clip_grad_norm_(trainable, 1.0)
         optimizer.step()

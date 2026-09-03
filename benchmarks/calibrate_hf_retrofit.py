@@ -206,6 +206,10 @@ def main() -> None:
         optimizer.zero_grad(set_to_none=True)
         student = patched(**patched_encoded, use_cache=False).logits.float()
         loss = _chunked_mse(student, teacher)
+        if not torch.isfinite(loss):
+            raise FloatingPointError(
+                "calibration diverged; lower --lr or reduce --max-tokens"
+            )
         loss.backward()
         torch.nn.utils.clip_grad_norm_(trainable, 1.0)
         optimizer.step()
