@@ -359,14 +359,16 @@ class PackedHybridReferenceState:
             old_steps = active_counters[:, 3].clone()
             # Exact-bank ages are absolute in each page, while one batched
             # bank instance uses a shared local step. Rebase ages to zero,
-            # process one event, then restore each request's own epoch.
+            # process one event, then restore each request's own epoch. The
+            # restore offset is the old epoch: existing entries keep their
+            # insertion step, while newly written entries already carry step 1.
             self.archive.exact_bank._ages.sub_(old_steps[:, None, None, None])
             active_archive = self.archive.update_read_chunk(
                 active_key_block,
                 active_value_block,
                 active_query,
             ).squeeze(2)
-            self.archive.exact_bank._ages.add_((old_steps + 1)[:, None, None, None])
+            self.archive.exact_bank._ages.add_(old_steps[:, None, None, None])
             active_counters[:, 3] = old_steps + 1
             self._flush_archive_pages(active_pages, bound)
             archive_out.index_copy_(0, active_indices, active_archive)
