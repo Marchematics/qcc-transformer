@@ -59,7 +59,7 @@ def _chunk_ids(
     *,
     max_tokens: int,
     num_chunks: int,
-) -> list[Tensor]:
+) -> list[tuple[Tensor, int]]:
     encoded = tokenizer(text, add_special_tokens=False, return_tensors="pt").input_ids[0]
     if encoded.numel() < max_tokens:
         repeats = int(math.ceil(max_tokens / max(1, encoded.numel())))
@@ -71,7 +71,10 @@ def _chunk_ids(
         starts = (
             torch.linspace(0, max_start, num_chunks).round().to(torch.long).tolist()
         )
-    return [encoded[start : start + max_tokens].clone() for start in starts]
+    return [
+        (encoded[start : start + max_tokens].clone(), int(start))
+        for start in starts
+    ]
 
 
 def _parse_layers(spec: str, count: int) -> set[int]:
@@ -99,15 +102,22 @@ def _parse_layers(spec: str, count: int) -> set[int]:
 @torch.no_grad()
 def _collect_hidden_states(
     model,
-    chunks: Iterable[Tensor],
+    chunks: Iterable[tuple[Tensor, int]],
     *,
     selected_layers: set[int],
     device: torch.device,
-) -> list[dict[int, Tensor]]:
-    records: list[dict[int, Tensor]] = []
-    for ids in chunks:
+) -> list[tuple[dict[int, Tensor], int]]:
+    records: list[tuple[dict[int, Tensor], int]] = []
+    for ids, position_start in chunks:
+        position_ids = torch.arange(
+            position_start,
+            position_start + ids.numel(),
+            device=device,
+            dtype=torch.long,
+        ).view(1, -1)
         output = model(
             input_ids=ids.unsqueeze(0).to(device),
+            position_ids=position_ids,
             use_cache=False,
             output_hidden_states=True,
             return_dict=True,
@@ -115,12 +125,13 @@ def _collect_hidden_states(
         hidden_states = output.hidden_states
         if hidden_states is None:
             raise RuntimeError("teacher did not return hidden states")
-        records.append(
+        records.append((
             {
                 index: hidden_states[index].detach().cpu()
                 for index in selected_layers
-            }
-        )
+            },
+            position_start,
+        ))
         del output, hidden_states
         if device.type == "cuda":
             torch.cuda.empty_cache()
@@ -130,7 +141,7 @@ def _collect_hidden_states(
 @torch.no_grad()
 def _teacher_examples(
     wrapper: HFQCCAttention,
-    hidden_records: list[dict[int, Tensor]],
+    hidden_records: list[tuple[dict[int, Tensor], int]],
     *,
     layer_index: int,
     window_size: int,
@@ -147,14 +158,17 @@ def _teacher_examples(
     if not dtype.is_floating_point:
         dtype = torch.float16 if device.type == "cuda" else torch.float32
     examples: list[tuple[Tensor, Tensor, Tensor]] = []
-    for record in hidden_records:
+    for record, position_start in hidden_records:
         hidden = record[layer_index].to(device=device, dtype=dtype)
         q, k, v, _ = qcc._project_qkv_gate(hidden)
         qh = qcc._split_heads(q)
         kh = qcc._split_heads(k)
         vh = qcc._split_heads(v)
         positions = torch.arange(
-            hidden.shape[1], device=device, dtype=torch.long
+            position_start,
+            position_start + hidden.shape[1],
+            device=device,
+            dtype=torch.long,
         ).view(1, -1)
         rotated_q, rotated_k = qcc._apply_rope(qh, kh, positions)
         # The teacher's actual attention uses rotary Q/K, while the deployed
