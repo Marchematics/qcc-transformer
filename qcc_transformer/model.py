@@ -1144,19 +1144,27 @@ class QCCSelfAttention(nn.Module):
             return q, k, v, self.gate(hidden)
 
         # Retrofit adapters may expose an explicit GQA/MQA expansion module
-        # for K/V.  That module is intentionally not folded into the fused
-        # GEMM: the fallback below projects and expands it without silently
-        # changing the loaded HF projection weights.
+        # for K/V.  Fuse the *raw* Q/K/V projections before the explicit
+        # expansion so a normal Llama/Qwen GQA layer still uses one GEMM.
+        # Quantized projection classes intentionally stay on the fallback
+        # path because their custom dequantization must own the operation.
+        raw_k_proj = getattr(self.k_proj, "base", self.k_proj)
+        raw_v_proj = getattr(self.v_proj, "base", self.v_proj)
+        expanded_kv = raw_k_proj is not self.k_proj or raw_v_proj is not self.v_proj
+        projection_sources = (self.q_proj, raw_k_proj, raw_v_proj, self.gate)
         can_fuse = all(
             isinstance(projection, nn.Linear)
-            and projection.out_features == self.d_model
-            for projection in (self.q_proj, self.k_proj, self.v_proj)
+            for projection in projection_sources
         )
         if not can_fuse:
             q = self.q_proj(hidden)
             k = self.k_proj(hidden)
             v = self.v_proj(hidden)
-            gate = self.gate(hidden)
+            gate_weight = getattr(self.gate, "weight", None)
+            if isinstance(gate_weight, Tensor) and gate_weight.dtype != hidden.dtype:
+                gate = self.gate(hidden.to(dtype=gate_weight.dtype)).to(hidden.dtype)
+            else:
+                gate = self.gate(hidden)
             if k.shape[-1] != self.d_model or v.shape[-1] != self.d_model:
                 raise ValueError(
                     "retrofit K/V projections must expand to hidden size; "
@@ -1166,8 +1174,8 @@ class QCCSelfAttention(nn.Module):
 
         versions = (
             self.q_proj.weight._version,
-            self.k_proj.weight._version,
-            self.v_proj.weight._version,
+            raw_k_proj.weight._version,
+            raw_v_proj.weight._version,
             self.gate.weight._version,
         )
         use_cache = not torch.is_grad_enabled() and not self.training
@@ -1182,8 +1190,12 @@ class QCCSelfAttention(nn.Module):
             weight = self._fused_projection_weight
             bias = self._fused_projection_bias
         else:
+            projection_dtype = hidden.dtype
             weight = torch.cat(
-                (self.q_proj.weight, self.k_proj.weight, self.v_proj.weight, self.gate.weight),
+                tuple(
+                    source.weight.to(device=hidden.device, dtype=projection_dtype)
+                    for source in projection_sources
+                ),
                 dim=0,
             )
             # Hugging Face Llama/Qwen checkpoints commonly disable projection
@@ -1191,26 +1203,49 @@ class QCCSelfAttention(nn.Module):
             # zeros for bias-less projections so the fused retrofit path
             # remains compatible without changing the loaded weights.
             bias_parts = []
-            for projection in (self.q_proj, self.k_proj, self.v_proj, self.gate):
+            for projection in projection_sources:
                 if projection.bias is None:
                     bias_parts.append(
                         torch.zeros(
                             projection.out_features,
-                            device=projection.weight.device,
-                            dtype=projection.weight.dtype,
+                            device=hidden.device,
+                            dtype=projection_dtype,
                         )
                     )
                 else:
-                    bias_parts.append(projection.bias)
+                    bias_parts.append(
+                        projection.bias.to(device=hidden.device, dtype=projection_dtype)
+                    )
             bias = torch.cat(tuple(bias_parts), dim=0)
             if use_cache:
                 self._fused_projection_weight = weight
                 self._fused_projection_bias = bias
                 self._fused_projection_versions = versions
         projected = F.linear(hidden, weight, bias)
+        q_width = self.d_model
+        k_width = int(raw_k_proj.out_features)
+        v_width = int(raw_v_proj.out_features)
         q, k, v, gate = projected.split(
-            (self.d_model, self.d_model, self.d_model, self.num_heads), dim=-1
+            (q_width, k_width, v_width, self.num_heads), dim=-1
         )
+        if expanded_kv:
+            kv_heads = int(getattr(self.k_proj, "kv_heads", 0))
+            head_dim = int(getattr(self.k_proj, "head_dim", 0))
+            if (
+                kv_heads <= 0
+                or head_dim <= 0
+                or k_width != kv_heads * head_dim
+                or v_width != kv_heads * head_dim
+                or self.num_heads % kv_heads
+            ):
+                raise ValueError("invalid grouped-query projection geometry")
+            repeat = self.num_heads // kv_heads
+            k = k.view(*k.shape[:-1], kv_heads, head_dim).repeat_interleave(
+                repeat, dim=-2
+            ).reshape(*k.shape[:-1], self.d_model)
+            v = v.view(*v.shape[:-1], kv_heads, head_dim).repeat_interleave(
+                repeat, dim=-2
+            ).reshape(*v.shape[:-1], self.d_model)
         return q, k, v, gate
 
     def _local_window_attention(
@@ -1911,7 +1946,7 @@ class QCCSelfAttention(nn.Module):
         return self.out_proj(head_out.transpose(1, 2).reshape(bsz, length, self.d_model))
 
     def _forward_train_chunked(
-        self, hidden: Tensor, q: Tensor, k: Tensor, v: Tensor,
+        self, hidden: Tensor, q: Tensor, k: Tensor, v: Tensor, gate_proj: Tensor,
         archive_hint: Optional[Tensor] = None,
         archive_query_source: Optional[Tensor] = None,
         archive_key_source: Optional[Tensor] = None,
@@ -2198,9 +2233,9 @@ class QCCSelfAttention(nn.Module):
             self.archive._landmark_key = key_state.detach()
             self.archive._landmark_value = value_state.detach()
         gate = (
-            torch.zeros_like(self.gate(hidden)).transpose(1, 2).unsqueeze(-1)
+            torch.zeros_like(gate_proj).transpose(1, 2).unsqueeze(-1)
             if self.archive.prefix_landmark
-            else torch.sigmoid(self.gate(hidden)).transpose(1, 2).unsqueeze(-1)
+            else torch.sigmoid(gate_proj).transpose(1, 2).unsqueeze(-1)
         )
         mixed_out = self._mix_local_archive(local_out, archive_out, gate)
         active = (torch.arange(length, device=hidden.device) >= window).view(
@@ -2214,7 +2249,7 @@ class QCCSelfAttention(nn.Module):
         return self.out_proj(head_out.transpose(1, 2).reshape(bsz, length, self.d_model))
 
     def _forward_inference(
-        self, hidden: Tensor, q: Tensor, k: Tensor, v: Tensor,
+        self, hidden: Tensor, q: Tensor, k: Tensor, v: Tensor, gate_proj: Tensor,
         archive_hint: Optional[Tensor] = None,
         archive_query_source: Optional[Tensor] = None,
         archive_key_source: Optional[Tensor] = None,
@@ -2235,26 +2270,35 @@ class QCCSelfAttention(nn.Module):
             # tensor and launching separate einsums for logits and values. The
             # key slice contains at most ``window + block_size - 1`` tokens;
             # the boolean mask keeps exact causal local-window semantics.
-            block_size = self.archive.scan_block_size
-            local_outputs: list[Tensor] = []
-            for start in range(0, length, block_size):
-                end = min(length, start + block_size)
-                key_start = max(0, start - window + 1)
-                key_positions = torch.arange(key_start, end, device=hidden.device)
-                query_positions = torch.arange(start, end, device=hidden.device)
-                valid = (key_positions[None, :] <= query_positions[:, None]) & (
-                    key_positions[None, :] >= query_positions[:, None] - window + 1
-                )
-                local_outputs.append(
-                    _scaled_dot_product_attention(
-                        q[:, :, start:end],
-                        k[:, :, key_start:end],
-                        v[:, :, key_start:end],
-                        attn_mask=valid,
-                        dropout_p=0.0,
+            local_out = None
+            if self.use_triton:
+                from .triton_kernels import TRITON_AVAILABLE, triton_local_chunk_attention
+
+                if TRITON_AVAILABLE:
+                    local_out = triton_local_chunk_attention(
+                        q, k, v, old_length=0, window_size=window
                     )
-                )
-            local_out = torch.cat(local_outputs, dim=2)
+            if local_out is None:
+                block_size = self.archive.scan_block_size
+                local_outputs: list[Tensor] = []
+                for start in range(0, length, block_size):
+                    end = min(length, start + block_size)
+                    key_start = max(0, start - window + 1)
+                    key_positions = torch.arange(key_start, end, device=hidden.device)
+                    query_positions = torch.arange(start, end, device=hidden.device)
+                    valid = (key_positions[None, :] <= query_positions[:, None]) & (
+                        key_positions[None, :] >= query_positions[:, None] - window + 1
+                    )
+                    local_outputs.append(
+                        _scaled_dot_product_attention(
+                            q[:, :, start:end],
+                            k[:, :, key_start:end],
+                            v[:, :, key_start:end],
+                            attn_mask=valid,
+                            dropout_p=0.0,
+                        )
+                    )
+                local_out = torch.cat(local_outputs, dim=2)
         else:
             # The CPU SDPA backend currently pays a relatively high per-block
             # mask setup cost. Keep the reference's single vectorized unfold
@@ -2291,7 +2335,7 @@ class QCCSelfAttention(nn.Module):
                     archive_q[:, :, self.window_size :],
                     output=archive_out[:, :, self.window_size :],
                 )
-            gate = torch.sigmoid(self.gate(hidden)).transpose(1, 2).unsqueeze(-1)
+            gate = torch.sigmoid(gate_proj).transpose(1, 2).unsqueeze(-1)
             mixed_out = self._mix_local_archive(local_out, archive_out, gate)
             active = (torch.arange(length, device=hidden.device) >= self.window_size).view(1, 1, length, 1)
             head_out = torch.where(active, mixed_out, local_out)
@@ -2311,7 +2355,7 @@ class QCCSelfAttention(nn.Module):
         if hidden.ndim != 3 or hidden.shape[-1] != self.d_model:
             raise ValueError("hidden must have shape [batch, sequence, d_model]")
         bsz, length, _ = hidden.shape
-        q_proj, k_proj, v_proj, _ = self._project_qkv_gate(hidden)
+        q_proj, k_proj, v_proj, gate_proj = self._project_qkv_gate(hidden)
         q_raw = self._split_heads(q_proj)
         k_raw = self._split_heads(k_proj)
         v = self._split_heads(v_proj)
@@ -2326,6 +2370,7 @@ class QCCSelfAttention(nn.Module):
                 q,
                 k,
                 v,
+                gate_proj,
                 archive_hint=archive_hint,
                 archive_query_source=archive_q_source,
                 archive_key_source=archive_k_source,
@@ -2346,6 +2391,7 @@ class QCCSelfAttention(nn.Module):
                 q,
                 k,
                 v,
+                gate_proj,
                 archive_hint=archive_hint,
                 archive_query_source=archive_q_source,
                 archive_key_source=archive_k_source,

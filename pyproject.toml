@@ -15,6 +15,7 @@ license = {text = "MIT"}
 [project.optional-dependencies]
 dev = ["pytest>=7.4"]
 hf = ["transformers>=4.45"]
+hf-quant = ["transformers>=4.45", "bitsandbytes>=0.43"]
 vllm = ["vllm>=0.6"]
 
 [tool.setuptools.packages.find]

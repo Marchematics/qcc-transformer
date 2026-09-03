@@ -28,6 +28,7 @@ from qcc_transformer import (
     retrofit_adapter_state,
     save_retrofit_adapter,
 )
+from qcc_transformer.hf_loading import load_hf_causal_lm, model_input_device
 from qcc_transformer.admission_training import (
     balanced_admission_loss,
     salience_binary_labels,
@@ -140,7 +141,11 @@ def _teacher_examples(
     qcc = wrapper.qcc
     projection = qcc.q_proj
     device = projection.weight.device
-    dtype = projection.weight.dtype
+    dtype = getattr(projection, "compute_dtype", None)
+    if not isinstance(dtype, torch.dtype) or not dtype.is_floating_point:
+        dtype = qcc.gate.weight.dtype
+    if not dtype.is_floating_point:
+        dtype = torch.float16 if device.type == "cuda" else torch.float32
     examples: list[tuple[Tensor, Tensor, Tensor]] = []
     for record in hidden_records:
         hidden = record[layer_index].to(device=device, dtype=dtype)
@@ -151,7 +156,14 @@ def _teacher_examples(
         positions = torch.arange(
             hidden.shape[1], device=device, dtype=torch.long
         ).view(1, -1)
-        q_teacher, k_teacher = qcc._apply_rope(qh, kh, positions)
+        rotated_q, rotated_k = qcc._apply_rope(qh, kh, positions)
+        # The deployed hybrid archive defaults to position-invariant addressing.
+        # Generate teacher labels in that same coordinate system; otherwise the
+        # predictor is optimized for rotary phases that the bank never stores.
+        if qcc.archive_position_invariant:
+            q_teacher, k_teacher = qh, kh
+        else:
+            q_teacher, k_teacher = rotated_q, rotated_k
         salience = sampled_future_attention_salience(
             q_teacher,
             k_teacher,
@@ -163,7 +175,7 @@ def _teacher_examples(
             salience, positive_fraction=positive_fraction, min_positive=1
         )
         examples.append((kh.detach().cpu(), vh.detach().cpu(), labels.cpu()))
-        del hidden, q, k, v, qh, kh, vh, q_teacher, k_teacher, salience, labels
+        del hidden, q, k, v, qh, kh, vh, rotated_q, rotated_k, q_teacher, k_teacher, salience, labels
         if device.type == "cuda":
             torch.cuda.empty_cache()
     return examples
@@ -239,6 +251,28 @@ def _train_layer(
     }
 
 
+def _load_initial_adapter(model: torch.nn.Module, path: Path) -> None:
+    """Load a previously calibrated regular QCC adapter into a hybrid model."""
+
+    payload = torch.load(path, map_location="cpu")
+    state = payload.get("state_dict", payload) if isinstance(payload, dict) else payload
+    if not isinstance(state, dict):
+        raise ValueError("initial adapter must contain a state_dict mapping")
+    missing, unexpected = model.load_state_dict(state, strict=False)
+    required_missing = [
+        key
+        for key in missing
+        if ".qcc.gate." in key
+        or key.endswith(".qcc.archive.codes")
+        or key.endswith(".qcc.archive.mix_logits")
+    ]
+    if required_missing or unexpected:
+        raise ValueError(
+            "initial QCC adapter does not match the hybrid model: "
+            f"missing={required_missing}, unexpected={unexpected}"
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", required=True)
@@ -246,13 +280,20 @@ def main() -> None:
     parser.add_argument("--held-out-file", type=Path, default=None)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--report", type=Path, default=None)
+    parser.add_argument(
+        "--init-adapter",
+        type=Path,
+        default=None,
+        help="optional regular QCC adapter used to initialize the hybrid base path",
+    )
     parser.add_argument("--max-tokens", type=int, default=1024)
     parser.add_argument("--num-train-chunks", type=int, default=4)
     parser.add_argument("--num-held-chunks", type=int, default=2)
     parser.add_argument("--window-size", type=int, default=128)
     parser.add_argument("--num-codes", type=int, default=16)
-    parser.add_argument("--exact-num-sets", type=int, default=32)
+    parser.add_argument("--exact-num-sets", type=int, default=128)
     parser.add_argument("--exact-ways", type=int, default=4)
+    parser.add_argument("--exact-probe-sets", type=int, default=None)
     parser.add_argument("--max-inserts-per-chunk", type=int, default=8)
     parser.add_argument("--layers", default="all")
     parser.add_argument("--teacher-queries", type=int, default=128)
@@ -261,6 +302,7 @@ def main() -> None:
     parser.add_argument("--steps", type=int, default=100)
     parser.add_argument("--lr", type=float, default=0.02)
     parser.add_argument("--dtype", choices=("auto", "float16", "bfloat16", "float32"), default="auto")
+    parser.add_argument("--load-in-4bit", action="store_true", help="load the real checkpoint through bitsandbytes NF4")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--kv-head-policy", choices=("reject", "repeat"), default="repeat")
     parser.add_argument("--trust-remote-code", action="store_true")
@@ -282,11 +324,14 @@ def main() -> None:
     tokenizer = AutoTokenizer.from_pretrained(
         args.model, trust_remote_code=args.trust_remote_code
     )
-    model = AutoModelForCausalLM.from_pretrained(
+    model = load_hf_causal_lm(
         args.model,
-        torch_dtype=_dtype(args.dtype),
+        dtype=_dtype(args.dtype),
+        device=device,
         trust_remote_code=args.trust_remote_code,
-    ).to(device)
+        load_in_4bit=args.load_in_4bit,
+    )
+    device = model_input_device(model, device)
     model.eval()
     config = model.config
     layer_count = int(
@@ -327,9 +372,12 @@ def main() -> None:
         hybrid_kwargs={
             "exact_num_sets": args.exact_num_sets,
             "exact_ways": args.exact_ways,
+            "exact_probe_sets": args.exact_probe_sets,
             "max_inserts_per_chunk": args.max_inserts_per_chunk,
         },
     )
+    if args.init_adapter is not None:
+        _load_initial_adapter(model, args.init_adapter)
     wrappers = [
         module for module in model.modules() if isinstance(module, HFQCCAttention)
     ]
@@ -392,12 +440,14 @@ def main() -> None:
         "num_codes": args.num_codes,
         "exact_num_sets": args.exact_num_sets,
         "exact_ways": args.exact_ways,
+        "exact_probe_sets": args.exact_probe_sets,
         "max_inserts_per_chunk": args.max_inserts_per_chunk,
         "selected_layers": sorted(selected_layers),
         "trainable_parameters": trainable,
         "total_parameters": total,
         "trainable_fraction": trainable / max(1, total),
         "adapter_parameters": adapter_parameters,
+        "init_adapter": str(args.init_adapter) if args.init_adapter is not None else None,
         "hf_zero_business_code": True,
     }
     save_retrofit_adapter(model, args.output, **metadata)

@@ -323,7 +323,12 @@ class HFQCCAttention(nn.Module):
         # module defaults to fp32.  The gate participates in the fused
         # projection path, so keep it in the backbone projection dtype;
         # recurrent archive accumulators remain fp32 for numerical stability.
-        self.qcc.gate.to(device=q_proj.weight.device, dtype=q_proj.weight.dtype)
+        gate_dtype = getattr(q_proj, "compute_dtype", None)
+        if not isinstance(gate_dtype, torch.dtype) or not gate_dtype.is_floating_point:
+            gate_dtype = q_proj.weight.dtype
+        if not gate_dtype.is_floating_point:
+            gate_dtype = torch.float16 if q_proj.weight.device.type == "cuda" else torch.float32
+        self.qcc.gate.to(device=q_proj.weight.device, dtype=gate_dtype)
         # ``patch_hf_model`` is commonly called after ``from_pretrained(...).
         # to(device)``.  The newly-created archive therefore must be moved
         # explicitly; otherwise Triton receives CPU codebook pointers while
@@ -388,7 +393,17 @@ class HFQCCAttention(nn.Module):
         modern_cache_call = "past_key_values" in kwargs
         cache = kwargs.get("past_key_values", past_key_value)
         seen = int(self.qcc._seen_tokens)
-        reset = cache is None or seen == 0
+        # QCC deliberately does not expose physical historical K/V tensors.
+        # Consequently a modern HF generation loop may pass ``None`` (or a
+        # framework-owned cache that contains no QCC state) after the first
+        # call.  Treating that as a new request resets the archive on every
+        # generated token and silently turns long-context retrieval into a
+        # local-window model.  Request boundaries are explicit through
+        # ``reset_hf_qcc_cache``; the internal counter is authoritative here.
+        reset = seen == 0
+        if isinstance(cache, QCCCacheHandle) and cache.attention is not self.qcc:
+            raise ValueError("past_key_value belongs to a different QCC attention layer")
+        archive_hint = hidden_states if self.qcc.archive_lexical_landmark else None
         positions = self._positions(
             position_ids, batch, length, hidden_states.device, 0 if reset else seen
         )
@@ -402,18 +417,21 @@ class HFQCCAttention(nn.Module):
                 hidden_states,
                 reset_state=reset,
                 position_ids=positions,
+                archive_hint=archive_hint,
             )
         elif length == 1 and not reset:
             output = self.qcc.step(
                 hidden_states[:, 0],
                 reset_cache=False,
                 position_ids=positions[:, 0],
+                archive_hint=archive_hint,
             ).unsqueeze(1)
         else:
             output = self.qcc.step_chunk(
                 hidden_states,
                 reset_cache=reset,
                 position_ids=positions,
+                archive_hint=archive_hint,
             )
         present = QCCCacheHandle(self.qcc) if use_cache else None
         # Attention weights are intentionally unavailable: QCC computes a

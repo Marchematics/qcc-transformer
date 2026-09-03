@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import random
 from pathlib import Path
@@ -118,8 +117,7 @@ def main() -> None:
     content = "\n".join(rows) + "\n"
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(content)
-    digest = hashlib.sha256(content.encode()).hexdigest()
-    print(json.dumps({**header, "sha256": digest, "output": str(args.output)}, indent=2))
+    print(json.dumps({**header, "output": str(args.output)}, indent=2))
 
 
 if __name__ == "__main__":

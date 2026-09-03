@@ -1,6 +1,8 @@
+import pytest
 import torch
 
 from qcc_transformer import SetAssociativeLandmarkBank
+from qcc_transformer import triton_kernels
 
 
 def test_set_associative_bank_retains_multiple_records_in_same_set() -> None:
@@ -141,3 +143,33 @@ def test_read_chunk_matches_individual_reads_for_frozen_state() -> None:
         confidences.append(confidence)
     torch.testing.assert_close(block_out, torch.stack(outputs, dim=2))
     torch.testing.assert_close(block_conf, torch.stack(confidences, dim=2))
+
+
+@pytest.mark.skipif(
+    not torch.cuda.is_available() or not triton_kernels.TRITON_AVAILABLE,
+    reason="CUDA and Triton required",
+)
+def test_triton_exact_read_matches_reference(monkeypatch: pytest.MonkeyPatch) -> None:
+    torch.manual_seed(45)
+    bank = SetAssociativeLandmarkBank(
+        num_heads=2,
+        head_dim=8,
+        num_sets=8,
+        ways=2,
+        probe_sets=3,
+    ).cuda()
+    bank.reset_state(1, device=torch.device("cuda"), dtype=torch.float16)
+    for _ in range(6):
+        key = torch.randn(1, 2, 8, device="cuda", dtype=torch.float16)
+        bank.update(
+            key,
+            torch.randn_like(key),
+            admission_bias=torch.full((1, 2), 10.0, device="cuda"),
+        )
+    query = torch.randn(1, 2, 11, 8, device="cuda", dtype=torch.float16)
+    monkeypatch.setattr(triton_kernels, "TRITON_AVAILABLE", False)
+    reference_out, reference_conf = bank.read_chunk(query, hard=True)
+    monkeypatch.setattr(triton_kernels, "TRITON_AVAILABLE", True)
+    fused_out, fused_conf = bank.read_chunk(query, hard=True)
+    torch.testing.assert_close(fused_out, reference_out, rtol=0, atol=0)
+    torch.testing.assert_close(fused_conf, reference_conf, rtol=0, atol=1e-5)

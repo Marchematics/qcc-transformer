@@ -143,7 +143,11 @@ class QCCV1AttentionImpl(AttentionImpl[QCCV1AttentionMetadata]):
         self.scale = float(scale)
         self.kv_cache_dtype = kv_cache_dtype
         self.config = config
-        self.runtime = PackedHybridReferenceState(config, use_triton=False)
+        # Let the runtime take the fused CUDA local/archive paths when Triton is
+        # available.  The CPU/Python implementation remains the correctness
+        # fallback, but silently forcing it for stock vLLM would turn the custom
+        # backend into an interpreter benchmark rather than a serving backend.
+        self.runtime = PackedHybridReferenceState(config, use_triton=True)
         self._loaded_layer_name: str | None = None
 
     def _ensure_layer_weights(self, layer_name: str) -> None:
