@@ -251,6 +251,28 @@ def _train_layer(
     }
 
 
+def _load_initial_adapter(model: torch.nn.Module, path: Path) -> None:
+    """Load a previously calibrated regular QCC adapter into a hybrid model."""
+
+    payload = torch.load(path, map_location="cpu")
+    state = payload.get("state_dict", payload) if isinstance(payload, dict) else payload
+    if not isinstance(state, dict):
+        raise ValueError("initial adapter must contain a state_dict mapping")
+    missing, unexpected = model.load_state_dict(state, strict=False)
+    required_missing = [
+        key
+        for key in missing
+        if ".qcc.gate." in key
+        or key.endswith(".qcc.archive.codes")
+        or key.endswith(".qcc.archive.mix_logits")
+    ]
+    if required_missing or unexpected:
+        raise ValueError(
+            "initial QCC adapter does not match the hybrid model: "
+            f"missing={required_missing}, unexpected={unexpected}"
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", required=True)
@@ -258,6 +280,12 @@ def main() -> None:
     parser.add_argument("--held-out-file", type=Path, default=None)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--report", type=Path, default=None)
+    parser.add_argument(
+        "--init-adapter",
+        type=Path,
+        default=None,
+        help="optional regular QCC adapter used to initialize the hybrid base path",
+    )
     parser.add_argument("--max-tokens", type=int, default=1024)
     parser.add_argument("--num-train-chunks", type=int, default=4)
     parser.add_argument("--num-held-chunks", type=int, default=2)
@@ -265,6 +293,7 @@ def main() -> None:
     parser.add_argument("--num-codes", type=int, default=16)
     parser.add_argument("--exact-num-sets", type=int, default=128)
     parser.add_argument("--exact-ways", type=int, default=4)
+    parser.add_argument("--exact-probe-sets", type=int, default=None)
     parser.add_argument("--max-inserts-per-chunk", type=int, default=8)
     parser.add_argument("--layers", default="all")
     parser.add_argument("--teacher-queries", type=int, default=128)
@@ -343,9 +372,12 @@ def main() -> None:
         hybrid_kwargs={
             "exact_num_sets": args.exact_num_sets,
             "exact_ways": args.exact_ways,
+            "exact_probe_sets": args.exact_probe_sets,
             "max_inserts_per_chunk": args.max_inserts_per_chunk,
         },
     )
+    if args.init_adapter is not None:
+        _load_initial_adapter(model, args.init_adapter)
     wrappers = [
         module for module in model.modules() if isinstance(module, HFQCCAttention)
     ]
@@ -408,12 +440,14 @@ def main() -> None:
         "num_codes": args.num_codes,
         "exact_num_sets": args.exact_num_sets,
         "exact_ways": args.exact_ways,
+        "exact_probe_sets": args.exact_probe_sets,
         "max_inserts_per_chunk": args.max_inserts_per_chunk,
         "selected_layers": sorted(selected_layers),
         "trainable_parameters": trainable,
         "total_parameters": total,
         "trainable_fraction": trainable / max(1, total),
         "adapter_parameters": adapter_parameters,
+        "init_adapter": str(args.init_adapter) if args.init_adapter is not None else None,
         "hf_zero_business_code": True,
     }
     save_retrofit_adapter(model, args.output, **metadata)

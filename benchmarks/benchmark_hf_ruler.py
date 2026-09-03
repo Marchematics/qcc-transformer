@@ -51,6 +51,8 @@ def _run_model(
     records: list[tuple[int, dict]],
     device: torch.device,
     max_new_tokens: int,
+    *,
+    qcc: bool = False,
 ) -> list[dict]:
     results: list[dict] = []
     for line_number, record in records:
@@ -60,6 +62,11 @@ def _run_model(
             "length_chars": len(record["input"]),
         }
         try:
+            # Each RULER record is an independent serving request.  The
+            # retrofit owns its history outside Transformers' cache, so the
+            # request boundary must be explicit for every record.
+            if qcc:
+                reset_hf_qcc_cache(model, batch_size=1)
             encoded = tokenizer(record["input"], return_tensors="pt", add_special_tokens=False)
             encoded = {key: value.to(device) for key, value in encoded.items()}
             result["tokens"] = int(encoded["input_ids"].shape[-1])
@@ -94,6 +101,7 @@ def main() -> None:
     parser.add_argument("--adapter", type=Path, default=None)
     parser.add_argument("--exact-num-sets", type=int, default=128)
     parser.add_argument("--exact-ways", type=int, default=4)
+    parser.add_argument("--exact-probe-sets", type=int, default=None)
     parser.add_argument(
         "--archive-position-invariant",
         action=argparse.BooleanOptionalAction,
@@ -129,7 +137,9 @@ def main() -> None:
         load_in_4bit=args.load_in_4bit,
     )
     model_device = model_input_device(baseline, device)
-    baseline_results = _run_model(baseline, tokenizer, records, model_device, args.max_new_tokens)
+    baseline_results = _run_model(
+        baseline, tokenizer, records, model_device, args.max_new_tokens, qcc=False
+    )
     del baseline
     gc.collect()
     if device.type == "cuda":
@@ -157,6 +167,7 @@ def main() -> None:
             hybrid_kwargs={
                 "exact_num_sets": args.exact_num_sets,
                 "exact_ways": args.exact_ways,
+                "exact_probe_sets": args.exact_probe_sets,
             },
             window_size=args.window_size,
             num_codes=args.num_codes,
@@ -164,8 +175,9 @@ def main() -> None:
             kv_head_policy=args.kv_head_policy,
         )
         enable_qkv_only_deployment_profile(patched)
-    reset_hf_qcc_cache(patched, batch_size=1)
-    qcc_results = _run_model(patched, tokenizer, records, patched_device, args.max_new_tokens)
+    qcc_results = _run_model(
+        patched, tokenizer, records, patched_device, args.max_new_tokens, qcc=True
+    )
     baseline_correct = sum(bool(item["correct"]) for item in baseline_results)
     qcc_correct = sum(bool(item["correct"]) for item in qcc_results)
     result = {

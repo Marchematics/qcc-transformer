@@ -131,6 +131,25 @@ directional logit loss into the historical MSE objective, which is useful when
 top-1/ranking fidelity lags behind the training MSE.  Set the weight to `0` to
 reproduce prior runs exactly.
 
+For the hybrid exact tier, first calibrate the regular QCC adapter, then pass it
+as `--init-adapter` to `benchmarks/calibrate_hf_admission.py`.  That second
+calibration labels admissions from sampled future Full-KV attention and stores
+the recurrent archive, exact bank, predictor, and mix parameters together:
+
+```bash
+python benchmarks/calibrate_hf_admission.py \
+  --model <model-id-or-local-snapshot> \
+  --train-file train.txt --held-out-file heldout.txt \
+  --init-adapter artifacts/hf/qcc_adapter.pt \
+  --output artifacts/hf/qcc_hybrid_adapter.pt \
+  --exact-num-sets 128 --exact-ways 4 --kv-head-policy repeat
+```
+
+Use the resulting file with `--adapter` on the real-HF retrieval, latency,
+memory, concurrency, RULER, LongBench, or PG-19 runners.  `--exact-probe-sets`
+can increase routing coverage for a quality run; keep the setting identical
+between matched QCC runs and measure its serving cost separately.
+
 For a parameter-free safety variant, `--archive-norm-gating` attenuates the
 archive contribution when its response norm disagrees with the exact local
 window. It preserves O(1) state and is included in the final 10-GPU sweep as a

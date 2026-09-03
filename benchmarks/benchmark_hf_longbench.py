@@ -71,6 +71,7 @@ def main() -> None:
     parser.add_argument("--num-codes", type=int, default=64)
     parser.add_argument("--exact-num-sets", type=int, default=128)
     parser.add_argument("--exact-ways", type=int, default=4)
+    parser.add_argument("--exact-probe-sets", type=int, default=None)
     parser.add_argument("--archive-mix", type=float, default=0.125)
     parser.add_argument("--kv-head-policy", choices=("reject", "repeat"), default="repeat")
     parser.add_argument("--apply-chat-template", action="store_true")
@@ -120,7 +121,11 @@ def main() -> None:
         patched_layers = load_hybrid_retrofit_adapter(
             model,
             args.adapter,
-            hybrid_kwargs={"exact_num_sets": args.exact_num_sets, "exact_ways": args.exact_ways},
+            hybrid_kwargs={
+                "exact_num_sets": args.exact_num_sets,
+                "exact_ways": args.exact_ways,
+                "exact_probe_sets": args.exact_probe_sets,
+            },
             window_size=args.window_size,
             num_codes=args.num_codes,
             max_position_embeddings=max_context,

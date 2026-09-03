@@ -24,6 +24,11 @@ def main() -> None:
     parser.add_argument("--chunk-size", type=int, default=512)
     parser.add_argument("--window-size", type=int, default=128)
     parser.add_argument("--num-codes", type=int, default=16)
+    parser.add_argument("--adapter", type=Path, default=None)
+    parser.add_argument("--exact-num-sets", type=int, default=128)
+    parser.add_argument("--exact-ways", type=int, default=4)
+    parser.add_argument("--exact-probe-sets", type=int, default=None)
+    parser.add_argument("--archive-mix", type=float, default=0.125)
     parser.add_argument("--dtype", choices=("float16", "bfloat16", "float32"), default="bfloat16")
     parser.add_argument("--load-in-4bit", action="store_true", help="load the real checkpoint through bitsandbytes NF4")
     parser.add_argument("--device", default="cuda")
@@ -48,6 +53,8 @@ def main() -> None:
             "--chunk-size", str(args.chunk_size),
             "--window-size", str(args.window_size),
             "--num-codes", str(args.num_codes),
+            "--exact-num-sets", str(args.exact_num_sets),
+            "--exact-ways", str(args.exact_ways),
             "--dtype", args.dtype,
             "--device", args.device,
             "--kv-head-policy", args.kv_head_policy,
@@ -57,6 +64,13 @@ def main() -> None:
             command.append("--trust-remote-code")
         if args.load_in_4bit:
             command.append("--load-in-4bit")
+        if args.adapter is not None:
+            command.extend([
+                "--adapter", str(args.adapter),
+                "--archive-mix", str(args.archive_mix),
+            ])
+            if args.exact_probe_sets is not None:
+                command.extend(["--exact-probe-sets", str(args.exact_probe_sets)])
         completed = subprocess.run(command, text=True, stdout=log.open("w"), stderr=subprocess.STDOUT)
         point: dict[str, object] = {"batch_size": batch_size, "returncode": completed.returncode, "output": str(output), "log": str(log)}
         if output.exists():
