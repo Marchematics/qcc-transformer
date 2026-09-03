@@ -72,7 +72,10 @@ def _chunked_kl_divergence(
     if temperature <= 0:
         raise ValueError("temperature must be positive")
     teacher = teacher_cpu.float() / temperature
-    teacher_log_norm = torch.logsumexp(teacher, dim=-1)
+    # Keep the full teacher logits on CPU, but move the token-wise normalizer
+    # to the student device.  It is only [batch, tokens], unlike the vocab
+    # dimension, and avoids a CPU/GPU operation in the KL reduction below.
+    teacher_log_norm = torch.logsumexp(teacher, dim=-1).to(device=student.device)
     student_log_norm = torch.full(
         student.shape[:-1], -torch.inf, device=student.device, dtype=torch.float32
     )
@@ -85,7 +88,7 @@ def _chunked_kl_divergence(
     total = student.new_zeros((), dtype=torch.float32)
     for start in range(0, student.shape[-1], chunk_size):
         end = min(start + chunk_size, student.shape[-1])
-        teacher_slice = teacher[..., start:end]
+        teacher_slice = teacher[..., start:end].to(device=student.device)
         student_slice = student[..., start:end].float() / temperature
         teacher_log_prob = teacher_slice - teacher_log_norm.unsqueeze(-1)
         student_log_prob = student_slice - student_log_norm.unsqueeze(-1)

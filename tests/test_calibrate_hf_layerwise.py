@@ -80,3 +80,15 @@ def test_chunked_kl_is_zero_for_identical_logits():
     loss = _chunked_kl_divergence(logits, logits, chunk_size=4)
     assert torch.isfinite(loss)
     assert loss.item() < 1e-5
+
+
+@pytest.mark.skipif(not __import__("torch").cuda.is_available(), reason="CUDA unavailable")
+def test_chunked_kl_supports_cpu_teacher_and_cuda_student():
+    import torch
+
+    teacher = torch.randn(1, 2, 17)
+    student = teacher.detach().cuda().requires_grad_()
+    loss = _chunked_kl_divergence(student, teacher, chunk_size=5)
+    assert torch.isfinite(loss)
+    loss.backward()
+    assert student.grad is not None
