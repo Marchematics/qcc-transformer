@@ -20,6 +20,24 @@ source .venv/bin/activate
 pip install -e '.[dev]'
 ```
 
+For a real 1--7B checkpoint on a smaller CUDA card, the optional bitsandbytes
+loader keeps the pretrained weights quantized while leaving the QCC retrofit
+and cache state unchanged:
+
+```bash
+pip install -e '.[hf-quant]'
+python benchmarks/benchmark_hf_retrofit.py \
+  --model Qwen/Qwen2.5-7B-Instruct-1M --device cuda \
+  --dtype float16 --load-in-4bit --kv-head-policy repeat \
+  --prompt-file heldout.txt --output artifacts/hf/qwen_retrofit.json
+```
+
+The same `--load-in-4bit` option is available on the real-HF retrieval,
+RULER, LongBench, PG-19, latency, memory, concurrency, and calibration
+entry points.  Quantizing weights does not make a million-token Full-KV
+control fit on a small card: use hardware that can hold both matched runs
+before interpreting a 1M paired result.
+
 ### Real-model retrofit (experimental)
 
 Load a compatible Hugging Face decoder first, then opt in to bounded QCC
