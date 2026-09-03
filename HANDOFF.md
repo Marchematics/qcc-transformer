@@ -212,6 +212,8 @@ python benchmarks/gate_99.py --evidence artifacts/gates/<run_id>.json
   把本地 API 检查当作 serving 结果。
 - 0.28 上游 `MambaSpec.mamba_type` 是严格枚举字段；QCC 自定义 attention 不写入
   伪造的字符串类型，保留上游默认值以兼容 worker/KV-transfer 路径。
+- `benchmarks/benchmark_hf_latency.py` 的每个 repeat 现在独立复制 decode
+  `attention_mask`，避免前一个请求追加的 token 泄漏到后续 TPOT/p95/p99 样本。
 - `QCCSelfAttention` 新增可选 `archive_norm_gating`（参数量不变、O(1) 状态），
   按 local/archive 响应范数一致性抑制异常远程读；默认关闭，10 卡 sweep 的
   GPU9 打开该消融。
