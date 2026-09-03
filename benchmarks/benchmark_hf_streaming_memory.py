@@ -19,6 +19,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from qcc_transformer import patch_hf_model, reset_hf_qcc_cache
+from qcc_transformer.hf_loading import load_hf_causal_lm, model_input_device
 
 
 def _sync(device: torch.device) -> None:
@@ -96,6 +97,8 @@ def main() -> None:
     parser.add_argument("--chunk-size", type=int, default=512)
     parser.add_argument("--window-size", type=int, default=128)
     parser.add_argument("--num-codes", type=int, default=16)
+    parser.add_argument("--dtype", choices=("float16", "bfloat16", "float32"), default="bfloat16")
+    parser.add_argument("--load-in-4bit", action="store_true", help="load the real checkpoint through bitsandbytes NF4")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--kv-head-policy", choices=("reject", "repeat"), default="repeat")
     parser.add_argument("--trust-remote-code", action="store_true")
@@ -106,6 +109,7 @@ def main() -> None:
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     device = torch.device(args.device)
+    dtype = {"float16": torch.float16, "bfloat16": torch.bfloat16, "float32": torch.float32}[args.dtype]
     common = {"trust_remote_code": args.trust_remote_code}
     tokenizer = AutoTokenizer.from_pretrained(args.model, **common)
     stream = _token_stream(tokenizer, args.total_tokens)
@@ -114,14 +118,28 @@ def main() -> None:
     # shared-prefix workload when the goal is independent-request concurrency.
     tokens = torch.stack([stream.roll(shifts=index) for index in range(args.batch_size)])
 
-    baseline = AutoModelForCausalLM.from_pretrained(args.model, **common).to(device).eval()
-    baseline_result = _run_stream(baseline, tokens, device, args.chunk_size)
+    baseline = load_hf_causal_lm(
+        args.model,
+        dtype=dtype,
+        device=device,
+        trust_remote_code=args.trust_remote_code,
+        load_in_4bit=args.load_in_4bit,
+    )
+    baseline_device = model_input_device(baseline, device)
+    baseline_result = _run_stream(baseline, tokens, baseline_device, args.chunk_size)
     del baseline
     gc.collect()
     if device.type == "cuda":
         torch.cuda.empty_cache()
 
-    patched = AutoModelForCausalLM.from_pretrained(args.model, **common).to(device).eval()
+    patched = load_hf_causal_lm(
+        args.model,
+        dtype=dtype,
+        device=device,
+        trust_remote_code=args.trust_remote_code,
+        load_in_4bit=args.load_in_4bit,
+    )
+    patched_device = model_input_device(patched, device)
     replaced = patch_hf_model(
         patched,
         window_size=args.window_size,
@@ -129,7 +147,7 @@ def main() -> None:
         kv_head_policy=args.kv_head_policy,
     )
     reset_hf_qcc_cache(patched, batch_size=args.batch_size)
-    qcc_result = _run_stream(patched, tokens, device, args.chunk_size)
+    qcc_result = _run_stream(patched, tokens, patched_device, args.chunk_size)
     result = {
         "model": args.model,
         "model_id": str(args.model),

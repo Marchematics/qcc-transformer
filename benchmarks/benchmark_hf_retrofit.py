@@ -18,6 +18,7 @@ import torch
 # Permit running this file directly from a fresh checkout.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from qcc_transformer import compare_logits, load_retrofit_adapter, patch_hf_model
+from qcc_transformer.hf_loading import load_hf_causal_lm, model_input_device
 
 
 def main() -> None:
@@ -39,6 +40,8 @@ def main() -> None:
     )
     parser.add_argument("--max-position-embeddings", type=int, default=None)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument("--dtype", choices=("float16", "bfloat16", "float32"), default="bfloat16")
+    parser.add_argument("--load-in-4bit", action="store_true", help="load the real checkpoint through bitsandbytes NF4")
     parser.add_argument("--trust-remote-code", action="store_true")
     parser.add_argument("--quality-gate", type=float, default=0.99)
     parser.add_argument("--kv-head-policy", choices=("reject", "repeat"), default="reject")
@@ -77,26 +80,46 @@ def main() -> None:
         raise SystemExit("install qcc-transformer[hf] to run this benchmark") from exc
 
     device = torch.device(args.device)
+    dtype = {"float16": torch.float16, "bfloat16": torch.bfloat16, "float32": torch.float32}[args.dtype]
     common = {"trust_remote_code": args.trust_remote_code}
     tokenizer = AutoTokenizer.from_pretrained(args.model, **common)
     # Keep this count tied to the actual loaded checkpoint rather than a model
     # name or config estimate.  The 99 gate uses it to enforce the 1--7B scope.
-    metadata_model = AutoModelForCausalLM.from_pretrained(args.model, **common)
+    metadata_model = load_hf_causal_lm(
+        args.model,
+        dtype=dtype,
+        device=device,
+        trust_remote_code=args.trust_remote_code,
+        load_in_4bit=args.load_in_4bit,
+    )
     parameter_count = sum(parameter.numel() for parameter in metadata_model.parameters())
     del metadata_model
     if device.type == "cuda":
         torch.cuda.empty_cache()
-    baseline = AutoModelForCausalLM.from_pretrained(args.model, **common).to(device).eval()
+    baseline = load_hf_causal_lm(
+        args.model,
+        dtype=dtype,
+        device=device,
+        trust_remote_code=args.trust_remote_code,
+        load_in_4bit=args.load_in_4bit,
+    )
+    model_device = model_input_device(baseline, device)
     references = []
     for prompt in prompts:
         encoded = tokenizer(prompt, return_tensors="pt", add_special_tokens=True)
-        encoded = {key: value.to(device) for key, value in encoded.items()}
+        encoded = {key: value.to(model_device) for key, value in encoded.items()}
         with torch.no_grad():
             references.append((encoded, baseline(**encoded, use_cache=False).logits.cpu()))
     del baseline
     if device.type == "cuda":
         torch.cuda.empty_cache()
-    patched = AutoModelForCausalLM.from_pretrained(args.model, **common).to(device).eval()
+    patched = load_hf_causal_lm(
+        args.model,
+        dtype=dtype,
+        device=device,
+        trust_remote_code=args.trust_remote_code,
+        load_in_4bit=args.load_in_4bit,
+    )
     patch_kwargs = {
         "window_size": args.window_size,
         "num_codes": args.num_codes,
@@ -108,10 +131,12 @@ def main() -> None:
         replaced = patch_hf_model(patched, **patch_kwargs)
     else:
         replaced = load_retrofit_adapter(patched, args.adapter, **patch_kwargs)
+    patched_device = model_input_device(patched, device)
     reports = []
     with torch.no_grad():
         for encoded, reference in references:
-            candidate = patched(**encoded, use_cache=False).logits.cpu()
+            patched_encoded = {key: value.to(patched_device) for key, value in encoded.items()}
+            candidate = patched(**patched_encoded, use_cache=False).logits.cpu()
             reports.append(compare_logits(reference, candidate, quality_gate=args.quality_gate))
     cosine = sum(r.mean_logit_cosine for r in reports) / len(reports)
     top1 = sum(r.top1_agreement for r in reports) / len(reports)

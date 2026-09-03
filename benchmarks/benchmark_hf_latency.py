@@ -20,6 +20,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from qcc_transformer import patch_hf_model, reset_hf_qcc_cache
+from qcc_transformer.hf_loading import load_hf_causal_lm, model_input_device
 
 
 def _sync(device: torch.device) -> None:
@@ -61,6 +62,8 @@ def main() -> None:
         help="use raw Q/K for archive addressing while local attention keeps RoPE",
     )
     parser.add_argument("--num-decode-steps", type=int, default=8)
+    parser.add_argument("--dtype", choices=("float16", "bfloat16", "float32"), default="bfloat16")
+    parser.add_argument("--load-in-4bit", action="store_true", help="load the real checkpoint through bitsandbytes NF4")
     parser.add_argument("--kv-head-policy", choices=("reject", "repeat"), default="reject")
     parser.add_argument("--trust-remote-code", action="store_true")
     args = parser.parse_args()
@@ -71,16 +74,30 @@ def main() -> None:
     except ImportError as exc:  # pragma: no cover
         raise SystemExit("install qcc-transformer[hf] to run this benchmark") from exc
     device = torch.device(args.device)
+    dtype = {"float16": torch.float16, "bfloat16": torch.bfloat16, "float32": torch.float32}[args.dtype]
     common = {"trust_remote_code": args.trust_remote_code}
     tokenizer = AutoTokenizer.from_pretrained(args.model, **common)
     encoded = tokenizer(args.prompt, return_tensors="pt", add_special_tokens=True)
-    encoded = {key: value.to(device) for key, value in encoded.items()}
-    baseline = AutoModelForCausalLM.from_pretrained(args.model, **common).to(device).eval()
-    baseline_ttft, baseline_tpot = _measure(baseline, encoded, device, args.num_decode_steps)
+    baseline = load_hf_causal_lm(
+        args.model,
+        dtype=dtype,
+        device=device,
+        trust_remote_code=args.trust_remote_code,
+        load_in_4bit=args.load_in_4bit,
+    )
+    model_device = model_input_device(baseline, device)
+    encoded = {key: value.to(model_device) for key, value in encoded.items()}
+    baseline_ttft, baseline_tpot = _measure(baseline, encoded, model_device, args.num_decode_steps)
     del baseline
     if device.type == "cuda":
         torch.cuda.empty_cache()
-    patched = AutoModelForCausalLM.from_pretrained(args.model, **common).to(device).eval()
+    patched = load_hf_causal_lm(
+        args.model,
+        dtype=dtype,
+        device=device,
+        trust_remote_code=args.trust_remote_code,
+        load_in_4bit=args.load_in_4bit,
+    )
     replaced = patch_hf_model(
         patched,
         window_size=args.window_size,
@@ -89,7 +106,9 @@ def main() -> None:
         kv_head_policy=args.kv_head_policy,
     )
     reset_hf_qcc_cache(patched, batch_size=1)
-    qcc_ttft, qcc_tpot = _measure(patched, encoded, device, args.num_decode_steps)
+    patched_device = model_input_device(patched, device)
+    patched_encoded = {key: value.to(patched_device) for key, value in encoded.items()}
+    qcc_ttft, qcc_tpot = _measure(patched, patched_encoded, patched_device, args.num_decode_steps)
     result = {
         "model": args.model,
         "tokens": int(encoded["input_ids"].shape[-1]),

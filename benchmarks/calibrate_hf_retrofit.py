@@ -18,6 +18,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from qcc_transformer import patch_hf_model, save_retrofit_adapter
+from qcc_transformer.hf_loading import load_hf_causal_lm, model_input_device
 
 
 def _chunked_mse(student: torch.Tensor, teacher_cpu: torch.Tensor, *, chunk_size: int = 8192) -> torch.Tensor:
@@ -74,6 +75,8 @@ def main() -> None:
         help="use raw (unrotated) Q/K for long-range archive addressing; local attention keeps RoPE",
     )
     parser.add_argument("--max-tokens", type=int, default=2048)
+    parser.add_argument("--dtype", choices=("auto", "float16", "bfloat16", "float32"), default="auto")
+    parser.add_argument("--load-in-4bit", action="store_true", help="load the real checkpoint through bitsandbytes NF4")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--trust-remote-code", action="store_true")
     parser.add_argument("--kv-head-policy", choices=("reject", "repeat"), default="reject")
@@ -105,6 +108,11 @@ def main() -> None:
         raise SystemExit("install qcc-transformer[hf] to run calibration") from exc
 
     device = torch.device(args.device)
+    dtype = None if args.dtype == "auto" else {
+        "float16": torch.float16,
+        "bfloat16": torch.bfloat16,
+        "float32": torch.float32,
+    }[args.dtype]
     common = {"trust_remote_code": args.trust_remote_code}
     tokenizer = AutoTokenizer.from_pretrained(args.model, **common)
     encoded = tokenizer(
@@ -119,14 +127,30 @@ def main() -> None:
     # its 1--7B backbone before loading the trainable retrofit copy.  Keeping
     # both models on a 24GB card doubles the checkpoint footprint and makes a
     # modest 512-token calibration look like an algorithmic OOM.
-    baseline = AutoModelForCausalLM.from_pretrained(args.model, **common).to(device).eval()
+    baseline = load_hf_causal_lm(
+        args.model,
+        dtype=dtype,
+        device=device,
+        trust_remote_code=args.trust_remote_code,
+        load_in_4bit=args.load_in_4bit,
+    )
+    model_device = model_input_device(baseline, device)
+    encoded = {key: value.to(model_device) for key, value in encoded.items()}
     with torch.no_grad():
         teacher = baseline(**encoded, use_cache=False).logits.float().cpu()
     del baseline
     if device.type == "cuda":
         torch.cuda.empty_cache()
 
-    patched = AutoModelForCausalLM.from_pretrained(args.model, **common).to(device)
+    patched = load_hf_causal_lm(
+        args.model,
+        dtype=dtype,
+        device=device,
+        trust_remote_code=args.trust_remote_code,
+        load_in_4bit=args.load_in_4bit,
+    )
+    patched_device = model_input_device(patched, device)
+    patched_encoded = {key: value.to(patched_device) for key, value in encoded.items()}
     replaced = patch_hf_model(
         patched,
         window_size=args.window_size,
@@ -172,7 +196,7 @@ def main() -> None:
     last_loss = float("nan")
     for _ in range(args.steps):
         optimizer.zero_grad(set_to_none=True)
-        student = patched(**encoded, use_cache=False).logits.float()
+        student = patched(**patched_encoded, use_cache=False).logits.float()
         loss = _chunked_mse(student, teacher)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(trainable, 1.0)
@@ -180,7 +204,7 @@ def main() -> None:
         last_loss = float(loss.detach().item())
     patched.eval()
     with torch.no_grad():
-        student = patched(**encoded, use_cache=False).logits.float()
+        student = patched(**patched_encoded, use_cache=False).logits.float()
         cosine = _mean_cosine_from_cpu(student, teacher)
         agreement = (student.argmax(-1).cpu() == teacher.argmax(-1)).float().mean()
     args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -217,7 +241,7 @@ def main() -> None:
                 "vllm_zero_code_changes": True,
                 "gradient_checkpointing": args.gradient_checkpointing,
                 "output": str(args.output),
-                "tokens": int(encoded["input_ids"].shape[-1]),
+                "tokens": int(patched_encoded["input_ids"].shape[-1]),
                 "steps": args.steps,
                 "final_mse": last_loss,
                 "mean_logit_cosine": float(cosine.item()),

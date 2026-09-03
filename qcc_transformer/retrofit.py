@@ -323,7 +323,12 @@ class HFQCCAttention(nn.Module):
         # module defaults to fp32.  The gate participates in the fused
         # projection path, so keep it in the backbone projection dtype;
         # recurrent archive accumulators remain fp32 for numerical stability.
-        self.qcc.gate.to(device=q_proj.weight.device, dtype=q_proj.weight.dtype)
+        gate_dtype = getattr(q_proj, "compute_dtype", None)
+        if not isinstance(gate_dtype, torch.dtype) or not gate_dtype.is_floating_point:
+            gate_dtype = q_proj.weight.dtype
+        if not gate_dtype.is_floating_point:
+            gate_dtype = torch.float16 if q_proj.weight.device.type == "cuda" else torch.float32
+        self.qcc.gate.to(device=q_proj.weight.device, dtype=gate_dtype)
         # ``patch_hf_model`` is commonly called after ``from_pretrained(...).
         # to(device)``.  The newly-created archive therefore must be moved
         # explicitly; otherwise Triton receives CPU codebook pointers while

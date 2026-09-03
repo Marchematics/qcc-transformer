@@ -20,6 +20,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from qcc_transformer.hybrid_archive import load_hybrid_retrofit_adapter
+from qcc_transformer.hf_loading import load_hf_causal_lm, model_input_device
 from qcc_transformer.production_profile import enable_qkv_only_deployment_profile
 from qcc_transformer.retrofit import reset_hf_qcc_cache
 
@@ -139,6 +140,7 @@ def main() -> None:
     parser.add_argument("--adapter", type=Path)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--dtype", choices=("float16", "bfloat16", "float32"), default="bfloat16")
+    parser.add_argument("--load-in-4bit", action="store_true", help="load the real checkpoint through bitsandbytes NF4")
     parser.add_argument("--max-new-tokens", type=int, default=16)
     parser.add_argument("--window-size", type=int, default=128)
     parser.add_argument("--num-codes", type=int, default=64)
@@ -166,7 +168,14 @@ def main() -> None:
     dtype = _dtype(args.dtype)
     common = {"trust_remote_code": args.trust_remote_code}
     tokenizer = AutoTokenizer.from_pretrained(args.model, **common)
-    model = AutoModelForCausalLM.from_pretrained(args.model, torch_dtype=dtype, **common).to(device).eval()
+    model = load_hf_causal_lm(
+        args.model,
+        dtype=dtype,
+        device=device,
+        trust_remote_code=args.trust_remote_code,
+        load_in_4bit=args.load_in_4bit,
+    )
+    model_device = model_input_device(model, device)
     native_context = _native_context(model)
     if args.require_native_context and (native_context is None or native_context < context_tokens):
         raise RuntimeError(
@@ -218,7 +227,7 @@ def main() -> None:
                 target_depth = actual_depths[target_sorted_index]
                 row["target_depth"] = target_depth
                 row["depth_bucket"] = depth_bucket(target_depth)
-                encoded = ids.to(device)
+                encoded = ids.to(model_device)
                 if args.mode == "qcc":
                     reset_hf_qcc_cache(model, batch_size=1)
                 with torch.inference_mode():

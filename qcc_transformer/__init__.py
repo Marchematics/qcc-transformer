@@ -27,6 +27,7 @@ from .retrofit import (
     compare_logits,
     reset_hf_qcc_cache,
 )
+from .hf_loading import load_hf_causal_lm, model_input_device
 from .vllm import QCCVLLMBackend, QCCVLLMState
 from .vllm_hybrid import HybridQCCVLLMBackend, HybridQCCVLLMState
 from .vllm_plugin import register_vllm_backend
@@ -54,6 +55,8 @@ __all__ = [
     "save_retrofit_adapter",
     "compare_logits",
     "reset_hf_qcc_cache",
+    "load_hf_causal_lm",
+    "model_input_device",
     "QCCVLLMState",
     "QCCVLLMBackend",
     "HybridQCCVLLMState",

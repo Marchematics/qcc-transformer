@@ -24,6 +24,8 @@ def main() -> None:
     parser.add_argument("--chunk-size", type=int, default=512)
     parser.add_argument("--window-size", type=int, default=128)
     parser.add_argument("--num-codes", type=int, default=16)
+    parser.add_argument("--dtype", choices=("float16", "bfloat16", "float32"), default="bfloat16")
+    parser.add_argument("--load-in-4bit", action="store_true", help="load the real checkpoint through bitsandbytes NF4")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--kv-head-policy", choices=("reject", "repeat"), default="repeat")
     parser.add_argument("--trust-remote-code", action="store_true")
@@ -46,12 +48,15 @@ def main() -> None:
             "--chunk-size", str(args.chunk_size),
             "--window-size", str(args.window_size),
             "--num-codes", str(args.num_codes),
+            "--dtype", args.dtype,
             "--device", args.device,
             "--kv-head-policy", args.kv_head_policy,
             "--output", str(output),
         ]
         if args.trust_remote_code:
             command.append("--trust-remote-code")
+        if args.load_in_4bit:
+            command.append("--load-in-4bit")
         completed = subprocess.run(command, text=True, stdout=log.open("w"), stderr=subprocess.STDOUT)
         point: dict[str, object] = {"batch_size": batch_size, "returncode": completed.returncode, "output": str(output), "log": str(log)}
         if output.exists():
