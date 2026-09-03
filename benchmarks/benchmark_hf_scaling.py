@@ -45,6 +45,15 @@ def _point(length: int, result: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def _native_context(config: Any) -> int | None:
+    values = [
+        getattr(config, name, None)
+        for name in ("max_position_embeddings", "n_positions", "max_sequence_length")
+    ]
+    values = [int(value) for value in values if isinstance(value, int) and value > 0]
+    return max(values) if values else None
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", required=True)
@@ -76,6 +85,30 @@ def main() -> None:
     lengths = [int(raw.strip()) for raw in args.lengths.split(",") if raw.strip()]
     if not lengths or any(length <= 0 for length in lengths):
         raise ValueError("lengths must contain positive integers")
+    if len(set(lengths)) != len(lengths):
+        raise ValueError("lengths must not contain duplicates")
+    required_lengths = {128_000, 256_000, 512_000, 1_000_000}
+    if not required_lengths.issubset(lengths):
+        raise ValueError("scaling protocol requires 128K, 256K, 512K, and 1M points")
+    try:
+        from transformers import AutoConfig
+    except ImportError as exc:
+        raise SystemExit("install qcc-transformer[hf] to inspect native context") from exc
+    config = AutoConfig.from_pretrained(
+        args.model, trust_remote_code=args.trust_remote_code
+    )
+    native_context_tokens = _native_context(config)
+    target_native_context = max(lengths)
+    if native_context_tokens is None or native_context_tokens < target_native_context:
+        raise ValueError(
+            "scaling protocol requires native context >= the longest point: "
+            f"native={native_context_tokens}, requested={target_native_context}"
+        )
+    if args.min_native_context is not None and args.min_native_context > native_context_tokens:
+        raise ValueError(
+            "--min-native-context exceeds the checkpoint native context: "
+            f"native={native_context_tokens}, requested={args.min_native_context}"
+        )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     points: list[dict[str, Any]] = []
     for length in lengths:
@@ -100,8 +133,7 @@ def main() -> None:
         for flag in ("--load-in-4bit", "--trust-remote-code"):
             if getattr(args, flag[2:].replace("-", "_")):
                 command.append(flag)
-        if args.min_native_context is not None:
-            command.extend(["--min-native-context", str(args.min_native_context)])
+        command.extend(["--min-native-context", str(target_native_context)])
         if args.adapter is not None:
             command.extend([
                 "--adapter", str(args.adapter),
@@ -130,7 +162,8 @@ def main() -> None:
         "synthetic": False,
         "protocol_locked": args.protocol_locked,
         "qcc_only": False,
-        "native_context_required": args.min_native_context,
+        "native_context_required": target_native_context,
+        "native_context_tokens": native_context_tokens,
         "lengths": lengths,
         "points": points,
         "note": "Real-HF scaling diagnostic; a point is paired only when both sides complete.",
