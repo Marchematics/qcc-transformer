@@ -84,6 +84,127 @@ try:  # pragma: no cover - exercised only on a Triton-enabled GPU runner
         )
 
     @triton.jit
+    def _qcc_local_ring_decode_kernel(
+        output_ptr,
+        query_ptr,
+        ring_key_ptr,
+        ring_value_ptr,
+        current_key_ptr,
+        current_value_ptr,
+        start_ptr,
+        length_ptr,
+        num_heads,
+        stride_ob,
+        stride_oh,
+        stride_od,
+        stride_qb,
+        stride_qh,
+        stride_qd,
+        stride_rkb,
+        stride_rkh,
+        stride_rkw,
+        stride_rkd,
+        stride_rvb,
+        stride_rvh,
+        stride_rvw,
+        stride_rvd,
+        stride_ckb,
+        stride_ckh,
+        stride_ckd,
+        stride_cvb,
+        stride_cvh,
+        stride_cvd,
+        BLOCK_D: tl.constexpr,
+        BLOCK_W: tl.constexpr,
+        WINDOW_SIZE: tl.constexpr,
+        HEAD_DIM: tl.constexpr,
+    ):
+        """Decode directly from a per-request circular local window.
+
+        The vLLM page is already a ring.  Reading it in physical order avoids
+        a gather and a temporary chronological copy on every decode step.  A
+        request can have a different ring length from its neighbours; the
+        scalar counters are read by the program owning that request/head.
+        """
+
+        pid = tl.program_id(0)
+        batch = pid // num_heads
+        head = pid % num_heads
+        start = tl.load(start_ptr + batch).to(tl.int32)
+        length = tl.load(length_ptr + batch).to(tl.int32)
+        offs_d = tl.arange(0, BLOCK_D)
+        offs_w = tl.arange(0, BLOCK_W)
+        mask_d = offs_d < HEAD_DIM
+        q = tl.load(
+            query_ptr + batch * stride_qb + head * stride_qh + offs_d * stride_qd,
+            mask=mask_d,
+            other=0.0,
+        ).to(tl.float32)
+        logits = tl.zeros((BLOCK_W,), dtype=tl.float32)
+        for index in range(BLOCK_W):
+            if index < WINDOW_SIZE:
+                physical = (start + index) % WINDOW_SIZE
+                key = tl.load(
+                    ring_key_ptr
+                    + batch * stride_rkb
+                    + head * stride_rkh
+                    + physical * stride_rkw
+                    + offs_d * stride_rkd,
+                    mask=mask_d & (index < length),
+                    other=0.0,
+                ).to(tl.float32)
+            elif index == WINDOW_SIZE:
+                key = tl.load(
+                    current_key_ptr
+                    + batch * stride_ckb
+                    + head * stride_ckh
+                    + offs_d * stride_ckd,
+                    mask=mask_d,
+                    other=0.0,
+                ).to(tl.float32)
+            else:
+                key = tl.zeros((BLOCK_D,), dtype=tl.float32)
+            dot = tl.sum(q * key, axis=0) / tl.sqrt(tl.full((), HEAD_DIM, tl.float32))
+            logits = tl.where(offs_w == index, dot, logits)
+        valid = (offs_w < length) | (offs_w == WINDOW_SIZE)
+        logits = tl.where(valid, logits, -float("inf"))
+        max_logit = tl.max(logits, axis=0)
+        weights = tl.exp(logits - max_logit)
+        weights = tl.where(valid, weights, 0.0)
+        weights = weights / tl.sum(weights, axis=0)
+        result = tl.zeros((BLOCK_D,), dtype=tl.float32)
+        for index in range(BLOCK_W):
+            if index < WINDOW_SIZE:
+                physical = (start + index) % WINDOW_SIZE
+                value = tl.load(
+                    ring_value_ptr
+                    + batch * stride_rvb
+                    + head * stride_rvh
+                    + physical * stride_rvw
+                    + offs_d * stride_rvd,
+                    mask=mask_d & (index < length),
+                    other=0.0,
+                ).to(tl.float32)
+            elif index == WINDOW_SIZE:
+                value = tl.load(
+                    current_value_ptr
+                    + batch * stride_cvb
+                    + head * stride_cvh
+                    + offs_d * stride_cvd,
+                    mask=mask_d,
+                    other=0.0,
+                ).to(tl.float32)
+            else:
+                value = tl.zeros((BLOCK_D,), dtype=tl.float32)
+            weight = tl.sum(tl.where(offs_w == index, weights, 0.0), axis=0)
+            result += weight * value
+        tl.store(
+            output_ptr + batch * stride_ob + head * stride_oh + offs_d * stride_od,
+            result,
+            mask=mask_d,
+        )
+
+    @triton.jit
     def _qcc_local_chunk_kernel(
         output_ptr,
         query_ptr,
@@ -1251,6 +1372,67 @@ def triton_local_decode_attention(
         output, query, keys, values, batch, heads, valid_length,
         *output.stride(), *query.stride(), *keys.stride(), *values.stride(),
         BLOCK_D=block_dim, BLOCK_W=block_window, HEAD_DIM=dim,
+    )
+    return output
+
+
+def triton_local_ring_decode_attention(
+    query: torch.Tensor,
+    ring_keys: torch.Tensor,
+    ring_values: torch.Tensor,
+    current_key: torch.Tensor,
+    current_value: torch.Tensor,
+    ring_start: torch.Tensor,
+    ring_length: torch.Tensor,
+) -> torch.Tensor:
+    """Compute decode attention directly from request-local circular storage."""
+
+    if not TRITON_AVAILABLE or not query.is_cuda:
+        raise RuntimeError("Triton CUDA runtime is unavailable")
+    if query.ndim != 3 or ring_keys.ndim != 4 or ring_values.shape != ring_keys.shape:
+        raise ValueError("query must be [B,H,D], ring keys/values [B,H,W,D]")
+    batch, heads, dim = query.shape
+    if ring_keys.shape[0] != batch or ring_keys.shape[1] != heads or ring_keys.shape[3] != dim:
+        raise ValueError("ring attention shapes do not match")
+    if current_key.shape != query.shape or current_value.shape != query.shape:
+        raise ValueError("current key/value must match query shape")
+    window_size = int(ring_keys.shape[2])
+    if window_size <= 0:
+        raise ValueError("ring window must be positive")
+    if ring_start.shape != (batch,) or ring_length.shape != (batch,):
+        raise ValueError("ring counters must have one entry per batch row")
+    if ring_start.device != query.device or ring_length.device != query.device:
+        raise ValueError("ring counters must be on the query device")
+    query = query.contiguous()
+    ring_keys = ring_keys.contiguous()
+    ring_values = ring_values.contiguous()
+    current_key = current_key.contiguous()
+    current_value = current_value.contiguous()
+    ring_start = ring_start.to(dtype=torch.int32).contiguous()
+    ring_length = ring_length.to(dtype=torch.int32).contiguous()
+    output = torch.empty_like(query)
+    block_dim = 1 << max(4, (dim - 1).bit_length())
+    block_window = 1 << max(0, window_size.bit_length())
+    _qcc_local_ring_decode_kernel[(batch * heads,)](
+        output,
+        query,
+        ring_keys,
+        ring_values,
+        current_key,
+        current_value,
+        ring_start,
+        ring_length,
+        heads,
+        *output.stride(),
+        *query.stride(),
+        *ring_keys.stride(),
+        *ring_values.stride(),
+        *current_key.stride(),
+        *current_value.stride(),
+        BLOCK_D=block_dim,
+        BLOCK_W=block_window,
+        WINDOW_SIZE=window_size,
+        HEAD_DIM=dim,
     )
     return output
 

@@ -314,38 +314,39 @@ class PackedHybridReferenceState:
         ):
             raise RuntimeError("corrupt packed local-ring length counters")
 
-        ring_positions = (
-            start[:, None] + torch.arange(self.config.window_size, device=pages.device)
-        ) % self.config.window_size
-        gather_index = ring_positions[:, None, :, None].expand(
-            batch, self.config.num_heads, self.config.window_size, self.config.head_dim
-        )
-        ordered_keys = local_keys.gather(2, gather_index)
-        ordered_values = local_values.gather(2, gather_index)
+        ordered_keys: Tensor | None = None
+        ordered_values: Tensor | None = None
         local: Tensor | None = None
         if pages.is_cuda and query.is_cuda:
             try:
-                from .triton_kernels import TRITON_AVAILABLE, triton_local_decode_attention
+                from .triton_kernels import (
+                    TRITON_AVAILABLE,
+                    triton_local_ring_decode_attention,
+                )
             except ImportError:  # pragma: no cover - optional CUDA dependency
                 TRITON_AVAILABLE = False
-            # A single valid length lets Triton consume a compact chronological
-            # window in one launch. Mixed-length batches use the vectorized path
-            # below so scheduler rows remain independent.
-            if TRITON_AVAILABLE and bool(torch.all(length == length[0]).item()):
-                valid_length = int(length[0].item()) + 1
-                compact_keys = torch.cat(
-                    (ordered_keys[:, :, : valid_length - 1], key.unsqueeze(2)), dim=2
-                )
-                compact_values = torch.cat(
-                    (ordered_values[:, :, : valid_length - 1], value.unsqueeze(2)), dim=2
-                )
-                local = triton_local_decode_attention(
+            if TRITON_AVAILABLE:
+                # The kernel reads the physical ring directly and accepts one
+                # length per request, so mixed prefill/decode rows no longer
+                # need a full chronological gather just to run local attention.
+                local = triton_local_ring_decode_attention(
                     query,
-                    compact_keys,
-                    compact_values,
-                    valid_length=valid_length,
+                    local_keys,
+                    local_values,
+                    key,
+                    value,
+                    start,
+                    length,
                 )
         if local is None:
+            ring_positions = (
+                start[:, None] + torch.arange(self.config.window_size, device=pages.device)
+            ) % self.config.window_size
+            gather_index = ring_positions[:, None, :, None].expand(
+                batch, self.config.num_heads, self.config.window_size, self.config.head_dim
+            )
+            ordered_keys = local_keys.gather(2, gather_index)
+            ordered_values = local_values.gather(2, gather_index)
             local_keys_with_current = torch.cat((ordered_keys, key.unsqueeze(2)), dim=2)
             local_values_with_current = torch.cat((ordered_values, value.unsqueeze(2)), dim=2)
             positions = torch.arange(self.config.window_size, device=pages.device)
@@ -373,8 +374,18 @@ class PackedHybridReferenceState:
         active_indices = torch.nonzero(evict_mask, as_tuple=False).flatten()
         if active_indices.numel():
             active_pages = pages.index_select(0, active_indices).contiguous()
-            active_key = ordered_keys.index_select(0, active_indices)[:, :, 0]
-            active_value = ordered_values.index_select(0, active_indices)[:, :, 0]
+            if ordered_keys is None or ordered_values is None:
+                active_ring_keys = local_keys.index_select(0, active_indices)
+                active_ring_values = local_values.index_select(0, active_indices)
+                active_start = start.index_select(0, active_indices)
+                active_index = active_start[:, None, None, None].expand(
+                    active_indices.numel(), self.config.num_heads, 1, self.config.head_dim
+                )
+                active_key = active_ring_keys.gather(2, active_index).squeeze(2)
+                active_value = active_ring_values.gather(2, active_index).squeeze(2)
+            else:
+                active_key = ordered_keys.index_select(0, active_indices)[:, :, 0]
+                active_value = ordered_values.index_select(0, active_indices)[:, :, 0]
             active_query = query.index_select(0, active_indices).unsqueeze(2)
             active_key_block = active_key.unsqueeze(2)
             active_value_block = active_value.unsqueeze(2)
