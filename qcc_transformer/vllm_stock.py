@@ -207,6 +207,7 @@ class QCCPackedStateLayout:
         self,
         context_tokens: int,
         *,
+        num_kv_heads: int | None = None,
         full_kv_element_bytes: int | None = None,
     ) -> float:
         """Attention-state bytes / matched unquantized Full-KV bytes.
@@ -217,11 +218,16 @@ class QCCPackedStateLayout:
 
         if context_tokens <= 0:
             raise ValueError("context_tokens must be positive")
+        kv_heads = self.config.num_heads if num_kv_heads is None else num_kv_heads
+        if kv_heads <= 0 or kv_heads > self.config.num_heads:
+            raise ValueError("num_kv_heads must lie in [1, num_heads]")
+        if self.config.num_heads % kv_heads:
+            raise ValueError("num_kv_heads must divide num_heads for GQA")
         element_bytes = full_kv_element_bytes or self.config.local_element_bytes
         full = (
             2
             * context_tokens
-            * self.config.num_heads
+            * kv_heads
             * self.config.head_dim
             * element_bytes
         )

@@ -24,6 +24,15 @@ from qcc_transformer.hf_loading import load_hf_causal_lm, model_input_device
 from qcc_transformer.production_profile import enable_qkv_only_deployment_profile
 
 
+def native_context(config) -> int | None:
+    values = [
+        getattr(config, name, None)
+        for name in ("max_position_embeddings", "n_positions", "max_sequence_length")
+    ]
+    values = [int(value) for value in values if isinstance(value, int) and value > 0]
+    return max(values) if values else None
+
+
 def _records(path: Path, max_examples: int | None):
     count = 0
     with path.open("r", encoding="utf-8") as stream:
@@ -93,6 +102,11 @@ def main() -> None:
     parser.add_argument("--ruler-jsonl", type=Path, required=True)
     parser.add_argument("--max-examples", type=int, default=None)
     parser.add_argument("--max-new-tokens", type=int, default=32)
+    parser.add_argument("--run-id", default=None)
+    parser.add_argument(
+        "--min-native-context", type=int, default=None,
+        help="require the checkpoint to natively declare at least this many tokens",
+    )
     parser.add_argument("--dtype", choices=("auto", "float16", "bfloat16", "float32"), default="auto")
     parser.add_argument("--load-in-4bit", action="store_true", help="load the real checkpoint through bitsandbytes NF4")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
@@ -137,6 +151,14 @@ def main() -> None:
         load_in_4bit=args.load_in_4bit,
     )
     model_device = model_input_device(baseline, device)
+    native_context_tokens = native_context(baseline.config)
+    if args.min_native_context is not None and (
+        native_context_tokens is None or native_context_tokens < args.min_native_context
+    ):
+        raise RuntimeError(
+            f"model native context {native_context_tokens} is below requested "
+            f"{args.min_native_context}"
+        )
     baseline_results = _run_model(
         baseline, tokenizer, records, model_device, args.max_new_tokens, qcc=False
     )
@@ -181,7 +203,20 @@ def main() -> None:
     baseline_correct = sum(bool(item["correct"]) for item in baseline_results)
     qcc_correct = sum(bool(item["correct"]) for item in qcc_results)
     result = {
+        "schema": "qcc-ruler-v1",
+        "benchmark": "ruler",
         "model": args.model,
+        "model_id": args.model,
+        "run_id": args.run_id,
+        "matched_full_kv": True,
+        "real_model": True,
+        "synthetic": False,
+        "official": True,
+        "qcc_only": False,
+        "qcc_score": qcc_correct / len(records),
+        "full_kv_score": baseline_correct / len(records),
+        "quality_score": qcc_correct / len(records),
+        "native_context_tokens": native_context_tokens,
         "records": len(records),
         "patched_layers": replaced,
         "baseline_full_kv": {

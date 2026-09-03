@@ -230,6 +230,17 @@ def main() -> None:
     parser.add_argument("--context-length", type=int)
     parser.add_argument("--gpu", default=None)
     parser.add_argument("--vllm-version", default=None)
+    parser.add_argument("--model-id", default=None)
+    parser.add_argument("--run-id", default=None)
+    parser.add_argument(
+        "--real-model", action=argparse.BooleanOptionalAction, default=None
+    )
+    parser.add_argument(
+        "--synthetic", action=argparse.BooleanOptionalAction, default=None
+    )
+    parser.add_argument(
+        "--protocol-locked", action=argparse.BooleanOptionalAction, default=None
+    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if args.concurrency <= 0 or args.max_tokens <= 0 or args.warmup < 0:
@@ -279,6 +290,11 @@ def main() -> None:
         "schema": "qcc-vllm-serving-v1",
         "label": args.label,
         "model": args.model,
+        "model_id": args.model_id or args.model,
+        "run_id": args.run_id,
+        "real_model": args.real_model,
+        "synthetic": args.synthetic,
+        "protocol_locked": args.protocol_locked,
         "context_length": args.context_length,
         "gpu": args.gpu,
         "vllm_version": args.vllm_version,

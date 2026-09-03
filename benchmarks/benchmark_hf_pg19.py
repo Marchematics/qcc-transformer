@@ -24,6 +24,15 @@ from qcc_transformer.production_profile import enable_qkv_only_deployment_profil
 from qcc_transformer.retrofit import reset_hf_qcc_cache
 
 
+def native_context(config) -> int | None:
+    values = [
+        getattr(config, name, None)
+        for name in ("max_position_embeddings", "n_positions", "max_sequence_length")
+    ]
+    values = [int(value) for value in values if isinstance(value, int) and value > 0]
+    return max(values) if values else None
+
+
 def load_documents(path: Path, limit: int | None = None) -> list[str]:
     documents: list[str] = []
     with path.open() as handle:
@@ -112,6 +121,11 @@ def main() -> None:
     parser.add_argument("--kv-head-policy", choices=("reject", "repeat"), default="repeat")
     parser.add_argument("--trust-remote-code", action="store_true")
     parser.add_argument("--official-source", default="deepmind/pg19:test")
+    parser.add_argument("--run-id", default=None)
+    parser.add_argument(
+        "--min-native-context", type=int, default=None,
+        help="require the checkpoint to natively declare at least this many tokens",
+    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if args.chunk_tokens <= 0:
@@ -135,6 +149,14 @@ def main() -> None:
         load_in_4bit=args.load_in_4bit,
     )
     model_device = model_input_device(model, requested_device)
+    native_context_tokens = native_context(model.config)
+    if native_context_tokens is None:
+        raise RuntimeError("model does not declare a native context length")
+    if args.min_native_context is not None and native_context_tokens < args.min_native_context:
+        raise RuntimeError(
+            f"model native context {native_context_tokens} is below requested "
+            f"{args.min_native_context}"
+        )
     patched_layers: list[str] = []
     if args.mode == "qcc":
         patched_layers = load_hybrid_retrofit_adapter(
@@ -158,6 +180,11 @@ def main() -> None:
     per_document: list[dict[str, Any]] = []
     for index, text in enumerate(documents):
         ids = tokenizer(text, add_special_tokens=False, return_tensors="pt")["input_ids"].to(model_device)
+        if ids.shape[1] > native_context_tokens:
+            raise RuntimeError(
+                f"PG-19 document {index} has {ids.shape[1]} tokens above native "
+                f"context {native_context_tokens}; do not truncate official evidence"
+            )
         try:
             nll, predicted = document_nll(
                 model, ids, chunk_tokens=args.chunk_tokens, qcc=args.mode == "qcc"
@@ -186,11 +213,15 @@ def main() -> None:
         "benchmark": "pg19",
         "mode": args.mode,
         "model_id": args.model,
+        "run_id": args.run_id,
+        "matched_full_kv": False,
         "real_model": True,
         "synthetic": False,
         "official": True,
+        "qcc_only": args.mode == "qcc",
         "official_source": args.official_source,
         "split": "test",
+        "native_context_tokens": native_context_tokens,
         "metric": "perplexity",
         "metric_direction": "lower_is_better",
         "perplexity": perplexity,

@@ -64,6 +64,11 @@ def main() -> None:
     parser.add_argument("--adapter", type=Path)
     parser.add_argument("--label", required=True,
                         help="safe output label used under official pred/<label>/")
+    parser.add_argument("--run-id", default=None)
+    parser.add_argument(
+        "--min-native-context", type=int, default=None,
+        help="require the checkpoint to natively declare at least this many tokens",
+    )
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--dtype", choices=("float16", "bfloat16", "float32"), default="bfloat16")
     parser.add_argument("--load-in-4bit", action="store_true", help="load the real checkpoint through bitsandbytes NF4")
@@ -116,6 +121,11 @@ def main() -> None:
     max_context = native_context(model.config)
     if max_context is None:
         raise RuntimeError("model does not declare a native context length")
+    if args.min_native_context is not None and max_context < args.min_native_context:
+        raise RuntimeError(
+            f"model native context {max_context} is below requested "
+            f"{args.min_native_context}"
+        )
     patched_layers: list[str] = []
     if args.mode == "qcc":
         patched_layers = load_hybrid_retrofit_adapter(
@@ -217,9 +227,12 @@ def main() -> None:
         "benchmark": "longbench",
         "mode": args.mode,
         "model_id": args.model,
+        "run_id": args.run_id,
+        "matched_full_kv": False,
         "real_model": True,
         "synthetic": False,
         "official": True,
+        "qcc_only": args.mode == "qcc",
         "official_evaluator": str(eval_path),
         "official_eval_stdout": proc.stdout,
         "native_context_tokens": max_context,
