@@ -3,10 +3,11 @@
 
 set -e
 
-PROJECT_DIR="/home/frankwang122222/zjh/zjh/工作文件/qcc-transformer-next"
-MODEL_PATH="$PROJECT_DIR/models/qwen2.5-1.5b"
-OUTPUT_DIR="$PROJECT_DIR/artifacts/hf_99/layerwise_test"
-RUN_ID="layertest_$(date +%Y%m%d_%H%M%S)"
+PROJECT_DIR="${PROJECT_DIR:-/mnt/workspace/qcc-transformer}"
+MODEL_PATH="${MODEL_PATH:-$PROJECT_DIR/models/phi-4-mini-instruct-ms}"
+OUTPUT_DIR="${OUTPUT_DIR:-$PROJECT_DIR/artifacts/hf_99/layerwise_test}"
+RUN_ID="${RUN_ID:-layertest_$(date +%Y%m%d_%H%M%S)}"
+HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
 
 cd "$PROJECT_DIR"
 
@@ -29,8 +30,8 @@ echo "Max tokens: 1024 (to fit in 24GB)"
 echo ""
 
 CUDA_VISIBLE_DEVICES=0 \
-HF_ENDPOINT=https://hf-mirror.com \
-PYTHONPATH="$PROJECT_DIR:$PYTHONPATH" \
+HF_ENDPOINT="$HF_ENDPOINT" \
+PYTHONPATH="$PROJECT_DIR:${PYTHONPATH:-}" \
 python3 benchmarks/calibrate_hf_layerwise.py \
     --model "$MODEL_PATH" \
     --train-file README.md \

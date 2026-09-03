@@ -4,10 +4,11 @@
 
 set -e
 
-PROJECT_DIR="/home/frankwang122222/zjh/zjh/工作文件/qcc-transformer-next"
-MODEL_PATH="$PROJECT_DIR/models/qwen2.5-1.5b"
-OUTPUT_DIR="$PROJECT_DIR/artifacts/hf_99/layerwise_sweep"
-RUN_ID="layerwise_$(date +%Y%m%d_%H%M%S)"
+PROJECT_DIR="${PROJECT_DIR:-/mnt/workspace/qcc-transformer}"
+MODEL_PATH="${MODEL_PATH:-$PROJECT_DIR/models/phi-4-mini-instruct-ms}"
+OUTPUT_DIR="${OUTPUT_DIR:-$PROJECT_DIR/artifacts/hf_99/layerwise_sweep}"
+RUN_ID="${RUN_ID:-layerwise_$(date +%Y%m%d_%H%M%S)}"
+HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
 
 cd "$PROJECT_DIR"
 
@@ -44,8 +45,8 @@ for config in "${CONFIGS[@]}"; do
     echo ">>> Running: layers=$layers window=$window codes=$codes steps=$steps lr=$lr"
 
     CUDA_VISIBLE_DEVICES=0 \
-    HF_ENDPOINT=https://hf-mirror.com \
-    PYTHONPATH="$PROJECT_DIR:$PYTHONPATH" \
+    HF_ENDPOINT="$HF_ENDPOINT" \
+    PYTHONPATH="$PROJECT_DIR:${PYTHONPATH:-}" \
     python3 benchmarks/calibrate_hf_layerwise.py \
         --model "$MODEL_PATH" \
         --train-file "$TRAIN_FILE" \
