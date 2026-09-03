@@ -326,7 +326,7 @@ class HybridQCCArchive(QCCArchive):
         query: Tensor,
         score: Tensor,
     ) -> tuple[Tensor, Tensor]:
-        """Causally read a block with at most K associative state mutations."""
+        """Causally read a block with a bounded number of admission events."""
 
         batch, _, tokens, _ = query.shape
         exact = torch.zeros_like(query)
@@ -352,25 +352,37 @@ class HybridQCCArchive(QCCArchive):
                     confidence[:, :, index] = conf
             return exact, confidence
 
-        # Select independently per head *inside each bounded tile*.  Selecting
-        # once across a million-token prefill would spend the entire admission
-        # budget on a few global maxima and could discard a real needle in an
-        # earlier region before the model ever reaches its query.  Per-tile
-        # selection keeps the state constant while giving every context region
-        # the same calibrated opportunity to enter the exact tier.
+        # Select independently inside each bounded tile.  Selecting once across
+        # a million-token prefill would spend the entire admission budget on a
+        # few global maxima and could discard a real needle in an earlier region
+        # before the model ever reaches its query.  Per-tile selection keeps the
+        # state constant while giving every context region the same calibrated
+        # opportunity to enter the exact tier.
+        #
+        # The budget is on *positions*, not head-position pairs.  A predictor
+        # can mark the same salient token for several heads, and updating those
+        # heads together is one state transition.  This caps Python/Triton
+        # scheduling work at K events per tile instead of K events times the
+        # number of heads during a long prefill.
         for tile_start in range(0, tokens, tile_size):
             tile_end = min(tokens, tile_start + tile_size)
             tile_score = score[:, :, tile_start:tile_end]
-            selected = torch.zeros_like(tile_score[0], dtype=torch.bool)
-            for head in range(score.shape[1]):
-                head_score = tile_score[0, head]
-                eligible = head_score >= self.admission_threshold
-                indices = torch.nonzero(eligible, as_tuple=False).flatten()
-                if indices.numel() > self.max_inserts_per_chunk:
-                    keep = head_score[indices].topk(self.max_inserts_per_chunk).indices
-                    indices = indices[keep]
-                selected[head, indices] = True
-            candidates = torch.nonzero(selected.any(dim=0), as_tuple=False).flatten()
+            eligible = tile_score >= self.admission_threshold
+            position_score = torch.where(
+                eligible,
+                tile_score,
+                torch.full_like(tile_score, -torch.inf),
+            ).max(dim=1).values[0]
+            candidates = torch.nonzero(
+                torch.isfinite(position_score), as_tuple=False
+            ).flatten()
+            if candidates.numel() > self.max_inserts_per_chunk:
+                keep = position_score[candidates].topk(
+                    self.max_inserts_per_chunk
+                ).indices
+                candidates = candidates[keep]
+                candidates = torch.sort(candidates).values
+            selected = eligible[0]
 
             cursor = tile_start
             for position_tensor in candidates:

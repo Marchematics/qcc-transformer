@@ -75,6 +75,7 @@ def test_run_one_requires_real_usage_and_measures_streaming_timing():
         thread.join(timeout=2)
         server.server_close()
     assert result.ok is True
+    assert result.prompt_tokens is None
     assert result.completion_tokens == 3
     assert result.ttft_s is not None and result.ttft_s >= 0
     assert result.tpot_s is not None and result.tpot_s >= 0

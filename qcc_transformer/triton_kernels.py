@@ -1614,7 +1614,14 @@ def triton_exact_global_read_chunk(
     values: torch.Tensor,
     scores: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Read all fixed exact slots in one fused program per query/head."""
+    """Read all fixed exact slots with a batched GPU dot-product.
+
+    The global quality configuration probes every slot.  A one-program Triton
+    loop is simple, but it serializes the complete table independently for each
+    query.  The table is bounded, so a batched GEMM is a better decode primitive:
+    it parallelizes across requests/tokens and only materializes ``[B,H,T,S]``
+    similarities, never a token-expanded K/V tensor.
+    """
 
     if not TRITON_AVAILABLE or not query.is_cuda:
         raise RuntimeError("Triton CUDA runtime is unavailable")
@@ -1634,31 +1641,31 @@ def triton_exact_global_read_chunk(
     keys = keys.contiguous()
     values = values.contiguous()
     scores = scores.contiguous()
-    output = torch.empty_like(query)
-    confidence = torch.empty(
-        (batch, heads, tokens), device=query.device, dtype=torch.float32
+    slots = num_sets * ways
+    normalized_query = torch.nn.functional.normalize(query.float(), dim=-1)
+    normalized_keys = torch.nn.functional.normalize(
+        keys.float().reshape(batch, heads, slots, dim), dim=-1
     )
-    block_dim = 1 << max(4, (dim - 1).bit_length())
-    _qcc_exact_global_read_kernel[(batch * heads * tokens,)](
-        output,
-        confidence,
-        query,
-        keys,
-        values,
-        scores,
-        heads,
-        tokens,
-        *output.stride(),
-        *query.stride(),
-        *keys.stride(),
-        *values.stride(),
-        *scores.stride(),
-        BLOCK_D=block_dim,
-        NUM_SLOTS=num_sets * ways,
-        WAYS=ways,
-        HEAD_DIM=dim,
+    similarity = torch.bmm(
+        normalized_query.reshape(batch * heads, tokens, dim),
+        normalized_keys.reshape(batch * heads, slots, dim).transpose(1, 2),
+    ).reshape(batch, heads, tokens, slots)
+    valid = torch.isfinite(scores).reshape(batch, heads, slots)
+    similarity = similarity.masked_fill(
+        ~valid.unsqueeze(2), torch.finfo(similarity.dtype).min
     )
-    return output, confidence
+    confidence, best = similarity.max(dim=-1)
+    flat_values = values.float().reshape(batch * heads, slots, dim)
+    flat_best = best.reshape(batch * heads, tokens, 1).expand(-1, -1, dim)
+    output = torch.gather(flat_values, 1, flat_best).reshape(
+        batch, heads, tokens, dim
+    )
+    any_valid = valid.any(dim=-1).unsqueeze(2)
+    output = torch.where(any_valid.unsqueeze(-1), output, torch.zeros_like(output))
+    confidence = torch.where(
+        any_valid, confidence, torch.full_like(confidence, -1.0)
+    )
+    return output.to(query.dtype), confidence
 
 
 def triton_local_chunk_attention(
