@@ -333,51 +333,67 @@ class HybridQCCArchive(QCCArchive):
         confidence = torch.full(
             query.shape[:-1], -1.0, device=query.device, dtype=torch.float32
         )
+        tile_size = max(1, int(self.scan_block_size))
         if batch != 1:
-            # Calibration can use larger batches. Keep this path exact and
-            # simple; serving keeps one state per logical vLLM request (B=1).
-            for index in range(tokens):
-                self._admit_one(key[:, :, index], value[:, :, index], score[:, :, index])
-                result, conf = self.exact_bank.read(query[:, :, index], hard=True)
-                exact[:, :, index] = result
-                confidence[:, :, index] = conf
+            # Calibration can use larger batches. Keep each tile causal while
+            # allowing the bank to update all request rows in one tensor call.
+            # A tile boundary is only a scheduling boundary; the bank itself
+            # remains persistent across tiles.
+            for tile_start in range(0, tokens, tile_size):
+                tile_end = min(tokens, tile_start + tile_size)
+                for index in range(tile_start, tile_end):
+                    self._admit_one(
+                        key[:, :, index], value[:, :, index], score[:, :, index]
+                    )
+                    result, conf = self.exact_bank.read(
+                        query[:, :, index], hard=True
+                    )
+                    exact[:, :, index] = result
+                    confidence[:, :, index] = conf
             return exact, confidence
 
-        # Select independently per head.  A global token top-k lets one head
-        # consume the whole budget and silently drops retrieval-critical events
-        # for the other heads.  The budget is fixed per head, so total mutable
-        # state remains bounded by the bank geometry.
-        selected = torch.zeros_like(score[0], dtype=torch.bool)
-        for head in range(score.shape[1]):
-            head_score = score[0, head]
-            eligible = head_score >= self.admission_threshold
-            indices = torch.nonzero(eligible, as_tuple=False).flatten()
-            if indices.numel() > self.max_inserts_per_chunk:
-                keep = head_score[indices].topk(self.max_inserts_per_chunk).indices
-                indices = indices[keep]
-            selected[head, indices] = True
-        candidates = torch.nonzero(selected.any(dim=0), as_tuple=False).flatten()
+        # Select independently per head *inside each bounded tile*.  Selecting
+        # once across a million-token prefill would spend the entire admission
+        # budget on a few global maxima and could discard a real needle in an
+        # earlier region before the model ever reaches its query.  Per-tile
+        # selection keeps the state constant while giving every context region
+        # the same calibrated opportunity to enter the exact tier.
+        for tile_start in range(0, tokens, tile_size):
+            tile_end = min(tokens, tile_start + tile_size)
+            tile_score = score[:, :, tile_start:tile_end]
+            selected = torch.zeros_like(tile_score[0], dtype=torch.bool)
+            for head in range(score.shape[1]):
+                head_score = tile_score[0, head]
+                eligible = head_score >= self.admission_threshold
+                indices = torch.nonzero(eligible, as_tuple=False).flatten()
+                if indices.numel() > self.max_inserts_per_chunk:
+                    keep = head_score[indices].topk(self.max_inserts_per_chunk).indices
+                    indices = indices[keep]
+                selected[head, indices] = True
+            candidates = torch.nonzero(selected.any(dim=0), as_tuple=False).flatten()
 
-        cursor = 0
-        for position_tensor in candidates:
-            position = int(position_tensor.item())
-            if position > cursor:
-                result, conf = self.exact_bank.read_chunk(
-                    query[:, :, cursor:position], hard=True
+            cursor = tile_start
+            for position_tensor in candidates:
+                position = tile_start + int(position_tensor.item())
+                if position > cursor:
+                    result, conf = self.exact_bank.read_chunk(
+                        query[:, :, cursor:position], hard=True
+                    )
+                    exact[:, :, cursor:position] = result
+                    confidence[:, :, cursor:position] = conf
+                self._admit_one(
+                    key[:, :, position],
+                    value[:, :, position],
+                    score[:, :, position],
+                    write_mask=selected[:, position - tile_start].unsqueeze(0),
                 )
-                exact[:, :, cursor:position] = result
-                confidence[:, :, cursor:position] = conf
-            self._admit_one(
-                key[:, :, position],
-                value[:, :, position],
-                score[:, :, position],
-                write_mask=selected[:, position].unsqueeze(0),
-            )
-            cursor = position
-        if cursor < tokens:
-            result, conf = self.exact_bank.read_chunk(query[:, :, cursor:], hard=True)
-            exact[:, :, cursor:] = result
-            confidence[:, :, cursor:] = conf
+                cursor = position
+            if cursor < tile_end:
+                result, conf = self.exact_bank.read_chunk(
+                    query[:, :, cursor:tile_end], hard=True
+                )
+                exact[:, :, cursor:tile_end] = result
+                confidence[:, :, cursor:tile_end] = conf
         return exact, confidence
 
     @torch.no_grad()

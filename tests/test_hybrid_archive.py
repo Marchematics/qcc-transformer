@@ -125,6 +125,40 @@ def test_chunk_admission_has_hard_insert_budget() -> None:
     assert int(torch.isfinite(hybrid.exact_bank.state.scores).sum()) <= 2
 
 
+def test_chunk_admission_reopens_budget_for_each_bounded_tile() -> None:
+    torch.manual_seed(73)
+    base = QCCArchive(
+        num_heads=1,
+        head_dim=4,
+        num_codes=2,
+        decay_rates=(0.9, 0.99),
+        window_size=2,
+        use_triton=False,
+        scan_block_size=4,
+    )
+    hybrid = HybridQCCArchive.from_archive(
+        base,
+        exact_num_sets=1,
+        exact_ways=16,
+        max_inserts_per_chunk=2,
+        admission_threshold=0.0,
+    )
+    with torch.no_grad():
+        hybrid.admission.key_weight.zero_()
+        hybrid.admission.value_weight.zero_()
+        hybrid.admission.bias.fill_(10.0)
+    key = torch.randn(1, 1, 9, 4)
+    value = torch.randn_like(key)
+    query = torch.randn_like(key)
+    with torch.no_grad():
+        output = hybrid.update_read_chunk(key, value, query)
+    assert output.shape == query.shape
+    # The admission limit is per bounded scan tile, not per entire prompt.
+    # This prevents a long prefill from giving all of its exact capacity to
+    # the final few global scores.
+    assert int(torch.isfinite(hybrid.exact_bank.state.scores).sum()) == 6
+
+
 def test_upgrade_qcc_attention_is_idempotent() -> None:
     attention = QCCSelfAttention(
         d_model=16,
