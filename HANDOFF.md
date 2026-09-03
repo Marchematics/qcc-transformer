@@ -89,6 +89,8 @@
 
 teacher 特征现在通过未 patch attention 模块的 forward-pre-hook 直接捕获归一化后的 `hidden_states`（兼容位置参数和 keyword 参数），再复用原始 Q/K/V 投影；这避免用残差流替代 attention 输入训练 admission predictor。
 
+该 hook 只用于校准 teacher，按选定层和 chunk 保存到 CPU；部署路径不注册 hook，也不改变模型参数、缓存状态或 HF/vLLM 接口。
+
 ### 3.6 未校准安全 gate（已实现，待远程验证）
 
 - `QCCSelfAttention` 新增 `gate_bias_init`；HF retrofit 默认值为 `2.0`，让新 adapter 初始更接近 exact local path，避免随机 archive 以 50/50 比例污染 pretrained logits；
