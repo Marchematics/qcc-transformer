@@ -150,6 +150,23 @@ def test_patch_hf_attention_preserves_prefill_and_decode_shapes():
     assert cache.get_seq_length() == 9
 
 
+def test_hf_prefill_is_chunked_when_prompt_exceeds_bound():
+    model = _Model()
+    patch_hf_model(
+        model,
+        window_size=4,
+        num_codes=4,
+        use_triton=False,
+        prefill_chunk_size=3,
+    )
+    hidden = torch.randn(1, 10, 16)
+    output, _, cache = model.attn(hidden, use_cache=True)
+    assert output.shape == hidden.shape
+    assert cache is not None and cache.get_seq_length() == hidden.shape[1]
+    assert model.attn.qcc._chunk_key_scratch is not None
+    assert model.attn.qcc._chunk_key_scratch.shape[2] <= 3 + 4
+
+
 def test_patch_hf_supports_modern_shared_cache_call():
     model = _Model()
     patch_hf_model(model, window_size=4, num_codes=4, use_triton=False)

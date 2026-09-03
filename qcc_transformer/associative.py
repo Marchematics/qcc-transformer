@@ -327,6 +327,62 @@ class SetAssociativeLandmarkBank(nn.Module):
                 confidences.append(confidence)
             return torch.cat(responses, dim=2), torch.cat(confidences, dim=2)
 
+        # ``probe_sets == num_sets`` is the default quality configuration. In
+        # that mode routing is only an index permutation: every slot is searched
+        # anyway.  The direct path avoids materializing a per-token set-index
+        # tensor and keeps the CPU fallback at [B,H,T,S*W] similarities rather
+        # than [B,H,T,S*W,D] gathered keys/values.
+        if self.probe_sets == self.num_sets:
+            if query.is_cuda and hard:
+                try:
+                    from .triton_kernels import (
+                        TRITON_AVAILABLE,
+                        triton_exact_global_read_chunk,
+                    )
+                except ImportError:  # pragma: no cover - optional CUDA dependency
+                    TRITON_AVAILABLE = False
+                if TRITON_AVAILABLE:
+                    return triton_exact_global_read_chunk(
+                        query,
+                        self._keys,
+                        self._values,
+                        self._scores,
+                    )
+
+            slots = self.num_sets * self.ways
+            keys = self._keys.reshape(batch, heads, slots, dim)
+            values = self._values.reshape(batch, heads, slots, dim)
+            scores = self._scores.reshape(batch, heads, slots)
+            valid = torch.isfinite(scores)
+            normalized_query = F.normalize(query.to(keys.dtype), dim=-1)
+            normalized_keys = F.normalize(keys, dim=-1)
+            similarity = torch.einsum(
+                "bhtd,bhsd->bhts", normalized_query, normalized_keys
+            )
+            similarity = torch.where(
+                valid.unsqueeze(2), similarity, torch.full_like(similarity, -1.0e9)
+            )
+            confidence, best = similarity.max(dim=-1)
+            if hard:
+                response = values.unsqueeze(2).expand(
+                    batch, heads, tokens, slots, dim
+                ).gather(
+                    3, best[..., None, None].expand(batch, heads, tokens, 1, dim)
+                ).squeeze(3)
+            else:
+                weights = F.softmax(similarity * self.temperature, dim=-1).to(
+                    values.dtype
+                )
+                response = torch.einsum("bhts,bhsd->bhtd", weights, values)
+            any_valid = valid.any(dim=-1).unsqueeze(2)
+            response = torch.where(
+                any_valid.unsqueeze(-1), response, torch.zeros_like(response)
+            )
+            confidence = torch.where(
+                any_valid, confidence, torch.full_like(confidence, -1.0)
+            )
+            return response.to(query.dtype), confidence
+
         codes = F.normalize(
             self.set_codes.to(query.device, self._keys.dtype), dim=-1
         )

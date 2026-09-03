@@ -244,6 +244,7 @@ class HFQCCAttention(nn.Module):
         k_proj_override: Optional[nn.Module] = None,
         v_proj_override: Optional[nn.Module] = None,
         rope_kwargs: Optional[dict[str, Any]] = None,
+        prefill_chunk_size: Optional[int] = None,
     ) -> None:
         super().__init__()
         required = ("o_proj",)
@@ -344,6 +345,9 @@ class HFQCCAttention(nn.Module):
         self.d_model = d_model
         self.kv_head_policy = kv_head_policy
         self.kv_heads = int(kv_heads)
+        if prefill_chunk_size is not None and prefill_chunk_size <= 0:
+            raise ValueError("prefill_chunk_size must be positive when provided")
+        self.prefill_chunk_size = prefill_chunk_size
         self._qcc_retrofit = True
 
     def __getattr__(self, name: str) -> Any:
@@ -369,6 +373,50 @@ class HFQCCAttention(nn.Module):
         if position_ids.ndim != 2:
             raise ValueError("position_ids must have shape [sequence] or [batch, sequence]")
         return position_ids.to(device=device)
+
+    def _bounded_prefill(
+        self,
+        hidden_states: Tensor,
+        positions: Tensor,
+        *,
+        reset: bool,
+        archive_hint: Optional[Tensor],
+    ) -> Tensor:
+        """Run a long HF prompt through bounded QCC chunks.
+
+        HF normally supplies the whole prompt to one attention module call.  Passing
+        that tensor directly to ``step_chunk`` would make the temporary chronological
+        local buffer as long as the prompt, defeating the constant-state serving path.
+        Each piece is still a normal causal QCC call and the persistent state is
+        advanced in order, so the concatenated result is identical to processing the
+        pieces as separate prefill calls.
+        """
+
+        length = hidden_states.shape[1]
+        chunk_size = self.prefill_chunk_size
+        if chunk_size is None:
+            chunk_size = int(getattr(self.qcc.archive, "scan_block_size", 1024))
+        chunk_size = max(1, chunk_size)
+        if length <= chunk_size:
+            return self.qcc.step_chunk(
+                hidden_states,
+                reset_cache=reset,
+                position_ids=positions,
+                archive_hint=archive_hint,
+            )
+        outputs: list[Tensor] = []
+        for start in range(0, length, chunk_size):
+            end = min(length, start + chunk_size)
+            piece_hint = None if archive_hint is None else archive_hint[:, start:end]
+            outputs.append(
+                self.qcc.step_chunk(
+                    hidden_states[:, start:end],
+                    reset_cache=reset and start == 0,
+                    position_ids=positions[:, start:end],
+                    archive_hint=piece_hint,
+                )
+            )
+        return torch.cat(outputs, dim=1)
 
     def forward(
         self,
@@ -427,10 +475,10 @@ class HFQCCAttention(nn.Module):
                 archive_hint=archive_hint,
             ).unsqueeze(1)
         else:
-            output = self.qcc.step_chunk(
+            output = self._bounded_prefill(
                 hidden_states,
-                reset_cache=reset,
-                position_ids=positions,
+                positions,
+                reset=reset,
                 archive_hint=archive_hint,
             )
         present = QCCCacheHandle(self.qcc) if use_cache else None
@@ -467,8 +515,9 @@ def patch_hf_model(
     archive_landmark_temperature: float = 1.0,
         archive_lexical_landmark: bool = False,
         archive_position_invariant: bool = True,
-        kv_head_policy: str = "reject",
-        gate_bias_init: float = 2.0,
+    kv_head_policy: str = "reject",
+    gate_bias_init: float = 2.0,
+    prefill_chunk_size: Optional[int] = None,
 ) -> list[str]:
     """Replace compatible HF attention modules and return their module paths.
 
@@ -494,6 +543,8 @@ def patch_hf_model(
             rope_parameters = getattr(config, "rope_parameters", None)
             if isinstance(rope_parameters, dict):
                 rope_theta = rope_parameters.get("rope_theta")
+    if prefill_chunk_size is not None and prefill_chunk_size <= 0:
+        raise ValueError("prefill_chunk_size must be positive when provided")
     rope_kwargs = _hf_rope_kwargs(config, max_position_embeddings)
     candidates: list[tuple[str, nn.Module]] = []
     for name, module in model.named_modules():
@@ -561,6 +612,7 @@ def patch_hf_model(
             k_proj_override=k_proj_override,
             v_proj_override=v_proj_override,
             rope_kwargs=rope_kwargs,
+            prefill_chunk_size=prefill_chunk_size,
         )
         # Track layer index for selective calibration
         wrapper.qcc._qcc_layer_index = layer_index
