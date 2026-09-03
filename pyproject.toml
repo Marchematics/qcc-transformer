@@ -16,7 +16,7 @@ license = {text = "MIT"}
 dev = ["pytest>=7.4"]
 hf = ["transformers>=4.45"]
 hf-quant = ["transformers>=4.45", "bitsandbytes>=0.43"]
-vllm = ["vllm>=0.6"]
+vllm = ["vllm>=0.11"]
 
 [project.entry-points."vllm.general_plugins"]
 qcc_stock_backend = "qcc_transformer.vllm_stock:register_stock_vllm_backend"

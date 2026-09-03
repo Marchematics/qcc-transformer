@@ -357,7 +357,13 @@ def register_stock_vllm_backend() -> object | None:
     if not os.environ.get(STOCK_CONFIG_ENV) or not os.environ.get(STOCK_ADAPTER_ENV):
         return None
 
-    validate_stock_vllm_api()
+    try:
+        validate_stock_vllm_api()
+    except RuntimeError:
+        # vLLM 0.11 moved the registry to ``vllm.attention`` and removed the
+        # experimental CircularBufferSpec.  The modern adapter uses the
+        # stable MambaSpec state-cache representation instead.
+        return _register_modern_vllm_backend()
     from vllm.v1.attention.backends.registry import (
         AttentionBackendEnum,
         register_backend,
@@ -370,6 +376,56 @@ def register_stock_vllm_backend() -> object | None:
     return AttentionBackendEnum.CUSTOM
 
 
+def _register_modern_vllm_backend() -> object:
+    """Register the state-page adapter used by vLLM 0.11 and newer."""
+
+    try:
+        from vllm.attention.backends.registry import (
+            AttentionBackendEnum,
+            register_backend,
+        )
+        from vllm.attention.layer import Attention
+        from vllm.v1.kv_cache_interface import MambaSpec
+    except ImportError as exc:  # pragma: no cover - optional dependency
+        raise RuntimeError(
+            "QCC stock backend requires a vLLM release with either "
+            "CircularBufferSpec or MambaSpec"
+        ) from exc
+
+    marker = "_qcc_stock_spec_patched"
+    if not getattr(Attention, marker, False):
+        original = Attention.get_kv_cache_spec
+
+        def qcc_get_kv_cache_spec(self: object, vllm_config: object) -> object:
+            backend = getattr(self, "attn_backend", None)
+            get_name = getattr(backend, "get_name", None)
+            if callable(get_name) and get_name() == "CUSTOM":
+                config = stock_config_from_env()
+                layout = QCCPackedStateLayout(config)
+                model_config = getattr(vllm_config, "model_config", None)
+                max_model_len = int(
+                    getattr(model_config, "max_model_len", config.max_position_embeddings)
+                )
+                block_size = max(config.max_position_embeddings, max_model_len)
+                return MambaSpec(
+                    shapes=((layout.total_bytes,),),
+                    dtypes=(torch.uint8,),
+                    block_size=block_size,
+                    page_size_padded=layout.total_bytes,
+                    mamba_type="qcc",
+                )
+            return original(self, vllm_config)
+
+        setattr(Attention, "get_kv_cache_spec", qcc_get_kv_cache_spec)
+        setattr(Attention, marker, True)
+
+    register_backend(
+        AttentionBackendEnum.CUSTOM,
+        "qcc_transformer.vllm_modern_backend.QCCModernAttentionBackend",
+    )
+    return AttentionBackendEnum.CUSTOM
+
+
 __all__ = [
     "PackedStateSegment",
     "QCCPackedStateLayout",
@@ -378,6 +434,7 @@ __all__ = [
     "STOCK_CONFIG_ENV",
     "configure_stock_vllm_environment",
     "register_stock_vllm_backend",
+    "_register_modern_vllm_backend",
     "stock_config_from_env",
     "typed_segment_view",
     "validate_layout",

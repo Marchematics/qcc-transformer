@@ -349,7 +349,10 @@ class QCCV1AttentionBackend(AttentionBackend):
 
     @staticmethod
     def get_name() -> str:
-        return "QCC_V1_PACKED"
+        # CUSTOM is the enum key used by both the legacy and current vLLM
+        # registries. Returning a private name makes Attention.__init__ fail
+        # while resolving AttentionBackendEnum[backend.get_name()].
+        return "CUSTOM"
 
     @staticmethod
     def get_impl_cls() -> type[QCCV1AttentionImpl]:

@@ -215,12 +215,13 @@ This avoids pinning an unstable vLLM ABI while making the cache state and
 shape contract explicit; upstream vLLM still needs a version-specific backend
 registration and matched quality benchmark.
 
-Once a version-specific `AttentionBackend` implementation is available, wire
-it into vLLM without changing application code by calling
-`qcc_transformer.register_vllm_backend("module.ClassName")`. The hook lazily
-uses vLLM v1's `AttentionBackendEnum.CUSTOM` registry and raises a clear error
-when vLLM is not installed; it does not misrepresent the state primitive as a
-complete backend.
+The package includes a stock vLLM v1 adapter. With vLLM 0.11 or newer, the
+entry point registers `QCCModernAttentionBackend` and maps each QCC attention
+layer to vLLM's stateful `MambaSpec` cache, which gives the scheduler one opaque
+packed state page per request. Older deployments that expose the experimental
+`CircularBufferSpec` use `QCCV1AttentionBackend` instead. Configure the page and
+adapter through `prepare_stock_vllm` or `QCC_STOCK_VLLM_CONFIG`/
+`QCC_STOCK_VLLM_ADAPTER`; application model code remains unchanged.
 
 ### 99 gate (all requirements must hold simultaneously)
 
