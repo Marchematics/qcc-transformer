@@ -12,6 +12,8 @@ from qcc_transformer.retrofit import (
     save_retrofit_adapter,
     reset_hf_qcc_cache,
 )
+from qcc_transformer.hybrid_archive import patch_hf_model_hybrid
+from benchmarks.calibrate_hf_admission import _load_initial_adapter
 
 
 class _Attention(nn.Module):
@@ -198,6 +200,27 @@ def test_retrofit_adapter_round_trip(tmp_path):
     assert replaced == ["attn"]
     for name, value in state.items():
         assert torch.equal(value, dict(target.named_parameters())[name].cpu())
+
+
+def test_regular_adapter_can_seed_hybrid_admission_calibration(tmp_path):
+    source = _Model()
+    patch_hf_model(source, window_size=4, num_codes=4, use_triton=False)
+    path = tmp_path / "regular_adapter.pt"
+    torch.save({"state_dict": retrofit_adapter_state(source)}, path)
+
+    target = _Model()
+    patch_hf_model_hybrid(
+        target,
+        window_size=4,
+        num_codes=4,
+        use_triton=False,
+        hybrid_kwargs={"exact_num_sets": 4, "exact_ways": 2},
+    )
+    _load_initial_adapter(target, path)
+    source_state = retrofit_adapter_state(source)
+    target_state = dict(target.named_parameters())
+    for name, value in source_state.items():
+        torch.testing.assert_close(target_state[name].cpu(), value)
 
 
 def test_patch_hf_rejects_grouped_query_attention():
