@@ -230,6 +230,23 @@ class PackedHybridReferenceState:
             exact_ages,
         )
 
+    def _flush_archive_pages(self, pages: Tensor, bound: tuple[Tensor, ...]) -> None:
+        """Copy recurrence tensors that were replaced by a block scan."""
+
+        numerator, denominator, last_step, exact_keys, exact_values, exact_scores, exact_ages = bound
+        for current, target in (
+            (self.archive._numerator, numerator),
+            (self.archive._denominator, denominator),
+            (self.archive._last_step, last_step),
+            (self.archive.exact_bank._keys, exact_keys),
+            (self.archive.exact_bank._values, exact_values),
+            (self.archive.exact_bank._scores, exact_scores),
+            (self.archive.exact_bank._ages, exact_ages),
+        ):
+            if current.data_ptr() != target.data_ptr():
+                target.copy_(current)
+        del pages
+
     @torch.no_grad()
     def forward_decode_batch(
         self,
@@ -348,6 +365,7 @@ class PackedHybridReferenceState:
             ).squeeze(2)
             self.archive.exact_bank._ages.add_((old_steps + 1)[:, None, None, None])
             active_counters[:, 3] = old_steps + 1
+            self._flush_archive_pages(active_pages, bound)
             archive_out.index_copy_(0, active_indices, active_archive)
             pages.index_copy_(0, active_indices, active_pages)
 
