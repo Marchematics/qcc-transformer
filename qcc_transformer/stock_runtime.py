@@ -322,27 +322,51 @@ class PackedHybridReferenceState:
         )
         ordered_keys = local_keys.gather(2, gather_index)
         ordered_values = local_values.gather(2, gather_index)
-        local_keys_with_current = torch.cat((ordered_keys, key.unsqueeze(2)), dim=2)
-        local_values_with_current = torch.cat((ordered_values, value.unsqueeze(2)), dim=2)
-        positions = torch.arange(self.config.window_size, device=pages.device)
-        lower = (length + 1 - self.config.window_size).clamp_min(0)
-        valid_old = (positions[None, :] >= lower[:, None]) & (
-            positions[None, :] < length[:, None]
-        )
-        valid = torch.cat(
-            (valid_old, torch.ones((batch, 1), device=pages.device, dtype=torch.bool)),
-            dim=1,
-        )
-        logits = torch.einsum(
-            "bhd,bhkd->bhk", query, local_keys_with_current
-        ) / math.sqrt(self.config.head_dim)
-        logits = logits.masked_fill(
-            ~valid[:, None, :], torch.finfo(logits.dtype).min
-        )
-        local = torch.einsum(
-            "bhk,bhkd->bhd", torch.softmax(logits.float(), dim=-1).to(query.dtype),
-            local_values_with_current,
-        )
+        local: Tensor | None = None
+        if pages.is_cuda and query.is_cuda:
+            try:
+                from .triton_kernels import TRITON_AVAILABLE, triton_local_decode_attention
+            except ImportError:  # pragma: no cover - optional CUDA dependency
+                TRITON_AVAILABLE = False
+            # A single valid length lets Triton consume a compact chronological
+            # window in one launch. Mixed-length batches use the vectorized path
+            # below so scheduler rows remain independent.
+            if TRITON_AVAILABLE and bool(torch.all(length == length[0]).item()):
+                valid_length = int(length[0].item()) + 1
+                compact_keys = torch.cat(
+                    (ordered_keys[:, :, : valid_length - 1], key.unsqueeze(2)), dim=2
+                )
+                compact_values = torch.cat(
+                    (ordered_values[:, :, : valid_length - 1], value.unsqueeze(2)), dim=2
+                )
+                local = triton_local_decode_attention(
+                    query,
+                    compact_keys,
+                    compact_values,
+                    valid_length=valid_length,
+                )
+        if local is None:
+            local_keys_with_current = torch.cat((ordered_keys, key.unsqueeze(2)), dim=2)
+            local_values_with_current = torch.cat((ordered_values, value.unsqueeze(2)), dim=2)
+            positions = torch.arange(self.config.window_size, device=pages.device)
+            lower = (length + 1 - self.config.window_size).clamp_min(0)
+            valid_old = (positions[None, :] >= lower[:, None]) & (
+                positions[None, :] < length[:, None]
+            )
+            valid = torch.cat(
+                (valid_old, torch.ones((batch, 1), device=pages.device, dtype=torch.bool)),
+                dim=1,
+            )
+            logits = torch.einsum(
+                "bhd,bhkd->bhk", query, local_keys_with_current
+            ) / math.sqrt(self.config.head_dim)
+            logits = logits.masked_fill(
+                ~valid[:, None, :], torch.finfo(logits.dtype).min
+            )
+            local = torch.einsum(
+                "bhk,bhkd->bhd", torch.softmax(logits.float(), dim=-1).to(query.dtype),
+                local_values_with_current,
+            )
 
         archive_out = torch.zeros_like(local)
         evict_mask = length >= self.config.window_size
