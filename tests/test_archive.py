@@ -126,6 +126,42 @@ def test_persistent_landmark_survives_long_filler_updates() -> None:
     torch.testing.assert_close(out, value[0, 0], rtol=1e-5, atol=1e-5)
 
 
+def test_chunked_landmark_reads_are_causal() -> None:
+    kwargs = dict(
+        num_heads=1,
+        head_dim=2,
+        num_codes=1,
+        decay_rates=(0.8,),
+        window_size=1,
+        use_triton=False,
+        persistent_landmark=True,
+    )
+    chunked = QCCArchive(**kwargs)
+    tokenwise = QCCArchive(**kwargs)
+    with torch.no_grad():
+        chunked.codes.copy_(torch.tensor([[[1.0, 0.0]]]))
+        tokenwise.load_state_dict(chunked.state_dict())
+        chunked.landmark_mix_logits.fill_(20.0)
+        tokenwise.landmark_mix_logits.fill_(20.0)
+        keys = torch.tensor(
+            [[[[1.0, 0.0], [2.0, 0.0], [3.0, 0.0]]]]
+        )
+        values = torch.tensor(
+            [[[[10.0, 0.0], [20.0, 0.0], [30.0, 0.0]]]]
+        )
+        queries = keys.clone()
+        actual = chunked.update_read_chunk(keys, values, queries)
+        expected = []
+        for index in range(keys.shape[2]):
+            tokenwise.update(keys[:, :, index], values[:, :, index])
+            expected.append(tokenwise.read(queries[:, :, index]))
+        expected = torch.stack(expected, dim=2)
+    torch.testing.assert_close(actual, expected, rtol=1e-5, atol=1e-5)
+    torch.testing.assert_close(
+        chunked._landmark_value, tokenwise._landmark_value, rtol=0, atol=0
+    )
+
+
 def test_prefix_landmark_keeps_first_slots_and_uses_key_routing() -> None:
     archive = QCCArchive(
         num_heads=1,

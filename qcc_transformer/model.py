@@ -414,7 +414,13 @@ class QCCArchive(nn.Module):
         self._numerator = self._numerator.detach()
         self._denominator = self._denominator.detach()
 
-    def update(self, key: Tensor, value: Tensor) -> None:
+    def update(
+        self,
+        key: Tensor,
+        value: Tensor,
+        *,
+        _include_landmarks: bool = True,
+    ) -> None:
         """Insert one evicted token per batch/head into the archive.
 
         ``key`` and ``value`` have shape ``[batch, heads, head_dim]``. Existing
@@ -430,8 +436,13 @@ class QCCArchive(nn.Module):
         if self._numerator.shape[0] != bsz or self._numerator.device != key.device:
             self.reset_state(bsz, device=key.device)
 
+        if _include_landmarks:
+            self._update_landmark(key, value)
+
         if self.lazy_decay and not torch.is_grad_enabled():
-            self._lazy_update(key, value)
+            self._lazy_update(
+                key, value, include_landmarks=False
+            )
             return
 
         rates = self.decay_rates.to(device=key.device, dtype=self._numerator.dtype)
@@ -454,7 +465,6 @@ class QCCArchive(nn.Module):
         codes = self.codes.to(device=key.device, dtype=self._numerator.dtype)
         score = torch.einsum("bhd,hmd->bhm", key.to(self._numerator.dtype), codes)
         score = score / math.sqrt(self.head_dim)
-        self._update_landmark(key, value)
         # Clipping bounds the reference implementation. A fused kernel should
         # use per-code log rescaling instead of clipping for higher fidelity.
         content_weight = torch.exp(score.clamp(min=-20.0, max=10.0))
@@ -484,14 +494,21 @@ class QCCArchive(nn.Module):
             self._numerator.mul_(numerator_decay).add_(numerator_add)
 
     @torch.no_grad()
-    def _lazy_update(self, key: Tensor, value: Tensor) -> None:
+    def _lazy_update(
+        self,
+        key: Tensor,
+        value: Tensor,
+        *,
+        include_landmarks: bool = True,
+    ) -> None:
         """Update only top-k code slots and apply decay on first touch."""
 
         assert self.active_codes is not None
         state_dtype = self._numerator.dtype
         codes = self.codes.to(device=key.device, dtype=state_dtype)
         scores = torch.einsum("bhd,hmd->bhm", key.to(state_dtype), codes)
-        self._update_landmark(key, value)
+        if include_landmarks:
+            self._update_landmark(key, value)
         values, indices = torch.topk(scores, self.active_codes, dim=-1)
         self._step += 1
         if (
@@ -611,6 +628,7 @@ class QCCArchive(nn.Module):
         query: Tensor,
         *,
         output: Optional[Tensor] = None,
+        _include_landmarks: bool = True,
     ) -> Tensor:
         """Update and read a sequence of evicted tokens with a block scan.
 
@@ -632,10 +650,40 @@ class QCCArchive(nn.Module):
         if self._numerator.shape[0] != batch or self._numerator.device != key.device:
             self.reset_state(batch, device=key.device)
 
+        if self.persistent_landmark and _include_landmarks:
+            # The recurrent archive can be scanned as a block, but sticky
+            # landmarks are causal records.  Process the base response once
+            # without landmark blending, then update and read the bounded
+            # landmark table in temporal order.  This keeps chunked inference
+            # identical to the one-token path without expanding state with
+            # sequence length.
+            recurrent = QCCArchive.update_read_chunk(
+                self,
+                key,
+                value,
+                query,
+                output=None,
+                _include_landmarks=False,
+            )
+            outputs = []
+            for index in range(events):
+                self._update_landmark(key[:, :, index], value[:, :, index])
+                outputs.append(
+                    self._combine_landmark(
+                        query[:, :, index], recurrent[:, :, index]
+                    )
+                )
+            result = torch.stack(outputs, dim=2)
+            if output is not None:
+                output.copy_(result)
+                return output
+            return result
+
         # Update sticky landmarks once per block before dispatching to the
         # dense/sparse archive kernel.  This side state is tiny (one value per
         # code) and therefore does not alter the O(1) memory bound.
-        self._update_landmark_chunk(key, value)
+        if _include_landmarks:
+            self._update_landmark_chunk(key, value)
 
         if self.lazy_decay and self.use_triton and key.is_cuda:
             if self.active_codes is None:
@@ -665,7 +713,11 @@ class QCCArchive(nn.Module):
                         content_threshold=self.content_threshold,
                     )
                     self._step += events
-                    combined = self._combine_landmark(query, output)
+                    combined = (
+                        self._combine_landmark(query, output)
+                        if _include_landmarks
+                        else output
+                    )
                     if output is not None and combined.data_ptr() != output.data_ptr():
                         output.copy_(combined)
                         return output
@@ -674,9 +726,21 @@ class QCCArchive(nn.Module):
         if self.lazy_decay:
             outputs = []
             for index in range(events):
-                self._lazy_update(key[:, :, index], value[:, :, index])
-                outputs.append(self._lazy_read(query[:, :, index]))
-            return torch.stack(outputs, dim=2)
+                self._lazy_update(
+                    key[:, :, index],
+                    value[:, :, index],
+                    include_landmarks=_include_landmarks,
+                )
+                outputs.append(
+                    self._lazy_read(
+                        query[:, :, index], include_landmarks=_include_landmarks
+                    )
+                )
+            result = torch.stack(outputs, dim=2)
+            if output is not None:
+                output.copy_(result)
+                return output
+            return result
 
         # Dense CUDA chunks use a two-launch fused update/read path.  The
         # previous implementation issued one update and one read launch per
@@ -701,7 +765,11 @@ class QCCArchive(nn.Module):
                     output=output,
                     content_threshold=self.content_threshold,
                 )
-                combined = self._combine_landmark(query, result)
+                combined = (
+                    self._combine_landmark(query, result)
+                    if _include_landmarks
+                    else result
+                )
                 if output is not None and combined.data_ptr() != output.data_ptr():
                     output.copy_(combined)
                     return output
@@ -710,11 +778,27 @@ class QCCArchive(nn.Module):
         # Sparse/lazy CUDA chunks and unsupported devices use the reference
         # event path or block scan below.
         if self.use_triton and key.is_cuda:
+            outputs = []
             for index in range(events):
-                self.update(key[:, :, index], value[:, :, index])
-            return torch.stack(
-                [self.read(query[:, :, index]) for index in range(events)], dim=2
-            )
+                if _include_landmarks:
+                    self.update(key[:, :, index], value[:, :, index])
+                    outputs.append(self.read(query[:, :, index]))
+                else:
+                    QCCArchive.update(
+                        self,
+                        key[:, :, index],
+                        value[:, :, index],
+                        _include_landmarks=False,
+                    )
+                    outputs.append(
+                        self._read_states(
+                            query[:, :, index],
+                            self._numerator,
+                            self._denominator,
+                            include_landmarks=False,
+                        )
+                    )
+            return torch.stack(outputs, dim=2)
 
         state_dtype = self._numerator.dtype
         rates = self.decay_rates.to(device=key.device, dtype=state_dtype)
@@ -752,7 +836,10 @@ class QCCArchive(nn.Module):
             )
             outputs.append(
                 self._read_states_chunk(
-                    query[:, :, start:end], numerator_states, denominator_states
+                    query[:, :, start:end],
+                    numerator_states,
+                    denominator_states,
+                    include_landmarks=_include_landmarks,
                 )
             )
         self._denominator = state_den
@@ -763,7 +850,14 @@ class QCCArchive(nn.Module):
             return output
         return result
 
-    def _read_states(self, query: Tensor, numerator: Tensor, denominator: Tensor) -> Tensor:
+    def _read_states(
+        self,
+        query: Tensor,
+        numerator: Tensor,
+        denominator: Tensor,
+        *,
+        include_landmarks: bool = True,
+    ) -> Tensor:
         """Read one or many queries from explicit archive states."""
 
         codes = self.codes.to(device=query.device, dtype=self._numerator.dtype)
@@ -780,7 +874,7 @@ class QCCArchive(nn.Module):
             response = torch.einsum("hmj,bhmjd->bhmd", mix, response)
             routing = F.softmax(routing_logits, dim=-1).to(response.dtype)
             response = torch.einsum("bhm,bhmd->bhd", routing, response).to(query.dtype)
-            return self._combine_landmark(query, response)
+            return self._combine_landmark(query, response) if include_landmarks else response
 
         values, indices = torch.topk(routing_logits, active, dim=-1)
         index_scales = indices.unsqueeze(-1).expand(-1, -1, -1, self.num_scales)
@@ -796,10 +890,12 @@ class QCCArchive(nn.Module):
         selected = (mix.unsqueeze(-1) * selected).sum(dim=3)
         routing = F.softmax(values, dim=-1).to(selected.dtype)
         response = (routing.unsqueeze(-1) * selected).sum(dim=2).to(query.dtype)
-        return self._combine_landmark(query, response)
+        return self._combine_landmark(query, response) if include_landmarks else response
 
     @torch.no_grad()
-    def _lazy_read(self, query: Tensor) -> Tensor:
+    def _lazy_read(
+        self, query: Tensor, *, include_landmarks: bool = True
+    ) -> Tensor:
         """Read top-k slots, materializing their elapsed decay on demand."""
 
         assert self.active_codes is not None
@@ -831,12 +927,14 @@ class QCCArchive(nn.Module):
                 )
                 landmark, valid = self._landmark_read(query)
                 mix = torch.sigmoid(self.landmark_mix_logits).to(result.dtype)
-                return torch.where(
-                    valid.unsqueeze(-1),
-                    (1.0 - mix.view(1, -1, 1)) * result
-                    + mix.view(1, -1, 1) * landmark,
-                    result,
-                )
+                if include_landmarks:
+                    return torch.where(
+                        valid.unsqueeze(-1),
+                        (1.0 - mix.view(1, -1, 1)) * result
+                        + mix.view(1, -1, 1) * landmark,
+                        result,
+                    )
+                return result
         index_scales = indices.unsqueeze(-1).expand(-1, -1, -1, self.num_scales)
         numerator = self._numerator.gather(
             2, index_scales.unsqueeze(-1).expand(-1, -1, -1, -1, self.head_dim)
@@ -855,9 +953,17 @@ class QCCArchive(nn.Module):
         mix = F.softmax(mix_logits, dim=-1).to(response.dtype)
         response = (mix.unsqueeze(-1) * response).sum(dim=3)
         routing = F.softmax(values, dim=-1).to(response.dtype)
-        return (routing.unsqueeze(-1) * response).sum(dim=2).to(query.dtype)
+        response = (routing.unsqueeze(-1) * response).sum(dim=2).to(query.dtype)
+        return self._combine_landmark(query, response) if include_landmarks else response
 
-    def _read_states_chunk(self, query: Tensor, numerator: Tensor, denominator: Tensor) -> Tensor:
+    def _read_states_chunk(
+        self,
+        query: Tensor,
+        numerator: Tensor,
+        denominator: Tensor,
+        *,
+        include_landmarks: bool = True,
+    ) -> Tensor:
         """Read a query block from explicit archive states."""
 
         codes = self.codes.to(device=query.device, dtype=self._numerator.dtype)
@@ -874,7 +980,7 @@ class QCCArchive(nn.Module):
             response = torch.einsum("hmj,bhemjd->bhemd", mix, response)
             routing = F.softmax(routing_logits, dim=-1).to(response.dtype)
             response = torch.einsum("bhem,bhemd->bhed", routing, response).to(query.dtype)
-            return self._combine_landmark(query, response)
+            return self._combine_landmark(query, response) if include_landmarks else response
 
         values, indices = torch.topk(routing_logits, active, dim=-1)
         index_scales = indices.unsqueeze(-1).expand(-1, -1, -1, -1, self.num_scales)
@@ -890,7 +996,7 @@ class QCCArchive(nn.Module):
         selected = (mix.unsqueeze(-1) * selected).sum(dim=4)
         routing = F.softmax(values, dim=-1).to(selected.dtype)
         response = (routing.unsqueeze(-1) * selected).sum(dim=3).to(query.dtype)
-        return self._combine_landmark(query, response)
+        return self._combine_landmark(query, response) if include_landmarks else response
 
     def read(self, query: Tensor) -> Tensor:
         """Read archive response for queries of shape ``[batch, heads, head_dim]``."""
@@ -1894,6 +2000,11 @@ class QCCSelfAttention(nn.Module):
                     archive_q[:, :, event_start:] if lexical_q is None else lexical_q[:, :, event_start:],
                     output=archive_out[:, :, event_start:],
                 )
+                # A chunk update changes the archive state for every active
+                # position.  Do not let a prior token-path remote read leak
+                # into the next decode step when read reuse is enabled.
+                self._archive_read_cache = None
+                self._archive_query_cache = None
             gate = (
                 torch.zeros_like(gate_proj).transpose(1, 2).unsqueeze(-1)
                 if self.archive.prefix_landmark
