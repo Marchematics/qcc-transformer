@@ -222,7 +222,7 @@ class SetAssociativeLandmarkBank(nn.Module):
         if query.ndim != 3 or query.shape[1:] != (self.num_heads, self.head_dim):
             raise ValueError("query must have shape [batch, heads, head_dim]")
         self._ensure_state(query)
-        if query.is_cuda:
+        if query.is_cuda and hard:
             response, confidence = self.read_chunk(
                 query.unsqueeze(2), hard=hard
             )
@@ -317,7 +317,7 @@ class SetAssociativeLandmarkBank(nn.Module):
         # The exact tier is on the serving critical path.  When Triton is
         # available, keep set selection as one small tensor op and fuse the
         # routed cosine search/value gather into one kernel launch per query.
-        if query.is_cuda:
+        if query.is_cuda and hard:
             try:
                 from .triton_kernels import TRITON_AVAILABLE, triton_exact_read_chunk
             except ImportError:  # pragma: no cover - optional CUDA dependency
