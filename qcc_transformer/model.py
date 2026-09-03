@@ -1144,13 +1144,17 @@ class QCCSelfAttention(nn.Module):
             return q, k, v, self.gate(hidden)
 
         # Retrofit adapters may expose an explicit GQA/MQA expansion module
-        # for K/V.  That module is intentionally not folded into the fused
-        # GEMM: the fallback below projects and expands it without silently
-        # changing the loaded HF projection weights.
+        # for K/V.  Fuse the *raw* Q/K/V projections before the explicit
+        # expansion so a normal Llama/Qwen GQA layer still uses one GEMM.
+        # Quantized projection classes intentionally stay on the fallback
+        # path because their custom dequantization must own the operation.
+        raw_k_proj = getattr(self.k_proj, "base", self.k_proj)
+        raw_v_proj = getattr(self.v_proj, "base", self.v_proj)
+        expanded_kv = raw_k_proj is not self.k_proj or raw_v_proj is not self.v_proj
+        projection_sources = (self.q_proj, raw_k_proj, raw_v_proj, self.gate)
         can_fuse = all(
             isinstance(projection, nn.Linear)
-            and projection.out_features == self.d_model
-            for projection in (self.q_proj, self.k_proj, self.v_proj)
+            for projection in projection_sources
         )
         if not can_fuse:
             q = self.q_proj(hidden)
@@ -1166,8 +1170,8 @@ class QCCSelfAttention(nn.Module):
 
         versions = (
             self.q_proj.weight._version,
-            self.k_proj.weight._version,
-            self.v_proj.weight._version,
+            raw_k_proj.weight._version,
+            raw_v_proj.weight._version,
             self.gate.weight._version,
         )
         use_cache = not torch.is_grad_enabled() and not self.training
@@ -1183,7 +1187,7 @@ class QCCSelfAttention(nn.Module):
             bias = self._fused_projection_bias
         else:
             weight = torch.cat(
-                (self.q_proj.weight, self.k_proj.weight, self.v_proj.weight, self.gate.weight),
+                tuple(source.weight for source in projection_sources),
                 dim=0,
             )
             # Hugging Face Llama/Qwen checkpoints commonly disable projection
@@ -1191,7 +1195,7 @@ class QCCSelfAttention(nn.Module):
             # zeros for bias-less projections so the fused retrofit path
             # remains compatible without changing the loaded weights.
             bias_parts = []
-            for projection in (self.q_proj, self.k_proj, self.v_proj, self.gate):
+            for projection in projection_sources:
                 if projection.bias is None:
                     bias_parts.append(
                         torch.zeros(
@@ -1208,9 +1212,30 @@ class QCCSelfAttention(nn.Module):
                 self._fused_projection_bias = bias
                 self._fused_projection_versions = versions
         projected = F.linear(hidden, weight, bias)
+        q_width = self.d_model
+        k_width = int(raw_k_proj.out_features)
+        v_width = int(raw_v_proj.out_features)
         q, k, v, gate = projected.split(
-            (self.d_model, self.d_model, self.d_model, self.num_heads), dim=-1
+            (q_width, k_width, v_width, self.num_heads), dim=-1
         )
+        if expanded_kv:
+            kv_heads = int(getattr(self.k_proj, "kv_heads", 0))
+            head_dim = int(getattr(self.k_proj, "head_dim", 0))
+            if (
+                kv_heads <= 0
+                or head_dim <= 0
+                or k_width != kv_heads * head_dim
+                or v_width != kv_heads * head_dim
+                or self.num_heads % kv_heads
+            ):
+                raise ValueError("invalid grouped-query projection geometry")
+            repeat = self.num_heads // kv_heads
+            k = k.view(*k.shape[:-1], kv_heads, head_dim).repeat_interleave(
+                repeat, dim=-2
+            ).reshape(*k.shape[:-1], self.d_model)
+            v = v.view(*v.shape[:-1], kv_heads, head_dim).repeat_interleave(
+                repeat, dim=-2
+            ).reshape(*v.shape[:-1], self.d_model)
         return q, k, v, gate
 
     def _local_window_attention(

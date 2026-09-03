@@ -18,8 +18,9 @@ class _Attention(nn.Module):
     def __init__(self, *, kv_heads: int = 4):
         super().__init__()
         self.q_proj = nn.Linear(16, 16, bias=False)
-        self.k_proj = nn.Linear(16, 16, bias=False)
-        self.v_proj = nn.Linear(16, 16, bias=False)
+        kv_width = 16 if kv_heads == 4 else 8
+        self.k_proj = nn.Linear(16, kv_width, bias=False)
+        self.v_proj = nn.Linear(16, kv_width, bias=False)
         self.o_proj = nn.Linear(16, 16, bias=False)
         self.num_heads = 4
         self.num_key_value_heads = kv_heads
@@ -206,12 +207,26 @@ def test_patch_hf_rejects_grouped_query_attention():
 
 def test_patch_hf_gqa_repeat_policy_and_idempotence():
     model = _Model(kv_heads=2)
-    # The test fixture uses equal-width projections, but the explicit policy
-    # still permits a model whose config advertises grouped heads.
     replaced = patch_hf_model(model, use_triton=False, kv_head_policy="repeat")
     assert replaced == ["attn"]
     assert patch_hf_model(model, use_triton=False, kv_head_policy="repeat") == []
     assert reset_hf_qcc_cache(model) == 1
+
+
+def test_gqa_projection_fuses_raw_qkv_before_repeat():
+    model = _Model(kv_heads=2)
+    patch_hf_model(model, use_triton=False, kv_head_policy="repeat")
+    hidden = torch.randn(1, 3, 16)
+    q, k, v, gate = model.attn.qcc._project_qkv_gate(hidden)
+    base = model.attn.base_attention
+    expected_q = base.q_proj(hidden)
+    expected_k = base.k_proj(hidden).view(1, 3, 2, 4).repeat_interleave(2, dim=-2).reshape(1, 3, 16)
+    expected_v = base.v_proj(hidden).view(1, 3, 2, 4).repeat_interleave(2, dim=-2).reshape(1, 3, 16)
+    assert q.shape == k.shape == v.shape == (1, 3, 16)
+    torch.testing.assert_close(q, expected_q)
+    torch.testing.assert_close(k, expected_k)
+    torch.testing.assert_close(v, expected_v)
+    assert gate.shape == (1, 3, 4)
 
 
 def test_fidelity_gate_and_adapter_manifest(tmp_path):
