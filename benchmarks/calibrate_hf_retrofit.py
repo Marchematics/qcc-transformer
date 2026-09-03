@@ -59,6 +59,43 @@ def _mean_cosine_from_cpu(student: torch.Tensor, teacher_cpu: torch.Tensor, *, c
     return (dot / (student_sq.sqrt() * teacher_sq.sqrt()).clamp_min(1e-12)).mean()
 
 
+def _chunked_kl_divergence(
+    student: torch.Tensor,
+    teacher_cpu: torch.Tensor,
+    *,
+    chunk_size: int = 8192,
+    temperature: float = 2.0,
+) -> torch.Tensor:
+    """Compute temperature-scaled teacher KL with bounded GPU temporaries."""
+    if student.shape != teacher_cpu.shape:
+        raise ValueError(f"student/teacher shape mismatch: {student.shape} vs {teacher_cpu.shape}")
+    if temperature <= 0:
+        raise ValueError("temperature must be positive")
+    teacher = teacher_cpu.float() / temperature
+    teacher_log_norm = torch.logsumexp(teacher, dim=-1)
+    student_log_norm = torch.full(
+        student.shape[:-1], -torch.inf, device=student.device, dtype=torch.float32
+    )
+    for start in range(0, student.shape[-1], chunk_size):
+        end = min(start + chunk_size, student.shape[-1])
+        student_slice = student[..., start:end].float() / temperature
+        student_log_norm = torch.logaddexp(
+            student_log_norm, torch.logsumexp(student_slice, dim=-1)
+        )
+    total = student.new_zeros((), dtype=torch.float32)
+    for start in range(0, student.shape[-1], chunk_size):
+        end = min(start + chunk_size, student.shape[-1])
+        teacher_slice = teacher[..., start:end]
+        student_slice = student[..., start:end].float() / temperature
+        teacher_log_prob = teacher_slice - teacher_log_norm.unsqueeze(-1)
+        student_log_prob = student_slice - student_log_norm.unsqueeze(-1)
+        total = total + (
+            teacher_log_prob.exp() * (teacher_log_prob - student_log_prob)
+        ).sum()
+    tokens = max(1, student.numel() // student.shape[-1])
+    return total * (temperature * temperature) / tokens
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", required=True)
@@ -91,6 +128,8 @@ def main() -> None:
         default=True,
         help="checkpoint frozen transformer blocks to keep calibration peak memory bounded",
     )
+    parser.add_argument("--kl-weight", type=float, default=0.5)
+    parser.add_argument("--kl-temperature", type=float, default=2.0)
     args = parser.parse_args()
     if args.steps <= 0 or args.lr <= 0 or args.max_tokens <= 0:
         raise ValueError("steps, lr, and max-tokens must be positive")
@@ -99,6 +138,10 @@ def main() -> None:
             "max-tokens must exceed window-size so calibration exercises the QCC archive; "
             "otherwise all outputs stay on the exact local path and have no trainable QCC graph"
         )
+    if not 0.0 <= args.kl_weight <= 1.0:
+        raise ValueError("kl-weight must lie in [0, 1]")
+    if args.kl_temperature <= 0:
+        raise ValueError("kl-temperature must be positive")
     text = args.text_file.read_text(encoding="utf-8")
     if not text.strip():
         raise ValueError("text-file must contain non-whitespace text")
@@ -204,8 +247,12 @@ def main() -> None:
     last_loss = float("nan")
     for _ in range(args.steps):
         optimizer.zero_grad(set_to_none=True)
-        student = patched(**patched_encoded, use_cache=False).logits.float()
-        loss = _chunked_mse(student, teacher)
+        student = patched(**patched_encoded, use_cache=False).logits
+        mse = _chunked_mse(student, teacher)
+        kl = _chunked_kl_divergence(
+            student, teacher, temperature=args.kl_temperature
+        )
+        loss = (1.0 - args.kl_weight) * mse + args.kl_weight * kl
         if not torch.isfinite(loss):
             raise FloatingPointError(
                 "calibration diverged; lower --lr or reduce --max-tokens"
@@ -216,7 +263,7 @@ def main() -> None:
         last_loss = float(loss.detach().item())
     patched.eval()
     with torch.no_grad():
-        student = patched(**patched_encoded, use_cache=False).logits.float()
+        student = patched(**patched_encoded, use_cache=False).logits
         cosine = _mean_cosine_from_cpu(student, teacher)
         agreement = (student.argmax(-1).cpu() == teacher.argmax(-1)).float().mean()
     args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -255,6 +302,8 @@ def main() -> None:
                 "output": str(args.output),
                 "tokens": int(patched_encoded["input_ids"].shape[-1]),
                 "steps": args.steps,
+                "kl_weight": args.kl_weight,
+                "kl_temperature": args.kl_temperature,
                 "final_mse": last_loss,
                 "mean_logit_cosine": float(cosine.item()),
                 "top1_agreement": float(agreement.item()),

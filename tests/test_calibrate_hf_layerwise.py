@@ -14,6 +14,7 @@ _SPEC.loader.exec_module(_MODULE)
 parse_layer_spec = _MODULE.parse_layer_spec
 _chunked_mse = _MODULE._chunked_mse
 _mean_cosine_from_cpu = _MODULE._mean_cosine_from_cpu
+_chunked_kl_divergence = _MODULE._chunked_kl_divergence
 _distillation_loss = _MODULE._distillation_loss
 
 
@@ -70,3 +71,12 @@ def test_distillation_loss_cosine_term_is_finite():
     loss = _distillation_loss(student, teacher, chunk_size=3, cosine_weight=0.5)
     assert torch.isfinite(loss)
     assert loss.item() < 1e-6
+
+
+def test_chunked_kl_is_zero_for_identical_logits():
+    import torch
+
+    logits = torch.randn(2, 3, 13)
+    loss = _chunked_kl_divergence(logits, logits, chunk_size=4)
+    assert torch.isfinite(loss)
+    assert loss.item() < 1e-5

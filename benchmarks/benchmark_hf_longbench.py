@@ -66,7 +66,7 @@ def main() -> None:
                         help="safe output label used under official pred/<label>/")
     parser.add_argument("--run-id", default=None)
     parser.add_argument(
-        "--min-native-context", type=int, default=None,
+        "--min-native-context", type=int, default=128_000,
         help="require the checkpoint to natively declare at least this many tokens",
     )
     parser.add_argument("--device", default="cuda")

@@ -55,12 +55,51 @@ def _mean_cosine_from_cpu(student: torch.Tensor, teacher_cpu: torch.Tensor, *, c
     return (dot / (student_sq.sqrt() * teacher_sq.sqrt()).clamp_min(1e-12)).mean()
 
 
+def _chunked_kl_divergence(
+    student: torch.Tensor,
+    teacher_cpu: torch.Tensor,
+    *,
+    chunk_size: int = 8192,
+    temperature: float = 2.0,
+) -> torch.Tensor:
+    """Match the teacher distribution with bounded GPU temporaries."""
+    if student.shape != teacher_cpu.shape:
+        raise ValueError(f"student/teacher shape mismatch: {student.shape} vs {teacher_cpu.shape}")
+    if temperature <= 0:
+        raise ValueError("temperature must be positive")
+    teacher = teacher_cpu.float() / temperature
+    teacher_log_norm = torch.logsumexp(teacher, dim=-1)
+    student_log_norm = torch.full(
+        student.shape[:-1], -torch.inf, device=student.device, dtype=torch.float32
+    )
+    for start in range(0, student.shape[-1], chunk_size):
+        end = min(start + chunk_size, student.shape[-1])
+        student_slice = student[..., start:end].float() / temperature
+        student_log_norm = torch.logaddexp(
+            student_log_norm, torch.logsumexp(student_slice, dim=-1)
+        )
+    total = student.new_zeros((), dtype=torch.float32)
+    for start in range(0, student.shape[-1], chunk_size):
+        end = min(start + chunk_size, student.shape[-1])
+        teacher_slice = teacher[..., start:end]
+        student_slice = student[..., start:end].float() / temperature
+        teacher_log_prob = teacher_slice - teacher_log_norm.unsqueeze(-1)
+        student_log_prob = student_slice - student_log_norm.unsqueeze(-1)
+        total = total + (
+            teacher_log_prob.exp() * (teacher_log_prob - student_log_prob)
+        ).sum()
+    tokens = max(1, student.numel() // student.shape[-1])
+    return total * (temperature * temperature) / tokens
+
+
 def _distillation_loss(
     student: torch.Tensor,
     teacher_cpu: torch.Tensor,
     *,
     chunk_size: int = 8192,
     cosine_weight: float = 0.0,
+    kl_weight: float = 0.0,
+    kl_temperature: float = 2.0,
 ) -> torch.Tensor:
     """Numerically stable logit distillation objective.
 
@@ -70,13 +109,29 @@ def _distillation_loss(
     agreement while retaining the MSE scale.  ``cosine_weight=0`` is exactly
     the historical objective for reproducibility.
     """
-    if not 0.0 <= cosine_weight <= 1.0:
-        raise ValueError("cosine_weight must lie in [0, 1]")
+    if not 0.0 <= cosine_weight <= 1.0 or not 0.0 <= kl_weight <= 1.0:
+        raise ValueError("cosine_weight and kl_weight must lie in [0, 1]")
+    if cosine_weight + kl_weight > 1.0:
+        raise ValueError("cosine_weight + kl_weight must not exceed 1")
     mse = _chunked_mse(student, teacher_cpu, chunk_size=chunk_size)
-    if cosine_weight == 0.0:
+    if cosine_weight == 0.0 and kl_weight == 0.0:
         return mse
-    cosine = _mean_cosine_from_cpu(student, teacher_cpu, chunk_size=chunk_size)
-    return (1.0 - cosine_weight) * mse + cosine_weight * (1.0 - cosine)
+    cosine = (
+        _mean_cosine_from_cpu(student, teacher_cpu, chunk_size=chunk_size)
+        if cosine_weight
+        else student.new_zeros((), dtype=torch.float32)
+    )
+    kl = (
+        _chunked_kl_divergence(
+            student,
+            teacher_cpu,
+            chunk_size=chunk_size,
+            temperature=kl_temperature,
+        )
+        if kl_weight
+        else student.new_zeros((), dtype=torch.float32)
+    )
+    return (1.0 - cosine_weight - kl_weight) * mse + cosine_weight * (1.0 - cosine) + kl_weight * kl
 
 
 def parse_layer_spec(spec: str, num_layers: int) -> list[int]:
@@ -184,12 +239,18 @@ def main() -> None:
         help="weight of directional (1-cosine) term in calibration loss; "
              "0 preserves historical MSE-only behavior",
     )
+    parser.add_argument("--kl-weight", type=float, default=0.5)
+    parser.add_argument("--kl-temperature", type=float, default=2.0)
     args = parser.parse_args()
 
     if args.steps <= 0 or args.lr <= 0 or args.max_tokens <= 0 or args.num_train_chunks <= 0:
         raise ValueError("steps, lr, max-tokens, and num-train-chunks must be positive")
-    if not 0.0 <= args.cosine_weight <= 1.0:
-        raise ValueError("cosine-weight must lie in [0, 1]")
+    if not 0.0 <= args.cosine_weight <= 1.0 or not 0.0 <= args.kl_weight <= 1.0:
+        raise ValueError("cosine-weight and kl-weight must lie in [0, 1]")
+    if args.cosine_weight + args.kl_weight > 1.0:
+        raise ValueError("cosine-weight + kl-weight must not exceed 1")
+    if args.kl_temperature <= 0:
+        raise ValueError("kl-temperature must be positive")
     if args.archive_prefix_landmark and not args.archive_persistent_landmark:
         raise ValueError("archive-prefix-landmark requires archive-persistent-landmark")
     if args.archive_prefix_pair_landmark and not args.archive_prefix_landmark:
@@ -366,11 +427,13 @@ def main() -> None:
     for step in range(args.steps):
         optimizer.zero_grad(set_to_none=True)
         batch_index = step % len(train_batches)
-        student = patched(**train_batches[batch_index], use_cache=False).logits.float()
+        student = patched(**train_batches[batch_index], use_cache=False).logits
         loss = _distillation_loss(
             student,
             train_teachers[batch_index],
             cosine_weight=args.cosine_weight,
+            kl_weight=args.kl_weight,
+            kl_temperature=args.kl_temperature,
         )
         if not torch.isfinite(loss):
             raise FloatingPointError(
@@ -389,7 +452,7 @@ def main() -> None:
         train_cosines = []
         train_agreements = []
         for batch, teacher in zip(train_batches, train_teachers):
-            train_student = patched(**batch, use_cache=False).logits.float()
+            train_student = patched(**batch, use_cache=False).logits
             train_cosines.append(_mean_cosine_from_cpu(train_student, teacher))
             train_agreements.append((train_student.argmax(-1).cpu() == teacher.argmax(-1)).float().mean())
         train_cosine = torch.stack(train_cosines).mean()
@@ -400,7 +463,7 @@ def main() -> None:
         held_out_gate_passed = None
 
         if held_out_teacher is not None:
-            held_out_student = patched(**held_out_encoded, use_cache=False).logits.float()
+            held_out_student = patched(**held_out_encoded, use_cache=False).logits
             held_out_cosine = _mean_cosine_from_cpu(held_out_student, held_out_teacher)
             held_out_agreement = (held_out_student.argmax(-1).cpu() == held_out_teacher.argmax(-1)).float().mean()
             held_out_gate_passed = float(held_out_cosine.item()) >= args.quality_gate
@@ -445,6 +508,9 @@ def main() -> None:
         "train_tokens": int(sum(batch["input_ids"].shape[-1] for batch in train_batches)),
         "train_chunks": len(train_batches),
         "steps": args.steps,
+        "cosine_weight": args.cosine_weight,
+        "kl_weight": args.kl_weight,
+        "kl_temperature": args.kl_temperature,
         "train_mean_logit_cosine": float(train_cosine.item()),
         "train_top1_agreement": float(train_agreement.item()),
     }

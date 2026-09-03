@@ -9,3 +9,4 @@ build/
 *.pth
 profile_output/
 work/
+.DS_Store

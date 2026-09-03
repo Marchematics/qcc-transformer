@@ -118,7 +118,7 @@ def main() -> None:
     parser.add_argument("--max-new-tokens", type=int, default=32)
     parser.add_argument("--run-id", default=None)
     parser.add_argument(
-        "--min-native-context", type=int, default=None,
+        "--min-native-context", type=int, default=128_000,
         help="require the checkpoint to natively declare at least this many tokens",
     )
     parser.add_argument("--dtype", choices=("auto", "float16", "bfloat16", "float32"), default="auto")
