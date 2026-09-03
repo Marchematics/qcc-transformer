@@ -69,6 +69,115 @@ def test_packed_decode_batch_matches_independent_page_references() -> None:
         torch.testing.assert_close(pages[1], page_b, atol=0, rtol=0)
 
 
+def test_packed_decode_batch_handles_gqa_and_independent_progress() -> None:
+    torch.manual_seed(72)
+    config = QCCStockVLLMConfig(
+        num_heads=4,
+        head_dim=4,
+        window_size=3,
+        num_codes=4,
+        exact_num_sets=4,
+        exact_ways=2,
+        local_element_bytes=4,
+    )
+    archive = HybridQCCArchive(
+        config.num_heads,
+        config.head_dim,
+        num_codes=config.num_codes,
+        decay_rates=config.decay_rates(),
+        window_size=config.window_size,
+        use_triton=False,
+        exact_num_sets=config.exact_num_sets,
+        exact_ways=config.exact_ways,
+    )
+    batched = PackedHybridReferenceState(config, archive=archive, use_triton=False)
+    single_a = PackedHybridReferenceState(config, archive=archive, use_triton=False)
+    single_b = PackedHybridReferenceState(config, archive=archive, use_triton=False)
+    pages = torch.cat(
+        [batched.allocate_page(dtype=torch.float32) for _ in range(2)], dim=0
+    ).view(2, -1)
+    page_a = single_a.allocate_page(dtype=torch.float32)
+    page_b = single_b.allocate_page(dtype=torch.float32)
+
+    def compare_one(
+        page_slice: torch.Tensor,
+        state,
+        page: torch.Tensor,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        position: int,
+    ) -> None:
+        actual = batched.forward_decode_batch(
+            page_slice,
+            query,
+            key,
+            value,
+            torch.tensor([position], dtype=torch.long),
+        )
+        expected = state.forward(
+            page,
+            query.unsqueeze(2),
+            key.unsqueeze(2),
+            value.unsqueeze(2),
+        ).squeeze(2)
+        torch.testing.assert_close(actual, expected, atol=1e-5, rtol=1e-5)
+        torch.testing.assert_close(page_slice[0], page, atol=0, rtol=0)
+
+    query = torch.randn(2, config.num_heads, config.head_dim)
+    key = torch.randn(2, 2, config.head_dim)
+    value = torch.randn_like(key)
+    actual = batched.forward_decode_batch(
+        pages, query, key, value, torch.zeros(2, dtype=torch.long)
+    )
+    expected = torch.cat(
+        (
+            single_a.forward(
+                page_a, query[:1].unsqueeze(2), key[:1].unsqueeze(2), value[:1].unsqueeze(2)
+            ).squeeze(2),
+            single_b.forward(
+                page_b, query[1:].unsqueeze(2), key[1:].unsqueeze(2), value[1:].unsqueeze(2)
+            ).squeeze(2),
+        ),
+        dim=0,
+    )
+    torch.testing.assert_close(actual, expected, atol=1e-5, rtol=1e-5)
+    torch.testing.assert_close(pages[0], page_a, atol=0, rtol=0)
+    torch.testing.assert_close(pages[1], page_b, atol=0, rtol=0)
+
+    for position, index, state, page in (
+        (1, 0, single_a, page_a),
+        (1, 1, single_b, page_b),
+        (2, 0, single_a, page_a),
+    ):
+        query = torch.randn(1, config.num_heads, config.head_dim)
+        key = torch.randn(1, 2, config.head_dim)
+        value = torch.randn_like(key)
+        compare_one(pages[index : index + 1], state, page, query, key, value, position)
+
+    for positions in ((3, 2), (4, 3)):
+        query = torch.randn(2, config.num_heads, config.head_dim)
+        key = torch.randn(2, 2, config.head_dim)
+        value = torch.randn_like(key)
+        actual = batched.forward_decode_batch(
+            pages, query, key, value, torch.tensor(positions, dtype=torch.long)
+        )
+        expected = torch.cat(
+            (
+                single_a.forward(
+                    page_a, query[:1].unsqueeze(2), key[:1].unsqueeze(2), value[:1].unsqueeze(2)
+                ).squeeze(2),
+                single_b.forward(
+                    page_b, query[1:].unsqueeze(2), key[1:].unsqueeze(2), value[1:].unsqueeze(2)
+                ).squeeze(2),
+            ),
+            dim=0,
+        )
+        torch.testing.assert_close(actual, expected, atol=1e-5, rtol=1e-5)
+        torch.testing.assert_close(pages[0], page_a, atol=0, rtol=0)
+        torch.testing.assert_close(pages[1], page_b, atol=0, rtol=0)
+
+
 def test_packed_layout_segments_do_not_overlap_and_are_aligned() -> None:
     layout = QCCPackedStateLayout(
         QCCStockVLLMConfig(num_heads=8, head_dim=16, window_size=32)
