@@ -365,7 +365,7 @@ def main() -> None:
         raise ValueError("positive-fraction must lie in (0, 1]")
 
     try:
-        from transformers import AutoModelForCausalLM, AutoTokenizer
+        from transformers import AutoTokenizer
     except ImportError as exc:
         raise SystemExit("install the HF extra: pip install -e '.[hf]'") from exc
 
