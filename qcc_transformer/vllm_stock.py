@@ -60,6 +60,9 @@ class QCCStockVLLMConfig:
     # adapter checkpoint remains global and is sliced by tensor-parallel rank at
     # load time when this value is greater than one.
     tensor_parallel_size: int = 1
+    # Local KV-head count used by the matched Full-KV denominator.  ``None``
+    # preserves the MHA default for older JSON configs.
+    num_kv_heads: int | None = None
 
     def __post_init__(self) -> None:
         positive = (
@@ -79,6 +82,9 @@ class QCCStockVLLMConfig:
         )
         if any(value <= 0 for value in positive):
             raise ValueError("all positive QCC stock-vLLM values must be > 0")
+        kv_heads = self.num_heads if self.num_kv_heads is None else self.num_kv_heads
+        if kv_heads <= 0 or kv_heads > self.num_heads or self.num_heads % kv_heads:
+            raise ValueError("num_kv_heads must divide local num_heads")
         if self.max_position_embeddings < self.window_size:
             raise ValueError("max_position_embeddings must cover the local window")
         if self.exact_probe_sets is not None and self.exact_probe_sets <= 0:
@@ -223,7 +229,11 @@ class QCCPackedStateLayout:
 
         if context_tokens <= 0:
             raise ValueError("context_tokens must be positive")
-        kv_heads = self.config.num_heads if num_kv_heads is None else num_kv_heads
+        kv_heads = (
+            self.config.num_kv_heads
+            if num_kv_heads is None and self.config.num_kv_heads is not None
+            else self.config.num_heads if num_kv_heads is None else num_kv_heads
+        )
         if kv_heads <= 0 or kv_heads > self.config.num_heads:
             raise ValueError("num_kv_heads must lie in [1, num_heads]")
         if self.config.num_heads % kv_heads:

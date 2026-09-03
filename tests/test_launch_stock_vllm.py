@@ -7,6 +7,7 @@ from benchmarks.launch_stock_vllm import (
     build_launch,
     infer_attention_geometry,
     native_context,
+    infer_kv_heads,
 )
 
 
@@ -14,6 +15,34 @@ def test_stock_launcher_derives_geometry_and_context():
     config = SimpleNamespace(hidden_size=256, num_attention_heads=8, max_position_embeddings=131072)
     assert infer_attention_geometry(config) == (8, 32)
     assert native_context(config) == 131072
+    assert infer_kv_heads(config, 8) == 8
+
+
+def test_stock_launcher_preserves_local_gqa_geometry_under_tp(tmp_path: Path):
+    adapter = tmp_path / "adapter.pt"
+    adapter.write_bytes(b"adapter")
+    config = SimpleNamespace(
+        hidden_size=256,
+        num_attention_heads=8,
+        num_key_value_heads=2,
+        max_position_embeddings=131072,
+    )
+    _, _, packed = build_launch(
+        model="org/model-1b",
+        adapter=adapter,
+        config=config,
+        context_length=128000,
+        window_size=128,
+        num_codes=16,
+        num_scales=4,
+        exact_num_sets=32,
+        exact_ways=2,
+        exact_probe_sets=None,
+        local_dtype="bfloat16",
+        passthrough=["--tensor-parallel-size", "2"],
+    )
+    assert packed.num_heads == 4
+    assert packed.num_kv_heads == 1
 
 
 def test_stock_launcher_parses_remote_code_and_option_forms():

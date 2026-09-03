@@ -175,6 +175,12 @@ class QCCV1AttentionImpl(AttentionImpl[QCCV1AttentionMetadata]):
             num_kv_heads = num_heads
         if num_heads % num_kv_heads:
             raise ValueError("query heads must be divisible by KV heads")
+        configured_kv_heads = config.num_kv_heads
+        if configured_kv_heads is not None and configured_kv_heads != num_kv_heads:
+            raise ValueError(
+                "QCC stock config does not match vLLM KV-head geometry: "
+                f"config={configured_kv_heads}, runtime={num_kv_heads}"
+            )
         self.num_heads = num_heads
         self.num_kv_heads = num_kv_heads
         self.head_size = head_size

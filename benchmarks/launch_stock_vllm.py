@@ -35,6 +35,13 @@ def infer_attention_geometry(config: Any) -> tuple[int, int]:
     return heads, head_dim
 
 
+def infer_kv_heads(config: Any, query_heads: int) -> int:
+    value = int(getattr(config, "num_key_value_heads", query_heads))
+    if value <= 0 or value > query_heads or query_heads % value:
+        raise ValueError("checkpoint KV-head geometry is incompatible with query heads")
+    return value
+
+
 def native_context(config: Any) -> int | None:
     values = [
         getattr(config, name, None)
@@ -96,10 +103,15 @@ def build_launch(
     if not adapter.is_file():
         raise FileNotFoundError(adapter)
     query_heads, head_dim = infer_attention_geometry(config)
+    kv_heads = infer_kv_heads(config, query_heads)
     tensor_parallel_size = _tensor_parallel_size(passthrough)
     if query_heads % tensor_parallel_size:
         raise ValueError(
             "checkpoint query heads must divide --tensor-parallel-size for stock QCC"
+        )
+    if kv_heads % tensor_parallel_size:
+        raise ValueError(
+            "checkpoint KV heads must divide --tensor-parallel-size for stock QCC"
         )
     target_context = context_length or native_context(config)
     if target_context is None or target_context <= 0:
@@ -121,6 +133,7 @@ def build_launch(
         max_position_embeddings=target_context,
         local_element_bytes=local_bytes,
         tensor_parallel_size=tensor_parallel_size,
+        num_kv_heads=kv_heads // tensor_parallel_size,
     )
     configured_max_len = _option_value(passthrough, "--max-model-len")
     if configured_max_len is not None:

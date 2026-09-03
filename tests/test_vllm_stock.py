@@ -225,6 +225,23 @@ def test_packed_state_ratio_uses_kv_heads_for_gqa() -> None:
     assert gqa == 4.0 * mha
 
 
+def test_packed_state_ratio_defaults_to_configured_kv_heads() -> None:
+    layout = QCCPackedStateLayout(
+        QCCStockVLLMConfig(
+            num_heads=16,
+            num_kv_heads=4,
+            head_dim=64,
+            window_size=128,
+            num_codes=16,
+            exact_num_sets=32,
+            exact_ways=4,
+        )
+    )
+    explicit = layout.compression_ratio_vs_full_kv(128_000, num_kv_heads=4)
+    default = layout.compression_ratio_vs_full_kv(128_000)
+    assert default == explicit
+
+
 def test_packed_layout_round_trips_config_json() -> None:
     config = QCCStockVLLMConfig(
         num_heads=32,
