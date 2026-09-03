@@ -12,6 +12,24 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from benchmarks.compare_serving_reports import compare_reports, load_report
 
 
+_STRONG_COMPRESSION_BASELINES = {
+    "adakv",
+    "cachegen",
+    "compresskv",
+    "gear",
+    "h2o",
+    "kivi",
+    "kvpress",
+    "pyramidkv",
+    "quest",
+    "rkv",
+    "scalekv",
+    "snapkv",
+    "squeezekv",
+    "streamingllm",
+}
+
+
 def _baseline_name(label: Any) -> str:
     if not isinstance(label, str) or not label.strip():
         raise ValueError("each baseline report needs a non-empty label")
@@ -30,18 +48,30 @@ def compare_pareto(qcc: dict[str, Any], baselines: list[dict[str, Any]]) -> dict
         name = _baseline_name(baseline.get("label"))
         if name in names:
             raise ValueError(f"duplicate baseline label {name}")
+        if name != "fp8_full_kv" and name not in _STRONG_COMPRESSION_BASELINES:
+            raise ValueError(
+                f"unsupported compression baseline {name}; use a registered strong KV baseline"
+            )
         names.add(name)
         paired = compare_reports(qcc, baseline)
+        memory_reduction = paired["derived"].get("server_peak_gpu_memory_reduction")
+        memory_dominates = (
+            isinstance(memory_reduction, (int, float)) and memory_reduction >= 0.0
+        )
         comparisons.append(
             {
                 "name": name,
                 "label": baseline.get("label"),
-                "qcc_dominates": paired["derived"]["qcc_dominates"],
+                "memory_dominates": memory_dominates,
+                "qcc_dominates": paired["derived"]["qcc_dominates"] and memory_dominates,
                 "metrics": paired["derived"],
             }
         )
     if "fp8_full_kv" not in names:
         raise ValueError("Pareto comparison requires a baseline labelled FP8 Full-KV")
+    compression = names - {"fp8_full_kv"}
+    if len(compression) < 2:
+        raise ValueError("Pareto comparison requires at least two strong KV compression baselines")
     provenance = comparisons and compare_reports(qcc, baselines[0])["provenance"]
     return {
         "schema": "qcc-vllm-pareto-comparison-v1",

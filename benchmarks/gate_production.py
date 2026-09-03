@@ -108,6 +108,26 @@ def audit(payload: dict[str, Any]) -> dict[str, Any]:
                         ratio = qcc / full
                         quality_ratios[benchmark] = ratio
                         _require(ratio >= QUALITY_RATIO, f"quality.{benchmark} ratio {ratio:.6f} < {QUALITY_RATIO:.2f}", failures)
+                task_ratios = section.get("task_ratios")
+                if task_ratios is not None:
+                    _require(
+                        isinstance(task_ratios, dict) and bool(task_ratios),
+                        f"quality.{benchmark}.task_ratios is missing",
+                        failures,
+                    )
+                    if isinstance(task_ratios, dict):
+                        for task, value in task_ratios.items():
+                            task_ratio = _number(
+                                value,
+                                f"quality.{benchmark}.task_ratios.{task}",
+                                failures,
+                            )
+                            if task_ratio is not None:
+                                _require(
+                                    task_ratio >= TAIL_RATIO,
+                                    f"quality.{benchmark} task {task} ratio {task_ratio:.6f} < {TAIL_RATIO:.2f}",
+                                    failures,
+                                )
     summary["quality_ratios"] = quality_ratios
 
     # 3: 128K stock-vLLM real serving gains.
@@ -188,6 +208,17 @@ def audit(payload: dict[str, Any]) -> dict[str, Any]:
         miss = _number(tail.get("catastrophic_retrieval_miss_rate"), "tail_safety.catastrophic_retrieval_miss_rate", failures)
         if miss is not None:
             _require(miss < 0.01, "catastrophic retrieval miss rate must be < 1%", failures)
+        miss_trials = _number(
+            tail.get("catastrophic_retrieval_miss_rate_trials"),
+            "tail_safety.catastrophic_retrieval_miss_rate_trials",
+            failures,
+        )
+        if miss_trials is not None:
+            _require(
+                miss_trials < 0.01,
+                "catastrophic retrieval miss rate over all trials must be < 1%",
+                failures,
+            )
         buckets = tail.get("critical_buckets")
         _require(isinstance(buckets, list) and bool(buckets), "tail_safety.critical_buckets is missing", failures)
         if isinstance(buckets, list):
@@ -207,6 +238,7 @@ def audit(payload: dict[str, Any]) -> dict[str, Any]:
             _require(len(baselines) >= 3, "pareto dominance requires FP8 plus two compression baselines", failures)
             for index, item in enumerate(baselines):
                 _require(isinstance(item, dict) and item.get("qcc_dominates") is True, f"pareto baseline {index} is not dominated", failures)
+                _require(isinstance(item, dict) and item.get("memory_dominates") is True, f"pareto baseline {index} lacks memory dominance", failures)
 
     # 8: tail production latency must improve without hiding a throughput tradeoff.
     production = payload.get("production_latency")
@@ -214,12 +246,18 @@ def audit(payload: dict[str, Any]) -> dict[str, Any]:
         ttft = _number(production.get("ttft_regression"), "production_latency.ttft_regression", failures)
         p95 = _number(production.get("p95_tpot_speedup"), "production_latency.p95_tpot_speedup", failures)
         p99 = _number(production.get("p99_tpot_speedup"), "production_latency.p99_tpot_speedup", failures)
+        ttft_p95 = _number(production.get("p95_ttft_speedup"), "production_latency.p95_ttft_speedup", failures)
+        ttft_p99 = _number(production.get("p99_ttft_speedup"), "production_latency.p99_ttft_speedup", failures)
         if ttft is not None:
             _require(ttft <= 0, "TTFT regression must be <= 0", failures)
         if p95 is not None:
             _require(p95 >= 1.0, "p95 TPOT must not regress", failures)
         if p99 is not None:
             _require(p99 >= 1.0, "p99 TPOT must not regress", failures)
+        if ttft_p95 is not None:
+            _require(ttft_p95 >= 1.0, "p95 TTFT must not regress", failures)
+        if ttft_p99 is not None:
+            _require(ttft_p99 >= 1.0, "p99 TTFT must not regress", failures)
         _require(production.get("throughput_latency_tradeoff") is False, "throughput/latency tradeoff evidence is not acceptable", failures)
 
     # 9: constant-state/near-constant-TPOT scaling through 1M.

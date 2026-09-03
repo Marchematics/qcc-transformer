@@ -62,6 +62,15 @@ def _same_required_field(
     return left
 
 
+def _same_required_text(
+    qcc: dict[str, Any], baseline: dict[str, Any], field: str
+) -> str:
+    value = _same_required_field(qcc, baseline, field)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"serving reports require non-empty {field}")
+    return value
+
+
 def _ratio(numerator: float, denominator: float) -> float:
     return numerator / max(denominator, 1.0e-12)
 
@@ -71,6 +80,14 @@ def compare_reports(qcc: dict[str, Any], baseline: dict[str, Any]) -> dict[str, 
 
     if qcc.get("label") == baseline.get("label"):
         raise ValueError("QCC and baseline labels must differ")
+    if qcc.get("real_model") is not True or baseline.get("real_model") is not True:
+        raise ValueError("serving comparison requires a real pretrained model")
+    if qcc.get("synthetic") is not False or baseline.get("synthetic") is not False:
+        raise ValueError("serving comparison cannot use synthetic evidence")
+    if qcc.get("qcc_only") is not False or baseline.get("qcc_only") is not False:
+        raise ValueError("serving comparison requires Full-KV and QCC sides")
+    if qcc.get("protocol_locked") is not True or baseline.get("protocol_locked") is not True:
+        raise ValueError("serving comparison requires a registered workload protocol")
     model_id = qcc.get("model_id", qcc.get("model"))
     baseline_model_id = baseline.get("model_id", baseline.get("model"))
     if model_id != baseline_model_id or model_id is None:
@@ -80,8 +97,9 @@ def compare_reports(qcc: dict[str, Any], baseline: dict[str, Any]) -> dict[str, 
     max_tokens = _same_required_field(qcc, baseline, "max_tokens")
     workload = _same_required_field(qcc, baseline, "workload")
     num_requests = _same_required_field(qcc, baseline, "num_requests")
-    if _same_required_field(qcc, baseline, "vllm_version") is None:
-        raise ValueError("serving reports require vllm_version")
+    _same_required_text(qcc, baseline, "vllm_version")
+    for field in ("gpu", "gpu_generation", "model_family"):
+        _same_required_text(qcc, baseline, field)
     if not isinstance(context_length, int) or context_length <= 0:
         raise ValueError("context_length must be a positive integer")
     if not isinstance(concurrency, int) or concurrency <= 0:
@@ -90,9 +108,22 @@ def compare_reports(qcc: dict[str, Any], baseline: dict[str, Any]) -> dict[str, 
         raise ValueError("max_tokens must be a positive integer")
     if not isinstance(num_requests, int) or num_requests <= 0:
         raise ValueError("num_requests must be a positive integer")
+    if context_length >= 128_000:
+        if qcc.get("workload_context_exact") is not True or baseline.get("workload_context_exact") is not True:
+            raise ValueError("128K serving reports must verify exact prompt token counts")
+        for name, report in (("qcc", qcc), ("baseline", baseline)):
+            native = report.get("native_context_tokens")
+            if isinstance(native, bool) or not isinstance(native, int) or native < context_length:
+                raise ValueError(
+                    f"{name} serving report must declare native context >= requested length"
+                )
 
     qcc_ttft_p50 = _summary_value(qcc, "ttft_s", "p50")
     base_ttft_p50 = _summary_value(baseline, "ttft_s", "p50")
+    qcc_ttft_p95 = _summary_value(qcc, "ttft_s", "p95")
+    base_ttft_p95 = _summary_value(baseline, "ttft_s", "p95")
+    qcc_ttft_p99 = _summary_value(qcc, "ttft_s", "p99")
+    base_ttft_p99 = _summary_value(baseline, "ttft_s", "p99")
     qcc_tpot_p50 = _summary_value(qcc, "tpot_s", "p50")
     base_tpot_p50 = _summary_value(baseline, "tpot_s", "p50")
     qcc_tpot_p95 = _summary_value(qcc, "tpot_s", "p95")
@@ -115,6 +146,8 @@ def compare_reports(qcc: dict[str, Any], baseline: dict[str, Any]) -> dict[str, 
     )
 
     ttft_regression = _ratio(qcc_ttft_p50, base_ttft_p50) - 1.0
+    p95_ttft_speedup = _ratio(base_ttft_p95, qcc_ttft_p95)
+    p99_ttft_speedup = _ratio(base_ttft_p99, qcc_ttft_p99)
     p50_tpot_speedup = _ratio(base_tpot_p50, qcc_tpot_p50)
     p95_tpot_speedup = _ratio(base_tpot_p95, qcc_tpot_p95)
     p99_tpot_speedup = _ratio(base_tpot_p99, qcc_tpot_p99)
@@ -141,10 +174,14 @@ def compare_reports(qcc: dict[str, Any], baseline: dict[str, Any]) -> dict[str, 
         throughput_speedup < 1.0
         or p95_tpot_speedup < 1.0
         or p99_tpot_speedup < 1.0
+        or p95_ttft_speedup < 1.0
+        or p99_ttft_speedup < 1.0
     )
     qcc_dominates = (
         all_requests_succeeded
         and ttft_regression <= 0.0
+        and p95_ttft_speedup >= 1.0
+        and p99_ttft_speedup >= 1.0
         and p95_tpot_speedup >= 1.0
         and p99_tpot_speedup >= 1.0
         and throughput_speedup >= 1.0
@@ -162,6 +199,8 @@ def compare_reports(qcc: dict[str, Any], baseline: dict[str, Any]) -> dict[str, 
 
     derived = {
         "ttft_regression": ttft_regression,
+        "p95_ttft_speedup": p95_ttft_speedup,
+        "p99_ttft_speedup": p99_ttft_speedup,
         "p50_tpot_speedup": p50_tpot_speedup,
         "p95_tpot_speedup": p95_tpot_speedup,
         "p99_tpot_speedup": p99_tpot_speedup,
@@ -198,11 +237,17 @@ def compare_reports(qcc: dict[str, Any], baseline: dict[str, Any]) -> dict[str, 
             "stock_vllm": True,
             "context_tokens": context_length,
             "tpot_speedup": p50_tpot_speedup,
+            "p95_tpot_speedup": p95_tpot_speedup,
+            "p99_tpot_speedup": p99_tpot_speedup,
+            "p95_ttft_speedup": p95_ttft_speedup,
+            "p99_ttft_speedup": p99_ttft_speedup,
             "throughput_speedup": throughput_speedup,
         },
         "production_latency": {
             **provenance,
             "ttft_regression": ttft_regression,
+            "p95_ttft_speedup": p95_ttft_speedup,
+            "p99_ttft_speedup": p99_ttft_speedup,
             "p95_tpot_speedup": p95_tpot_speedup,
             "p99_tpot_speedup": p99_tpot_speedup,
             "throughput_latency_tradeoff": throughput_latency_tradeoff,

@@ -28,6 +28,7 @@ def _evidence() -> dict:
             "synthetic": False,
             "qcc_only": False,
             "run_id": run_id,
+            "task_ratios": {"task:all": 0.99, "length:128K+": 0.99},
         }
         for name in ("ruler", "longbench", "pg19")
     }
@@ -78,6 +79,7 @@ def _evidence() -> dict:
         "tail_safety": {
             **custom,
             "catastrophic_retrieval_miss_rate": 0.005,
+            "catastrophic_retrieval_miss_rate_trials": 0.004,
             "critical_buckets": [
                 {"name": "0-25%", "qcc_full_kv_ratio": 0.99},
                 {"name": "75-100%", "qcc_full_kv_ratio": 0.98},
@@ -86,14 +88,16 @@ def _evidence() -> dict:
         "pareto_dominance": {
             **custom,
             "baselines": [
-                {"name": "fp8_full_kv", "qcc_dominates": True},
-                {"name": "compresskv", "qcc_dominates": True},
-                {"name": "h2o", "qcc_dominates": True},
+                {"name": "fp8_full_kv", "qcc_dominates": True, "memory_dominates": True},
+                {"name": "compresskv", "qcc_dominates": True, "memory_dominates": True},
+                {"name": "h2o", "qcc_dominates": True, "memory_dominates": True},
             ],
         },
         "production_latency": {
             **custom,
             "ttft_regression": 0.0,
+            "p95_ttft_speedup": 1.01,
+            "p99_ttft_speedup": 1.01,
             "p95_tpot_speedup": 1.1,
             "p99_tpot_speedup": 1.02,
             "throughput_latency_tradeoff": False,

@@ -33,6 +33,16 @@ def native_context(config) -> int | None:
     return max(values) if values else None
 
 
+def length_bucket(tokens: int) -> str:
+    if tokens < 8_192:
+        return "0-8K"
+    if tokens < 32_768:
+        return "8-32K"
+    if tokens < 128_000:
+        return "32-128K"
+    return "128K+"
+
+
 def _records(path: Path, max_examples: int | None):
     count = 0
     with path.open("r", encoding="utf-8") as stream:
@@ -79,6 +89,10 @@ def _run_model(
             encoded = tokenizer(record["input"], return_tensors="pt", add_special_tokens=False)
             encoded = {key: value.to(device) for key, value in encoded.items()}
             result["tokens"] = int(encoded["input_ids"].shape[-1])
+            result["task"] = str(
+                record.get("task", record.get("task_name", record.get("type", "unknown")))
+            )
+            result["length_bucket"] = length_bucket(result["tokens"])
             generated = model.generate(
                 **encoded,
                 max_new_tokens=max_new_tokens,
@@ -202,6 +216,40 @@ def main() -> None:
     )
     baseline_correct = sum(bool(item["correct"]) for item in baseline_results)
     qcc_correct = sum(bool(item["correct"]) for item in qcc_results)
+    baseline_by_line = {item["line"]: item for item in baseline_results}
+    qcc_by_line = {item["line"]: item for item in qcc_results}
+
+    def paired_ratios(field: str) -> dict[str, float]:
+        full_counts: dict[str, list[int]] = {}
+        qcc_counts: dict[str, list[int]] = {}
+        for line, full_row in baseline_by_line.items():
+            qcc_row = qcc_by_line.get(line)
+            if qcc_row is None:
+                raise RuntimeError(f"missing paired QCC RULER record for line {line}")
+            key = full_row.get(field)
+            if key is None:
+                key = qcc_row.get(field)
+            key = str(key if key is not None else "unknown")
+            full_counts.setdefault(key, [0, 0])
+            qcc_counts.setdefault(key, [0, 0])
+            full_counts[key][0] += 1
+            full_counts[key][1] += int(bool(full_row.get("correct")))
+            qcc_counts[key][1] += int(bool(qcc_row.get("correct")))
+        ratios: dict[str, float] = {}
+        for key, (count, correct) in full_counts.items():
+            if correct <= 0:
+                ratios[key] = 0.0
+            else:
+                ratios[key] = (qcc_counts[key][1] / count) / (correct / count)
+        return ratios
+
+    task_ratios = {
+        **{f"task:{key}": value for key, value in paired_ratios("task").items()},
+        **{
+            f"length:{key}": value
+            for key, value in paired_ratios("length_bucket").items()
+        },
+    }
     result = {
         "schema": "qcc-ruler-v1",
         "benchmark": "ruler",
@@ -215,6 +263,7 @@ def main() -> None:
         "qcc_only": False,
         "qcc_score": qcc_correct / len(records),
         "full_kv_score": baseline_correct / len(records),
+        "task_ratios": task_ratios,
         "quality_score": qcc_correct / len(records),
         "native_context_tokens": native_context_tokens,
         "records": len(records),

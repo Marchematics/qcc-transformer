@@ -27,6 +27,7 @@ class RequestResult:
     index: int
     ok: bool
     prompt_chars: int
+    prompt_tokens: int | None
     completion_tokens: int
     ttft_s: float | None
     e2e_s: float
@@ -82,6 +83,15 @@ def load_prompts(path: Path, limit: int | None) -> list[str]:
     return prompts
 
 
+def native_context_from_config(config: Any) -> int | None:
+    values = [
+        getattr(config, name, None)
+        for name in ("max_position_embeddings", "n_positions", "max_sequence_length")
+    ]
+    values = [int(value) for value in values if isinstance(value, int) and value > 0]
+    return max(values) if values else None
+
+
 def _parse_sse_line(line: bytes) -> dict[str, Any] | None:
     text = line.decode("utf-8", errors="replace").strip()
     if not text.startswith("data:"):
@@ -100,6 +110,7 @@ def run_one(
     model: str,
     max_tokens: int,
     timeout: float,
+    prompt_tokens: int | None = None,
 ) -> RequestResult:
     payload = {
         "model": model,
@@ -142,6 +153,8 @@ def run_one(
                         first_content = now
                     last_content = now
         end = time.perf_counter()
+        if first_content is None:
+            raise RuntimeError("stream ended without a content token")
         ttft = None if first_content is None else first_content - start
         if completion_tokens <= 0 and first_content is not None:
             # Token usage should be present on stock vLLM with include_usage. Treat
@@ -150,12 +163,13 @@ def run_one(
         tpot = None
         if completion_tokens > 1 and first_content is not None and last_content is not None:
             tpot = (last_content - first_content) / (completion_tokens - 1)
-        return RequestResult(index, True, len(prompt), completion_tokens, ttft, end - start, tpot)
+        return RequestResult(index, True, len(prompt), prompt_tokens, completion_tokens, ttft, end - start, tpot)
     except Exception as exc:  # keep all failures auditable in output JSON
         return RequestResult(
             index=index,
             ok=False,
             prompt_chars=len(prompt),
+            prompt_tokens=prompt_tokens,
             completion_tokens=0,
             ttft_s=None,
             e2e_s=time.perf_counter() - start,
@@ -172,6 +186,26 @@ class NvidiaMemorySampler:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
+    def _pid_scope(self) -> set[int] | None:
+        """Return a server process tree, or None for all compute processes."""
+
+        if self.pid is None:
+            return None
+        scope = {self.pid}
+        pending = [self.pid]
+        while pending:
+            parent = pending.pop()
+            children_path = Path(f"/proc/{parent}/task/{parent}/children")
+            try:
+                children = [int(value) for value in children_path.read_text().split()]
+            except (OSError, ValueError):
+                continue
+            for child in children:
+                if child not in scope:
+                    scope.add(child)
+                    pending.append(child)
+        return scope
+
     def _sample(self) -> None:
         while not self._stop.is_set():
             try:
@@ -187,12 +221,13 @@ class NvidiaMemorySampler:
                     check=False,
                 )
                 total = 0.0
+                scope = self._pid_scope()
                 for line in proc.stdout.splitlines():
                     fields = [part.strip() for part in line.split(",")]
                     if len(fields) != 2:
                         continue
                     sample_pid, memory = int(fields[0]), float(fields[1])
-                    if self.pid is None or sample_pid == self.pid:
+                    if scope is None or sample_pid in scope:
                         total += memory
                 if total > 0:
                     self.samples_mib.append(total)
@@ -226,8 +261,17 @@ def main() -> None:
     parser.add_argument("--limit", type=int)
     parser.add_argument("--timeout", type=float, default=900.0)
     parser.add_argument("--warmup", type=int, default=1)
-    parser.add_argument("--server-pid", type=int)
+    parser.add_argument(
+        "--server-pid",
+        type=int,
+        help="root PID for the vLLM server; its child worker processes are included",
+    )
     parser.add_argument("--context-length", type=int)
+    parser.add_argument(
+        "--tokenizer",
+        default=None,
+        help="HF tokenizer used to verify every workload prompt has --context-length tokens",
+    )
     parser.add_argument("--gpu", default=None)
     parser.add_argument("--gpu-generation", default=None)
     parser.add_argument("--model-family", default=None)
@@ -248,8 +292,41 @@ def main() -> None:
     args = parser.parse_args()
     if args.concurrency <= 0 or args.max_tokens <= 0 or args.warmup < 0:
         raise ValueError("concurrency/max-tokens must be positive and warmup non-negative")
+    if args.context_length is not None and args.context_length <= 0:
+        raise ValueError("context-length must be positive")
 
     prompts = load_prompts(args.workload, args.limit)
+    prompt_tokens: list[int | None] = [None] * len(prompts)
+    workload_context_exact = False
+    native_context_tokens: int | None = None
+    if args.context_length is not None:
+        try:
+            from transformers import AutoConfig, AutoTokenizer
+        except ImportError as exc:
+            raise SystemExit(
+                "--context-length requires Transformers so the workload can be token-counted; "
+                "install qcc-transformer[hf]"
+            ) from exc
+        tokenizer_id = args.tokenizer or args.model
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_id)
+        config = AutoConfig.from_pretrained(args.model)
+        native_context_tokens = native_context_from_config(config)
+        if native_context_tokens is None or native_context_tokens < args.context_length:
+            raise ValueError(
+                "model native context is below context-length="
+                f"{args.context_length}; observed={native_context_tokens}"
+            )
+        prompt_tokens = [
+            int(tokenizer(prompt, add_special_tokens=True, return_tensors="pt")["input_ids"].shape[-1])
+            for prompt in prompts
+        ]
+        if any(count != args.context_length for count in prompt_tokens):
+            observed = sorted(set(prompt_tokens))
+            raise ValueError(
+                "workload prompt token counts do not match context-length="
+                f"{args.context_length}; observed={observed[:8]}"
+            )
+        workload_context_exact = True
     # Unmeasured warmup requests remove startup/graph-capture effects from the primary run.
     for index in range(min(args.warmup, len(prompts))):
         warm = run_one(
@@ -259,6 +336,7 @@ def main() -> None:
             model=args.model,
             max_tokens=min(args.max_tokens, 4),
             timeout=args.timeout,
+            prompt_tokens=prompt_tokens[index],
         )
         if not warm.ok:
             raise RuntimeError(f"warmup failed: {warm.error}")
@@ -276,6 +354,7 @@ def main() -> None:
                     model=args.model,
                     max_tokens=args.max_tokens,
                     timeout=args.timeout,
+                    prompt_tokens=prompt_tokens[index],
                 )
                 for index, prompt in enumerate(prompts)
             ]
@@ -299,6 +378,10 @@ def main() -> None:
         "synthetic": args.synthetic,
         "protocol_locked": args.protocol_locked,
         "context_length": args.context_length,
+        "tokenizer": args.tokenizer or args.model if args.context_length is not None else None,
+        "native_context_tokens": native_context_tokens,
+        "prompt_tokens": prompt_tokens,
+        "workload_context_exact": workload_context_exact,
         "gpu": args.gpu,
         "gpu_generation": args.gpu_generation,
         "model_family": args.model_family,

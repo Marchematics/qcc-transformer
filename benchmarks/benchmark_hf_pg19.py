@@ -33,6 +33,16 @@ def native_context(config) -> int | None:
     return max(values) if values else None
 
 
+def length_bucket(tokens: int) -> str:
+    if tokens < 8_192:
+        return "0-8K"
+    if tokens < 32_768:
+        return "8-32K"
+    if tokens < 128_000:
+        return "32-128K"
+    return "128K+"
+
+
 def load_documents(path: Path, limit: int | None = None) -> list[str]:
     documents: list[str] = []
     with path.open() as handle:
@@ -178,6 +188,7 @@ def main() -> None:
     total_nll = 0.0
     total_predicted = 0
     per_document: list[dict[str, Any]] = []
+    bucket_totals: dict[str, dict[str, float]] = {}
     for index, text in enumerate(documents):
         ids = tokenizer(text, add_special_tokens=False, return_tensors="pt")["input_ids"].to(model_device)
         if ids.shape[1] > native_context_tokens:
@@ -191,6 +202,11 @@ def main() -> None:
             )
             total_nll += nll
             total_predicted += predicted
+            bucket = bucket_totals.setdefault(
+                length_bucket(int(ids.shape[1])), {"nll": 0.0, "tokens": 0.0}
+            )
+            bucket["nll"] += nll
+            bucket["tokens"] += predicted
             per_document.append({
                 "document": index,
                 "input_tokens": int(ids.shape[1]),
@@ -208,6 +224,11 @@ def main() -> None:
         raise RuntimeError("PG-19 produced no scored next-token targets")
     mean_nll = total_nll / total_predicted
     perplexity = math.exp(mean_nll)
+    bucket_scores = {
+        name: 1.0 / math.exp(values["nll"] / values["tokens"])
+        for name, values in sorted(bucket_totals.items())
+        if values["tokens"] > 0
+    }
     report = {
         "schema": "qcc-pg19-v1",
         "benchmark": "pg19",
@@ -228,6 +249,7 @@ def main() -> None:
         "mean_nll": mean_nll,
         # Gate-normalized higher-is-better score. QCC/Full ratio = FullPPL/QCCPPL.
         "quality_score": 1.0 / perplexity,
+        "bucket_scores": bucket_scores,
         "documents": len(documents),
         "predicted_tokens": total_predicted,
         "chunk_tokens": args.chunk_tokens,

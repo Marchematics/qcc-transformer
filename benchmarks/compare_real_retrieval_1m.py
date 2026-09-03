@@ -28,11 +28,37 @@ def load_rows(path: Path) -> dict[int, dict[str, Any]]:
     return rows
 
 
+def load_manifest_targets(path: Path) -> dict[int, tuple[str, str]]:
+    lines = [line for line in path.read_text().splitlines() if line.strip()]
+    if len(lines) < 2:
+        raise ValueError("retrieval manifest requires a header and trials")
+    header = json.loads(lines[0])
+    if header.get("schema") != "qcc-real-retrieval-manifest-v1":
+        raise ValueError("unsupported retrieval manifest schema")
+    if header.get("protocol_locked") is not True:
+        raise ValueError("retrieval manifest is not protocol-locked")
+    rows: dict[int, tuple[str, str]] = {}
+    for line in lines[1:]:
+        trial = json.loads(line)
+        index = trial.get("trial")
+        target = trial.get("target_entity")
+        expected = trial.get("expected")
+        if not isinstance(index, int) or index in rows:
+            raise ValueError("retrieval manifest trial ids must be unique integers")
+        if not isinstance(target, str) or not isinstance(expected, str):
+            raise ValueError(f"manifest trial {index} has no target/expected pair")
+        rows[index] = (target, expected)
+    if len(rows) != int(header.get("trials", -1)):
+        raise ValueError("retrieval manifest trial count does not match its header")
+    return rows
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--full-summary", type=Path, required=True)
     parser.add_argument("--qcc-summary", type=Path, required=True)
+    parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--full-jsonl", type=Path, required=True)
     parser.add_argument("--qcc-jsonl", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
@@ -64,6 +90,9 @@ def main() -> None:
     qcc_rows = load_rows(args.qcc_jsonl)
     if full_rows.keys() != qcc_rows.keys() or len(full_rows) != int(full["trials"]):
         raise ValueError("paired trial rows are incomplete or mismatched")
+    manifest_targets = load_manifest_targets(args.manifest)
+    if full_rows.keys() != manifest_targets.keys():
+        raise ValueError("paired trial rows do not cover the registered manifest")
 
     full_correct = 0
     qcc_correct = 0
@@ -74,6 +103,16 @@ def main() -> None:
         q = qcc_rows[index]
         if f.get("expected") != q.get("expected") or f.get("target_entity") != q.get("target_entity"):
             raise ValueError(f"trial {index} target mismatch")
+        if (f.get("target_entity"), f.get("expected")) != manifest_targets[index]:
+            raise ValueError(f"trial {index} does not match the registered manifest")
+        for label, row in (("Full-KV", f), ("QCC", q)):
+            if row.get("input_tokens") != full["context_tokens"]:
+                raise ValueError(f"trial {index} {label} did not execute the full context length")
+            depth = row.get("target_depth")
+            if not isinstance(depth, (int, float)) or not 0.0 < float(depth) < 1.0:
+                raise ValueError(f"trial {index} {label} has no valid target depth")
+        if f.get("depth_bucket") != q.get("depth_bucket"):
+            raise ValueError(f"trial {index} depth bucket mismatch")
         f_ok = bool(f.get("correct"))
         q_ok = bool(q.get("correct"))
         full_correct += int(f_ok)
@@ -88,6 +127,8 @@ def main() -> None:
     trials = len(full_rows)
     full_rate = full_correct / trials
     qcc_rate = qcc_correct / trials
+    if full.get("correct") != full_correct or qcc.get("correct") != qcc_correct:
+        raise ValueError("summary correct counts do not match paired trial rows")
     critical_buckets = []
     for name, counts in sorted(buckets.items()):
         full_bucket_rate = counts["full"] / counts["trials"]
@@ -103,6 +144,7 @@ def main() -> None:
             }
         )
     catastrophic_rate = catastrophic / full_correct if full_correct else 1.0
+    catastrophic_rate_trials = catastrophic / trials
     common = {
         "run_id": args.run_id,
         "model_id": full["model_id"],
@@ -130,6 +172,7 @@ def main() -> None:
             **common,
             "catastrophic_retrieval_misses": catastrophic,
             "catastrophic_retrieval_miss_rate": catastrophic_rate,
+            "catastrophic_retrieval_miss_rate_trials": catastrophic_rate_trials,
             "critical_buckets": critical_buckets,
         },
     }

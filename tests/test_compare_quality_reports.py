@@ -19,6 +19,7 @@ def test_quality_join_preserves_task_ratios():
         **_common("ruler", "paired"),
         "qcc_score": 0.99,
         "full_kv_score": 1.0,
+        "task_ratios": {"task:niah": 0.99, "length:8-32K": 0.99},
     }
     longbench_full = {
         **_common("longbench", "fullkv"),
@@ -35,11 +36,13 @@ def test_quality_join_preserves_task_ratios():
     pg19_full = {
         **_common("pg19", "fullkv"),
         "quality_score": 0.2,
+        "bucket_scores": {"8-32K": 0.2},
         "split": "test",
     }
     pg19_qcc = {
         **_common("pg19", "qcc"),
         "quality_score": 0.19,
+        "bucket_scores": {"8-32K": 0.19},
         "split": "test",
     }
     result = assemble_quality(

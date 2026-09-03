@@ -49,7 +49,7 @@ def _metadata(report: dict[str, Any], name: str) -> tuple[str, str]:
     return model_id, run_id
 
 
-def _ruler_scores(report: dict[str, Any]) -> tuple[float, float]:
+def _ruler_scores(report: dict[str, Any]) -> tuple[float, float, dict[str, float]]:
     if report.get("benchmark") != "ruler":
         raise ValueError("RULER report has the wrong benchmark name")
     qcc = report.get("qcc_score")
@@ -58,7 +58,14 @@ def _ruler_scores(report: dict[str, Any]) -> tuple[float, float]:
         qcc = report["qcc_retrofit"].get("accuracy")
     if full is None and isinstance(report.get("baseline_full_kv"), dict):
         full = report["baseline_full_kv"].get("accuracy")
-    return _finite(qcc, "ruler.qcc_score"), _finite(full, "ruler.full_kv_score")
+    raw_ratios = report.get("task_ratios")
+    if not isinstance(raw_ratios, dict) or not raw_ratios:
+        raise ValueError("ruler.task_ratios is required for task and length-tail checks")
+    task_ratios = {
+        str(key): _finite(value, f"ruler.task_ratios.{key}")
+        for key, value in raw_ratios.items()
+    }
+    return _finite(qcc, "ruler.qcc_score"), _finite(full, "ruler.full_kv_score"), task_ratios
 
 
 def _paired_scores(
@@ -76,6 +83,9 @@ def _paired_scores(
     qcc_score = _finite(qcc.get("quality_score"), f"{benchmark}.qcc_score")
     full_tasks = full.get("dataset_scores")
     qcc_tasks = qcc.get("dataset_scores")
+    if full_tasks is None and qcc_tasks is None:
+        full_tasks = full.get("bucket_scores")
+        qcc_tasks = qcc.get("bucket_scores")
     task_ratios: dict[str, float] = {}
     if isinstance(full_tasks, dict) or isinstance(qcc_tasks, dict):
         if not isinstance(full_tasks, dict) or not isinstance(qcc_tasks, dict):
@@ -102,7 +112,7 @@ def assemble_quality(
     pg19_qcc: dict[str, Any],
 ) -> dict[str, Any]:
     ruler_model, ruler_run = _metadata(ruler, "ruler")
-    ruler_qcc, ruler_full = _ruler_scores(ruler)
+    ruler_qcc, ruler_full, ruler_tasks = _ruler_scores(ruler)
     longbench_qcc_score, longbench_full_score, longbench_tasks = _paired_scores(
         longbench_full, longbench_qcc, "longbench"
     )
@@ -143,7 +153,7 @@ def assemble_quality(
         "model_id": ruler_model,
         "run_id": ruler_run,
         "quality": {
-            "ruler": section("ruler", ruler_qcc, ruler_full, {}),
+            "ruler": section("ruler", ruler_qcc, ruler_full, ruler_tasks),
             "longbench": section("longbench", longbench_qcc_score, longbench_full_score, longbench_tasks),
             "pg19": section("pg19", pg19_qcc_score, pg19_full_score, pg19_tasks),
         },
