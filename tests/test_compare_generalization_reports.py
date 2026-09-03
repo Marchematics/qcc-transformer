@@ -7,6 +7,7 @@ def _report(model_id: str, family: str, gpu: str, reproduction: str) -> dict:
         "run_id": "run-1",
         "real_model": True,
         "synthetic": False,
+        "protocol_locked": True,
         "model_family": family,
         "gpu_generation": gpu,
         "reproduction_id": reproduction,

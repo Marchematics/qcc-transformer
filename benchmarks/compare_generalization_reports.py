@@ -32,6 +32,8 @@ def summarize_reports(
             raise ValueError(f"report {index} has incompatible model/run provenance")
         if report.get("real_model") is not True or report.get("synthetic") is not False:
             raise ValueError(f"report {index} is not marked as real non-synthetic evidence")
+        if report.get("protocol_locked") is not True:
+            raise ValueError(f"report {index} does not declare a registered protocol")
         family = report.get("model_family")
         gpu_generation = report.get("gpu_generation")
         reproduction = report.get("reproduction_id")
