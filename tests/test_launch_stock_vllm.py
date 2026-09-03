@@ -131,3 +131,32 @@ def test_stock_launcher_rejects_server_context_or_backend_mismatch(tmp_path: Pat
         assert "CUSTOM" in str(exc)
     else:
         raise AssertionError("mismatched attention backend was accepted")
+
+
+def test_stock_launcher_rejects_context_above_native_limit(tmp_path: Path):
+    adapter = tmp_path / "adapter.pt"
+    adapter.write_bytes(b"adapter")
+    config = SimpleNamespace(
+        hidden_size=256,
+        num_attention_heads=8,
+        max_position_embeddings=131072,
+    )
+    try:
+        build_launch(
+            model="org/model-1b",
+            adapter=adapter,
+            config=config,
+            context_length=256000,
+            window_size=128,
+            num_codes=16,
+            num_scales=4,
+            exact_num_sets=32,
+            exact_ways=2,
+            exact_probe_sets=None,
+            local_dtype="bfloat16",
+            passthrough=[],
+        )
+    except ValueError as exc:
+        assert "native context" in str(exc)
+    else:
+        raise AssertionError("context above the checkpoint native limit was accepted")

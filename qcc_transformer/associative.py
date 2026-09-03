@@ -364,11 +364,14 @@ class SetAssociativeLandmarkBank(nn.Module):
             )
             confidence, best = similarity.max(dim=-1)
             if hard:
-                response = values.unsqueeze(2).expand(
-                    batch, heads, tokens, slots, dim
-                ).gather(
-                    3, best[..., None, None].expand(batch, heads, tokens, 1, dim)
-                ).squeeze(3)
+                # Gather along the slot dimension directly.  Expanding the
+                # value table to [B,H,T,S,D] is only a view in theory, but
+                # gather materializes that expanded indexing path on several
+                # torch backends.  The direct rank-4 gather keeps temporary
+                # memory at [B,H,T,D] while preserving the exact argmax read.
+                response = values.gather(
+                    2, best[..., None].expand(batch, heads, tokens, dim)
+                )
             else:
                 weights = F.softmax(similarity * self.temperature, dim=-1).to(
                     values.dtype

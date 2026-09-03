@@ -17,7 +17,12 @@ import torch
 
 # Permit running this file directly from a fresh checkout.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from qcc_transformer import compare_logits, load_retrofit_adapter, patch_hf_model
+from qcc_transformer import (
+    compare_logits,
+    load_retrofit_adapter,
+    patch_hf_model,
+    reset_hf_qcc_cache,
+)
 from qcc_transformer.hf_loading import load_hf_causal_lm, model_input_device
 
 
@@ -126,6 +131,13 @@ def main() -> None:
     reports = []
     with torch.no_grad():
         for encoded, reference in references:
+            # Each held-out prompt is an independent request.  QCC owns its
+            # history outside the framework cache, so relying on the internal
+            # counter here would append later prompts to the previous one and
+            # corrupt the paired fidelity report.
+            reset_hf_qcc_cache(
+                patched, batch_size=int(encoded["input_ids"].shape[0])
+            )
             patched_encoded = {key: value.to(patched_device) for key, value in encoded.items()}
             candidate = patched(**patched_encoded, use_cache=False).logits.cpu()
             reports.append(compare_logits(reference, candidate, quality_gate=args.quality_gate))

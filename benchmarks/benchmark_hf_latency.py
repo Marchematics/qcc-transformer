@@ -155,8 +155,11 @@ def main() -> None:
         help="use raw Q/K for archive addressing while local attention keeps RoPE",
     )
     parser.add_argument("--num-decode-steps", type=int, default=8)
-    parser.add_argument("--repeats", type=int, default=1, help="measured requests for p50/p95/p99")
-    parser.add_argument("--warmup", type=int, default=0)
+    parser.add_argument(
+        "--repeats", type=int, default=20,
+        help="measured requests for stable p50/p95/p99 tails",
+    )
+    parser.add_argument("--warmup", type=int, default=2)
     parser.add_argument("--dtype", choices=("float16", "bfloat16", "float32"), default="bfloat16")
     parser.add_argument("--load-in-4bit", action="store_true", help="load the real checkpoint through bitsandbytes NF4")
     parser.add_argument("--kv-head-policy", choices=("reject", "repeat"), default="reject")

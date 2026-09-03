@@ -116,6 +116,12 @@ def build_launch(
     target_context = context_length or native_context(config)
     if target_context is None or target_context <= 0:
         raise ValueError("context-length is required when the checkpoint has no native context")
+    native_tokens = native_context(config)
+    if native_tokens is None or native_tokens < target_context:
+        raise ValueError(
+            "checkpoint native context is below the requested target: "
+            f"native={native_tokens}, requested={target_context}"
+        )
     if target_context < window_size:
         raise ValueError("context-length must cover window-size")
     if local_dtype not in {"float16", "bfloat16", "float32"}:
