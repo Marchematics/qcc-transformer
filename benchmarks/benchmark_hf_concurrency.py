@@ -34,11 +34,26 @@ def main() -> None:
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--kv-head-policy", choices=("reject", "repeat"), default="repeat")
     parser.add_argument("--trust-remote-code", action="store_true")
+    parser.add_argument("--decode-steps", type=int, default=0)
+    parser.add_argument("--run-id", default=None)
+    parser.add_argument("--model-id", default=None)
+    parser.add_argument("--min-native-context", type=int, default=None)
+    parser.add_argument("--sla-seconds", type=float, default=None)
+    parser.add_argument(
+        "--protocol-locked",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="record that this custom workload was registered before execution",
+    )
     parser.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args()
     batch_sizes = [int(raw.strip()) for raw in args.batch_sizes.split(",") if raw.strip()]
     if not batch_sizes or any(size <= 0 for size in batch_sizes):
         raise ValueError("batch-sizes must contain positive integers")
+    if args.decode_steps < 0:
+        raise ValueError("decode-steps must be non-negative")
+    if args.sla_seconds is not None and args.sla_seconds <= 0:
+        raise ValueError("sla-seconds must be positive")
     args.output_dir.mkdir(parents=True, exist_ok=True)
     points: list[dict[str, object]] = []
     for batch_size in batch_sizes:
@@ -58,8 +73,15 @@ def main() -> None:
             "--dtype", args.dtype,
             "--device", args.device,
             "--kv-head-policy", args.kv_head_policy,
+            "--decode-steps", str(args.decode_steps),
             "--output", str(output),
         ]
+        if args.run_id is not None:
+            command.extend(["--run-id", args.run_id])
+        if args.min_native_context is not None:
+            command.extend(["--min-native-context", str(args.min_native_context)])
+        if args.protocol_locked is not None:
+            command.append("--protocol-locked" if args.protocol_locked else "--no-protocol-locked")
         if args.trust_remote_code:
             command.append("--trust-remote-code")
         if args.load_in_4bit:
@@ -75,15 +97,44 @@ def main() -> None:
         point: dict[str, object] = {"batch_size": batch_size, "returncode": completed.returncode, "output": str(output), "log": str(log)}
         if output.exists():
             try:
-                point["result"] = json.loads(output.read_text(encoding="utf-8"))
+                result = json.loads(output.read_text(encoding="utf-8"))
+                point["result"] = result
+                if isinstance(result, dict):
+                    full = result.get("baseline_full_kv")
+                    qcc = result.get("qcc_retrofit")
+                    full_ok = isinstance(full, dict) and full.get("status") == "ok"
+                    qcc_ok = isinstance(qcc, dict) and qcc.get("status") == "ok"
+                    point["full_kv_within_sla"] = bool(
+                        full_ok
+                        and (
+                            args.sla_seconds is None
+                            or float(full.get("elapsed_seconds", float("inf"))) <= args.sla_seconds
+                        )
+                    )
+                    point["qcc_within_sla"] = bool(
+                        qcc_ok
+                        and (
+                            args.sla_seconds is None
+                            or float(qcc.get("elapsed_seconds", float("inf"))) <= args.sla_seconds
+                        )
+                    )
             except json.JSONDecodeError as exc:
                 point["parse_error"] = str(exc)
         points.append(point)
-    full_ok = [p["batch_size"] for p in points if isinstance(p.get("result"), dict) and p["result"].get("baseline_full_kv", {}).get("status") == "ok"]
-    qcc_ok = [p["batch_size"] for p in points if isinstance(p.get("result"), dict) and p["result"].get("qcc_retrofit", {}).get("status") == "ok"]
+    full_ok = [p["batch_size"] for p in points if p.get("full_kv_within_sla") is True]
+    qcc_ok = [p["batch_size"] for p in points if p.get("qcc_within_sla") is True]
     summary = {
         "model": args.model,
+        "model_id": args.model_id or args.model,
+        "run_id": args.run_id,
+        "real_model": True,
+        "synthetic": False,
+        "protocol_locked": args.protocol_locked,
+        "qcc_only": False,
         "total_tokens_per_request": args.total_tokens,
+        "decode_steps": args.decode_steps,
+        "sla_seconds": args.sla_seconds,
+        "fixed_sla": args.sla_seconds is not None,
         "batch_sizes": batch_sizes,
         "points": points,
         "max_full_kv_batch": max(full_ok) if full_ok else None,

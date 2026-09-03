@@ -194,6 +194,12 @@ def main() -> None:
     parser.add_argument("--trust-remote-code", action="store_true")
     parser.add_argument("--min-native-context", type=int, default=None)
     parser.add_argument("--run-id", default=None)
+    parser.add_argument(
+        "--protocol-locked",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="record that this custom workload was registered before execution",
+    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if args.total_tokens <= 0 or args.chunk_size <= 0 or args.batch_size <= 0 or args.decode_steps < 0:
@@ -278,6 +284,7 @@ def main() -> None:
         "run_id": args.run_id,
         "real_model": True,
         "synthetic": False,
+        "protocol_locked": args.protocol_locked,
         "total_tokens": args.total_tokens,
         "native_context_tokens": native_context_tokens,
         "batch_size": args.batch_size,
