@@ -106,7 +106,7 @@ def document_nll(model, input_ids: torch.Tensor, *, chunk_tokens: int, qcc: bool
             total_tokens += chunk.shape[1] - 1
         previous_next_logits = logits[:, -1]
         past = getattr(outputs, "past_key_values", None)
-        if past is None and start + chunk.shape[1] < input_ids.shape[1]:
+        if past is None and start + chunk.shape[1] < input_ids.shape[1] and not qcc:
             raise RuntimeError("model did not return a cache required for matched streaming PG-19")
     return total_nll, total_tokens
 
