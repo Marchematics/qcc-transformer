@@ -59,6 +59,7 @@
 ### 3.2 HF/Qwen RoPE 与投影兼容
 
 - `_apply_rope` 使用 HF Llama/Qwen 的 half-split `rotate_half` 约定；
+- Transformers 5.x 传入的 `position_embeddings=(cos, sin)` 现在直接用于 local Q/K，支持 batch/sequence 维度变体和 partial rotary；prefill chunk 会沿序列轴切片，避免动态/LongRoPE 被 wrapper 重算覆盖；
 - 同时兼容旧版 `config.rope_theta` 与 Transformers 5.x 的 `config.rope_parameters["rope_theta"]`；
 - 新建的 `rope_inv_freq` buffer 会显式移动到 projection 所在 CUDA device；
 - GQA/MQA 不静默改变 head 语义，使用 `kv_head_policy="repeat"` 时才显式复制 KV heads。

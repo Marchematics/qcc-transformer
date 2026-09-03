@@ -433,6 +433,7 @@ class HFQCCAttention(nn.Module):
         *,
         reset: bool,
         archive_hint: Optional[Tensor],
+        position_embeddings: Optional[tuple[Tensor, Tensor]],
     ) -> Tensor:
         """Run a long HF prompt through bounded QCC chunks.
 
@@ -455,17 +456,25 @@ class HFQCCAttention(nn.Module):
                 reset_cache=reset,
                 position_ids=positions,
                 archive_hint=archive_hint,
+                position_embeddings=position_embeddings,
             )
         outputs: list[Tensor] = []
         for start in range(0, length, chunk_size):
             end = min(length, start + chunk_size)
             piece_hint = None if archive_hint is None else archive_hint[:, start:end]
+            piece_embeddings = None
+            if position_embeddings is not None:
+                piece_embeddings = tuple(
+                    angle.narrow(-2, start, end - start)
+                    for angle in position_embeddings
+                )
             outputs.append(
                 self.qcc.step_chunk(
                     hidden_states[:, start:end],
                     reset_cache=reset and start == 0,
                     position_ids=positions[:, start:end],
                     archive_hint=piece_hint,
+                    position_embeddings=piece_embeddings,
                 )
             )
         return torch.cat(outputs, dim=1)
@@ -492,6 +501,15 @@ class HFQCCAttention(nn.Module):
         # cases, so the modern shared Cache need not contain physical K/V.
         modern_cache_call = "past_key_values" in kwargs
         cache = kwargs.get("past_key_values", past_key_value)
+        position_embeddings = kwargs.get("position_embeddings")
+        if position_embeddings is not None:
+            if (
+                not isinstance(position_embeddings, (tuple, list))
+                or len(position_embeddings) != 2
+                or not all(isinstance(angle, Tensor) for angle in position_embeddings)
+            ):
+                raise ValueError("position_embeddings must be a (cos, sin) tensor pair")
+            position_embeddings = (position_embeddings[0], position_embeddings[1])
         seen = int(self.qcc._seen_tokens)
         # QCC deliberately does not expose physical historical K/V tensors.
         # Consequently a modern HF generation loop may pass ``None`` (or a
@@ -520,6 +538,7 @@ class HFQCCAttention(nn.Module):
                 reset_state=reset,
                 position_ids=positions,
                 archive_hint=archive_hint,
+                position_embeddings=position_embeddings,
             )
         elif length == 1 and not reset:
             output = self.qcc.step(
@@ -527,6 +546,7 @@ class HFQCCAttention(nn.Module):
                 reset_cache=False,
                 position_ids=positions[:, 0],
                 archive_hint=archive_hint,
+                position_embeddings=position_embeddings,
             ).unsqueeze(1)
         else:
             output = self._bounded_prefill(
@@ -534,6 +554,7 @@ class HFQCCAttention(nn.Module):
                 positions,
                 reset=reset,
                 archive_hint=archive_hint,
+                position_embeddings=position_embeddings,
             )
         present = QCCCacheHandle(self.qcc) if use_cache else None
         # Attention weights are intentionally unavailable: QCC computes a

@@ -1444,12 +1444,86 @@ class QCCSelfAttention(nn.Module):
         return heads, heads, heads
 
     def _apply_rope(
-        self, query: Tensor, key: Tensor, positions: Optional[Tensor]
+        self,
+        query: Tensor,
+        key: Tensor,
+        positions: Optional[Tensor],
+        position_embeddings: Optional[tuple[Tensor, Tensor]] = None,
     ) -> tuple[Tensor, Tensor]:
         """Apply rotary phases to q/k for an optional relative-position path."""
 
-        if self.rope_theta is None or query.shape[-1] < 2 or self.rope_inv_freq.numel() == 0:
+        if query.shape[-1] < 2:
             return query, key
+        external_angles = position_embeddings is not None
+        if (
+            not external_angles
+            and (self.rope_theta is None or self.rope_inv_freq.numel() == 0)
+        ):
+            return query, key
+        if external_angles:
+            if (
+                not isinstance(position_embeddings, (tuple, list))
+                or len(position_embeddings) != 2
+                or not all(isinstance(angle, Tensor) for angle in position_embeddings)
+            ):
+                raise ValueError("position_embeddings must be a (cos, sin) tensor pair")
+            cos, sin = (angle.to(device=query.device) for angle in position_embeddings)
+            if cos.shape != sin.shape:
+                raise ValueError("position_embeddings cos/sin shapes must match")
+            if query.ndim == 4:
+                if cos.ndim == 2:
+                    cos = cos.unsqueeze(0).unsqueeze(1)
+                    sin = sin.unsqueeze(0).unsqueeze(1)
+                elif cos.ndim == 3:
+                    cos = cos.unsqueeze(1)
+                    sin = sin.unsqueeze(1)
+                elif cos.ndim != 4:
+                    raise ValueError("rank-4 q/k require position embeddings with rank 2-4")
+                if cos.shape[1] != 1:
+                    if cos.shape[2] == 1:
+                        cos = cos.transpose(1, 2)
+                        sin = sin.transpose(1, 2)
+                    else:
+                        raise ValueError("position embeddings have an unsupported head shape")
+                if cos.shape[0] not in (1, query.shape[0]):
+                    raise ValueError("position embeddings batch dimension must match q/k")
+                if cos.shape[2] != query.shape[2]:
+                    raise ValueError("position embeddings sequence dimension must match q/k")
+                cos = cos.expand(query.shape[0], -1, -1, -1)
+                sin = sin.expand(query.shape[0], -1, -1, -1)
+            elif query.ndim == 3:
+                if cos.ndim == 2:
+                    cos = cos.unsqueeze(1)
+                    sin = sin.unsqueeze(1)
+                elif cos.ndim == 3 and cos.shape[0] == 1 and cos.shape[1] == query.shape[0]:
+                    cos = cos.transpose(0, 1)
+                    sin = sin.transpose(0, 1)
+                elif cos.ndim != 3:
+                    raise ValueError("rank-3 q/k require position embeddings with rank 2-3")
+                if cos.shape[0] not in (1, query.shape[0]):
+                    raise ValueError("position embeddings batch dimension must match q/k")
+                if cos.shape[1] not in (1, query.shape[1]):
+                    raise ValueError("position embeddings head dimension must be singleton")
+                cos = cos.expand(query.shape[0], -1, -1)
+                sin = sin.expand(query.shape[0], -1, -1)
+            else:
+                raise ValueError("q/k tensors must have rank 3 or 4")
+            rotary_dim = int(cos.shape[-1])
+            if rotary_dim % 2:
+                raise ValueError("position embeddings rotary width must be even")
+            if rotary_dim > query.shape[-1]:
+                raise ValueError("position embeddings rotary width exceeds head dimension")
+            cos_full = cos.to(dtype=query.dtype)
+            sin_full = sin.to(dtype=query.dtype)
+
+            def rotate_external(tensor: Tensor) -> Tensor:
+                prefix = tensor[..., :rotary_dim]
+                suffix = tensor[..., rotary_dim:]
+                half = prefix.shape[-1] // 2
+                rotate_half = torch.cat((-prefix[..., half:], prefix[..., :half]), dim=-1)
+                return torch.cat((prefix * cos_full + rotate_half * sin_full, suffix), dim=-1)
+
+            return rotate_external(query), rotate_external(key)
         if positions is None:
             if query.ndim == 4:
                 positions = torch.arange(query.shape[2], device=query.device)
@@ -1713,6 +1787,7 @@ class QCCSelfAttention(nn.Module):
         reset_cache: bool = False,
         position_ids: Optional[Tensor] = None,
         archive_hint: Optional[Tensor] = None,
+        position_embeddings: Optional[tuple[Tensor, Tensor]] = None,
     ) -> Tensor:
         """Decode one token with bounded local KV plus recurrent archive state.
 
@@ -1741,7 +1816,7 @@ class QCCSelfAttention(nn.Module):
             position_ids = torch.full(
                 (bsz,), self._seen_tokens, device=hidden.device, dtype=torch.long
             )
-        q, key = self._apply_rope(q_raw, key_raw, position_ids)
+        q, key = self._apply_rope(q_raw, key_raw, position_ids, position_embeddings)
         archive_query = q_raw if self.archive_position_invariant else q
         archive_key_current = key_raw if self.archive_position_invariant else key
         if self.use_archive:
@@ -1887,6 +1962,7 @@ class QCCSelfAttention(nn.Module):
         reset_cache: bool = False,
         position_ids: Optional[Tensor] = None,
         archive_hint: Optional[Tensor] = None,
+        position_embeddings: Optional[tuple[Tensor, Tensor]] = None,
     ) -> Tensor:
         """Decode a causal block while preserving the persistent cache.
 
@@ -1917,7 +1993,7 @@ class QCCSelfAttention(nn.Module):
             position_ids = self._seen_tokens + torch.arange(
                 length, device=hidden.device, dtype=torch.long
             )
-        q, k = self._apply_rope(q_raw, k_raw, position_ids)
+        q, k = self._apply_rope(q_raw, k_raw, position_ids, position_embeddings)
         if not self.archive_position_invariant:
             archive_q = q
             archive_k_current = k
@@ -2510,6 +2586,7 @@ class QCCSelfAttention(nn.Module):
         reset_state: bool = True,
         position_ids: Optional[Tensor] = None,
         archive_hint: Optional[Tensor] = None,
+        position_embeddings: Optional[tuple[Tensor, Tensor]] = None,
     ) -> Tensor:
         if hidden.ndim != 3 or hidden.shape[-1] != self.d_model:
             raise ValueError("hidden must have shape [batch, sequence, d_model]")
@@ -2520,7 +2597,7 @@ class QCCSelfAttention(nn.Module):
         v = self._split_heads(v_proj)
         if position_ids is None:
             position_ids = torch.arange(length, device=hidden.device, dtype=torch.long)
-        q, k = self._apply_rope(q_raw, k_raw, position_ids)
+        q, k = self._apply_rope(q_raw, k_raw, position_ids, position_embeddings)
         archive_q_source = q_raw if self.archive_position_invariant else q
         archive_k_source = k_raw if self.archive_position_invariant else k
         if not torch.is_grad_enabled():
