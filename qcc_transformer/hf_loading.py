@@ -21,6 +21,24 @@ def _compute_dtype(dtype: torch.dtype | str | None) -> torch.dtype:
     return torch.float16
 
 
+def _ensure_remote_code_compat() -> None:
+    """Provide type-only symbols expected by older Phi remote-code snapshots.
+
+    Phi-3/Phi-4 checkpoints may ship ``modeling_phi3.py`` revisions that import
+    ``LossKwargs`` from ``transformers.utils`` even though that symbol is not
+    exported by the installed Transformers release.  The symbol is consumed only
+    by the model's forward annotation, so a mapping alias is sufficient and keeps
+    the checkpoint usable without pinning the host's Transformers version.
+    """
+
+    try:
+        import transformers.utils as transformers_utils
+    except ImportError:  # pragma: no cover - handled by the caller
+        return
+    if not hasattr(transformers_utils, "LossKwargs"):
+        transformers_utils.LossKwargs = dict[str, Any]
+
+
 def load_hf_causal_lm(
     model_id: str,
     *,
@@ -42,6 +60,9 @@ def load_hf_causal_lm(
         from transformers import AutoModelForCausalLM
     except ImportError as exc:  # pragma: no cover - optional dependency
         raise RuntimeError("install qcc-transformer[hf] to load a HF checkpoint") from exc
+
+    if trust_remote_code:
+        _ensure_remote_code_compat()
 
     load_kwargs = dict(kwargs)
     load_kwargs["trust_remote_code"] = trust_remote_code

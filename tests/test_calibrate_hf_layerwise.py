@@ -82,6 +82,25 @@ def test_chunked_kl_is_zero_for_identical_logits():
     assert loss.item() < 1e-5
 
 
+def test_hf_loader_supplies_phi_remote_code_loss_kwargs():
+    transformers = pytest.importorskip("transformers")
+    from qcc_transformer.hf_loading import _ensure_remote_code_compat
+
+    utils = transformers.utils
+    had_symbol = hasattr(utils, "LossKwargs")
+    previous = getattr(utils, "LossKwargs", None)
+    try:
+        if had_symbol:
+            delattr(utils, "LossKwargs")
+        _ensure_remote_code_compat()
+        assert hasattr(utils, "LossKwargs")
+    finally:
+        if had_symbol:
+            setattr(utils, "LossKwargs", previous)
+        else:
+            delattr(utils, "LossKwargs")
+
+
 @pytest.mark.skipif(not __import__("torch").cuda.is_available(), reason="CUDA unavailable")
 def test_chunked_kl_supports_cpu_teacher_and_cuda_student():
     import torch
