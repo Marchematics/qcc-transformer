@@ -41,7 +41,7 @@ def _point(length: int, result: dict[str, Any] | None) -> dict[str, Any]:
         "measured": both_ok,
         "full_kv_status": baseline.get("status"),
         "qcc_status": qcc.get("status"),
-        "raw_result": str(result.get("output", "")) if result else None,
+        "result_derived": result.get("derived") if result else None,
     }
 
 
@@ -65,6 +65,10 @@ def main() -> None:
     parser.add_argument("--trust-remote-code", action="store_true")
     parser.add_argument("--min-native-context", type=int, default=None)
     parser.add_argument("--run-id", default=None)
+    parser.add_argument(
+        "--protocol-locked", action=argparse.BooleanOptionalAction, default=None,
+        help="mark this source-controlled scaling protocol as pre-registered",
+    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if args.chunk_size <= 0 or args.decode_steps < 0:
@@ -119,9 +123,11 @@ def main() -> None:
         "schema": "qcc-hf-scaling-v1",
         "model_id": args.model,
         "run_id": args.run_id,
+        "matched_full_kv": all(point["matched_full_kv"] for point in points),
         "real_model": True,
         "synthetic": False,
-        "protocol_locked": False,
+        "protocol_locked": args.protocol_locked,
+        "qcc_only": False,
         "native_context_required": args.min_native_context,
         "lengths": lengths,
         "points": points,

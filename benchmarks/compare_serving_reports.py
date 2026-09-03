@@ -37,6 +37,12 @@ def _positive(value: Any, name: str) -> float:
     return value
 
 
+def _count(value: Any, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"{name} must be a non-negative integer")
+    return value
+
+
 def _summary_value(report: dict[str, Any], metric: str, percentile: str) -> float:
     summary = report.get(metric)
     if not isinstance(summary, dict):
@@ -115,13 +121,21 @@ def compare_reports(qcc: dict[str, Any], baseline: dict[str, Any]) -> dict[str, 
     throughput_speedup = _ratio(qcc_throughput, base_throughput)
     request_throughput_speedup = _ratio(qcc_request_throughput, base_request_throughput)
 
-    qcc_failures = int(qcc.get("failed_requests", -1))
-    baseline_failures = int(baseline.get("failed_requests", -1))
+    qcc_failures = _count(qcc.get("failed_requests"), "qcc.failed_requests")
+    baseline_failures = _count(
+        baseline.get("failed_requests"), "baseline.failed_requests"
+    )
+    qcc_successful = _count(
+        qcc.get("successful_requests"), "qcc.successful_requests"
+    )
+    baseline_successful = _count(
+        baseline.get("successful_requests"), "baseline.successful_requests"
+    )
     all_requests_succeeded = (
         qcc_failures == 0
         and baseline_failures == 0
-        and qcc.get("successful_requests") == num_requests
-        and baseline.get("successful_requests") == num_requests
+        and qcc_successful == num_requests
+        and baseline_successful == num_requests
     )
     throughput_latency_tradeoff = (
         throughput_speedup < 1.0
