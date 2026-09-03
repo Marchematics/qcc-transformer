@@ -138,7 +138,7 @@ python benchmarks/benchmark_hf_ruler.py \
   --model <model-id-or-local-snapshot> \
   --ruler-jsonl ruler/niah_single_1/validation.jsonl \
   --max-examples 10 --output artifacts/hf/ruler_niah.json \
-  --kv-head-policy repeat
+  --kv-head-policy repeat --run-id <shared-run-id>
 ```
 
 The scorer runs Full-KV and QCC separately, counts generation/OOM/context
@@ -146,11 +146,64 @@ errors as failures, and stores per-record predictions.  The resulting score
 is task- and checkpoint-specific; it must not be generalized to all RULER
 tasks or lengths without matching runs.
 
-For independent-request memory/concurrency diagnostics, run
-`benchmarks/benchmark_hf_concurrency.py`. It sweeps `--batch-sizes` at a fixed
-per-request context and records Full-KV/QCC completion, peak memory, and the
-largest completed batch for each side. This is explicitly HF-only; `gate_99.py`
-still requires corresponding real-vLLM scheduler evidence.
+For the official quality bundle, run LongBench's own `eval.py` and PG-19 in
+both modes with the same `--run-id`, then convert the native reports into the
+gate's paired section:
+
+```bash
+python benchmarks/assemble_quality_evidence.py \
+  --run-id <shared-run-id> --model-id <checkpoint-id> \
+  --ruler artifacts/hf/ruler.json \
+  --longbench-full artifacts/hf/longbench_full.json \
+  --longbench-qcc artifacts/hf/longbench_qcc.json \
+  --pg19-full artifacts/hf/pg19_full.json \
+  --pg19-qcc artifacts/hf/pg19_qcc.json \
+  --output artifacts/gates/quality.json
+```
+
+The LongBench and PG-19 runners require `--run-id`; they reject omitted tasks,
+wrong splits, and mismatched Full-KV/QCC report pairs. `benchmark_hf_scaling.py`
+is the real-checkpoint scaling runner for the locked 128K/256K/512K/1M points;
+it retains OOMs and marks a point unmatched instead of substituting a shorter
+context.
+
+For the strict 1M retrieval gate, create one manifest before either mode and
+run both modes with the same `--run-id` and manifest. The comparison utility
+recomputes paired trial rates and all random-depth tails:
+
+```bash
+python benchmarks/make_real_retrieval_1m.py --trials 1000 --output artifacts/retrieval/manifest.jsonl
+python benchmarks/benchmark_hf_retrieval_1m.py --model <model-id> --manifest artifacts/retrieval/manifest.jsonl \
+  --mode fullkv --run-id <shared-run-id> --output-jsonl artifacts/retrieval/full.jsonl \
+  --summary artifacts/retrieval/full.json
+python benchmarks/benchmark_hf_retrieval_1m.py --model <model-id> --manifest artifacts/retrieval/manifest.jsonl \
+  --mode qcc --adapter <adapter.pt> --run-id <shared-run-id> --output-jsonl artifacts/retrieval/qcc.jsonl \
+  --summary artifacts/retrieval/qcc.json
+python benchmarks/compare_retrieval_1m.py --full-summary artifacts/retrieval/full.json \
+  --qcc-summary artifacts/retrieval/qcc.json --output artifacts/gates/retrieval_tail.json
+```
+
+The command also writes `retrieval_tail.retrieval_1m.json` and
+`retrieval_tail.tail_safety.json`; either those sidecars or the combined file
+can be supplied to `assemble_gate_evidence.py`.
+
+For stock-vLLM fixed-SLA concurrency, run
+`benchmarks/benchmark_vllm_sweep.py` separately against the Full-KV and QCC
+servers with the same workload, limits, context, GPU, and vLLM version. It
+selects the largest complete point whose p95 TTFT and TPOT satisfy the locked
+SLA; pass the two `summary.json` files to `compare_serving_reports.py`:
+
+```bash
+python benchmarks/compare_serving_reports.py --run-id <shared-run-id> \
+  --model-id <checkpoint-id> --full-report artifacts/vllm/full/summary.json \
+  --qcc-report artifacts/vllm/qcc/summary.json --full-attention-state-bytes <bytes> \
+  --qcc-attention-state-bytes <bytes> --output artifacts/gates/serving.json
+```
+
+It also writes one sidecar per gate section, so the combined report can be
+passed directly to the final assembler.
+`benchmark_hf_concurrency.py` remains an HF-only memory diagnostic and is not
+accepted as scheduler evidence.
 
 For a vLLM custom attention backend, use the dependency-free
 `QCCVLLMState.forward(query, key, value)` primitive from
@@ -212,6 +265,13 @@ each section records its own `run_id`, provenance flags, and raw Full-KV/QCC
 measurements. The current repository intentionally does **not** ship a passing
 bundle: real long-context quality, matched vLLM/memory/concurrency evidence,
 and the extended anti-cherry-picking sections are still missing.
+
+For paired stock-vLLM results, `benchmark_vllm_server.py` records the workload
+SHA-256, streaming p95/p99 tails, request failures, and sampled server peak
+memory. `compare_serving_reports.py` refuses mismatched workload/model/GPU/
+vLLM pairs and emits the `vllm_latency`, `memory`, and `production_latency`
+sections. `compare_pareto.py` recomputes dominance from four measured metrics;
+it never trusts a caller-provided `qcc_dominates` flag.
 
 ## Run tests
 

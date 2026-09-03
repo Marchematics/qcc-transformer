@@ -105,6 +105,38 @@ cd /home/frankwang122222/zjh/zjh/*/qcc-transformer-next
 - Phi-4-mini 128K 同 runner：QCC 完成 `131072` tokens，`2200.34 tok/s`、peak allocated `8.59GB`；Full-KV 在第 166/256 chunk（约 `84.99K` tokens）OOM，peak allocated `20.33GB`；因此不能从该结果计算 matched speedup/80% reduction，只能记录为 QCC 可完成而 Full-KV 未完成。
 - Phi-4-mini 多 chunk 校准（4 个 train chunks、100 steps、window 128、codes 16）：训练 cosine `0.996909`，held-out cosine `0.972924`，参数比例 `0.1037%`；相较单片段过拟合有所改善，但仍未达到 `0.99`。
 
+### 3.7 本轮续作变更（2026-09-03）
+
+- `HFQCCAttention` 不再把现代 Transformers 在生成时传入的空或
+  framework-owned `past_key_values` 误判为新请求；QCC 请求边界统一由
+  `reset_hf_qcc_cache()` 显式控制。
+- `archive_lexical_landmark` 已由 HF wrapper 自动把 attention 输入作为
+  position-free archive hint 传入；`calibrate_hf_admission.py` 新增
+  `--archive-position-invariant`，默认在 raw Q/K 坐标上生成 admission labels，
+  与部署 archive 保持一致。
+- 新增 `assemble_quality_evidence.py`、`compare_serving_reports.py`、
+  `compare_pareto.py`、`assemble_generalization.py` 和 real-HF
+  `benchmark_hf_scaling.py`，用于生成严格配对的官方质量、serving、Pareto、
+  跨模型/GPU 和 128K→1M evidence section；它们拒绝错配、失败请求、部分
+  suite、缺失 tail 或未锁定 provenance，不填充指标。
+- `gate_production.py` 现在额外要求模型原生 context ≥128K、vLLM workload
+  hash/GPU、实际 Full-KV/QCC peak memory、p95/p99 TTFT，以及 Pareto 的四项
+  数值 dominance。
+- `make_real_retrieval_1m.py` 的 manifest 现在锁定随机深度、多 needle 和
+  semantic distractor；`benchmark_hf_retrieval_1m.py` 记录 run/model provenance，
+  `compare_retrieval_1m.py` 逐 trial 重算 Full-KV/QCC 成功率、四个深度 tail 和
+  catastrophic miss，并输出可直接装配的 `retrieval_1m`/`tail_safety` sections。
+- `benchmark_vllm_server.py` 现在要求成对的固定-SLA p95 TTFT/TPOT 限值；新增
+  `benchmark_vllm_sweep.py` 只选择完整且 SLA 通过的最大并发点，
+  `compare_serving_reports.py` 接受 sweep summary，并以 p95 TPOT 作为 headline
+  speedup，避免 median-only 或“请求线程数=并发收益”的误报。
+- stock-vLLM v1 backend 不再强制关闭 Triton；CUDA 可用时 packed runtime 使用
+  bounded fused local attention，Python/reference 路径只作 fallback。
+- LongBench、PG-19、RULER 的 `--limit/--max-examples` 现在会把报告标记为非
+  full-suite，质量 assembler 会拒绝这类结果；admission calibrator 输出与 regular
+  calibrator 一致的 canonical parameter/provenance 字段。
+- 本轮没有新增真实模型/GPU 实验数字；当前 99 gate 仍未通过。
+
 ## 4. 已验证结果（严格区分证据等级）
 
 ### 本地回归

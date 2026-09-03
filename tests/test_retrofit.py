@@ -157,6 +157,24 @@ def test_patch_hf_supports_modern_shared_cache_call():
     assert output[0].shape == (1, 4, 16)
 
 
+def test_modern_generation_without_physical_cache_keeps_qcc_state():
+    model = _Model()
+    patch_hf_model(model, window_size=4, num_codes=4, use_triton=False)
+    first = model.attn(
+        torch.randn(1, 4, 16), past_key_values=object(), use_cache=True
+    )
+    assert len(first) == 2
+    assert model.attn.qcc._seen_tokens == 4
+    # A QCC retrofit intentionally returns no physical past-KV object.  A
+    # subsequent framework call may therefore pass None; that must not reset
+    # the bounded archive between generated tokens.
+    second = model.attn(
+        torch.randn(1, 1, 16), past_key_values=None, use_cache=True
+    )
+    assert len(second) == 2
+    assert model.attn.qcc._seen_tokens == 5
+
+
 def test_patch_hf_exposes_differentiable_calibration_path():
     model = _Model()
     patch_hf_model(model, window_size=4, num_codes=4, use_triton=False)

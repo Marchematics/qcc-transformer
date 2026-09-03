@@ -83,6 +83,14 @@ def main() -> None:
     # name or config estimate.  The 99 gate uses it to enforce the 1--7B scope.
     metadata_model = AutoModelForCausalLM.from_pretrained(args.model, **common)
     parameter_count = sum(parameter.numel() for parameter in metadata_model.parameters())
+    native_context_values = [
+        getattr(metadata_model.config, name, None)
+        for name in ("max_position_embeddings", "n_positions", "max_sequence_length")
+    ]
+    native_context_tokens = max(
+        (int(value) for value in native_context_values if isinstance(value, int) and value > 0),
+        default=None,
+    )
     del metadata_model
     if device.type == "cuda":
         torch.cuda.empty_cache()
@@ -118,6 +126,7 @@ def main() -> None:
     result = {
         "model": args.model,
         "parameter_count": parameter_count,
+        "native_context_tokens": native_context_tokens,
         "pretrained": True,
         "real_checkpoint": True,
         "model_id": str(args.model),

@@ -39,6 +39,7 @@ def _evidence() -> dict:
             "pretrained": True,
             "real_checkpoint": True,
             "parameter_count": 1_500_000_000,
+            "native_context_tokens": 131_072,
         },
         "quality": quality,
         "vllm_latency": {
@@ -48,11 +49,15 @@ def _evidence() -> dict:
             "tpot_speedup": 5.1,
             "throughput_speedup": 2.1,
             "vllm_version": "0.29.0",
+            "gpu": "A100-80GB",
+            "workload_sha256": "a" * 64,
         },
         "memory": {
             **custom,
             "full_kv_attention_state_bytes": 1000,
             "qcc_attention_state_bytes": 180,
+            "full_kv_peak_memory_bytes": 1000,
+            "qcc_peak_memory_bytes": 180,
             "full_kv_concurrency": 1,
             "qcc_concurrency": 4,
             "fixed_sla": True,
@@ -74,21 +79,23 @@ def _evidence() -> dict:
             "multi_needle": True,
             "semantic_distractor": True,
             "oracle_admission": False,
+            "native_context_tokens": 1_000_000,
+            "manifest_sha256": "b" * 64,
         },
         "tail_safety": {
             **custom,
             "catastrophic_retrieval_miss_rate": 0.005,
             "critical_buckets": [
-                {"name": "0-25%", "qcc_full_kv_ratio": 0.99},
-                {"name": "75-100%", "qcc_full_kv_ratio": 0.98},
+                {"task": "1m_retrieval", "bucket": name, "context_tokens": 1_000_000, "trials": 250, "full_kv_score": 1.0, "qcc_score": 0.99, "qcc_full_kv_ratio": 0.99}
+                for name in ("0-25%", "25-50%", "50-75%", "75-100%")
             ],
         },
         "pareto_dominance": {
             **custom,
             "baselines": [
-                {"name": "fp8_full_kv", "qcc_dominates": True},
-                {"name": "compresskv", "qcc_dominates": True},
-                {"name": "h2o", "qcc_dominates": True},
+                {"name": "fp8_full_kv", "qcc_dominates": True, "baseline_quality_score": 0.90, "qcc_quality_score": 0.95, "baseline_state_bytes": 1000, "qcc_state_bytes": 100, "baseline_p95_tpot_ms": 10, "qcc_p95_tpot_ms": 5, "baseline_throughput_tokens_per_s": 100, "qcc_throughput_tokens_per_s": 200},
+                {"name": "compresskv", "qcc_dominates": True, "baseline_quality_score": 0.92, "qcc_quality_score": 0.95, "baseline_state_bytes": 900, "qcc_state_bytes": 100, "baseline_p95_tpot_ms": 9, "qcc_p95_tpot_ms": 5, "baseline_throughput_tokens_per_s": 110, "qcc_throughput_tokens_per_s": 200},
+                {"name": "h2o", "qcc_dominates": True, "baseline_quality_score": 0.91, "qcc_quality_score": 0.95, "baseline_state_bytes": 800, "qcc_state_bytes": 100, "baseline_p95_tpot_ms": 8, "qcc_p95_tpot_ms": 5, "baseline_throughput_tokens_per_s": 120, "qcc_throughput_tokens_per_s": 200},
             ],
         },
         "production_latency": {
@@ -96,6 +103,8 @@ def _evidence() -> dict:
             "ttft_regression": 0.0,
             "p95_tpot_speedup": 1.1,
             "p99_tpot_speedup": 1.02,
+            "p95_ttft_speedup": 1.01,
+            "p99_ttft_speedup": 1.01,
             "throughput_latency_tradeoff": False,
         },
         "scaling_law": {
@@ -116,6 +125,9 @@ def _evidence() -> dict:
             "model_families": 2,
             "gpu_generations": 2,
             "independent_reproductions": 2,
+            "model_ids": ["org/model", "org/other-model"],
+            "gpu_generation_ids": ["ampere", "hopper"],
+            "reproduction_run_ids": ["rep-1", "rep-2"],
         },
     }
 

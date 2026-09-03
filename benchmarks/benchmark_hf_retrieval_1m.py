@@ -48,8 +48,29 @@ def load_manifest(path: Path) -> tuple[dict[str, Any], list[dict[str, Any]], str
         raise ValueError("unsupported retrieval manifest schema")
     if header.get("protocol_locked") is not True:
         raise ValueError("retrieval manifest is not protocol-locked")
+    for field in ("random_depth", "multi_needle", "semantic_distractor"):
+        if header.get(field) is not True:
+            raise ValueError(f"retrieval manifest lacks {field}")
     if len(trials) != int(header.get("trials", -1)) or len(trials) < 1000:
         raise ValueError("strict retrieval manifest must contain at least 1000 trials")
+    for index, trial in enumerate(trials):
+        if not isinstance(trial, dict):
+            raise ValueError(f"trial {index} is not an object")
+        if any(trial.get(field) is not True for field in ("random_depth", "multi_needle", "semantic_distractor")):
+            raise ValueError(f"trial {index} lacks strict retrieval flags")
+        records = trial.get("records")
+        if not isinstance(records, list):
+            raise ValueError(f"trial {index} has no records")
+        needles = [record for record in records if isinstance(record, dict) and record.get("kind") == "needle"]
+        distractors = [record for record in records if isinstance(record, dict) and record.get("kind") == "semantic_distractor"]
+        if len(needles) < 2 or not distractors:
+            raise ValueError(f"trial {index} does not contain multi-needle semantic-distractor records")
+        target = trial.get("target_entity")
+        if not isinstance(target, str) or not any(record.get("entity") == target for record in needles):
+            raise ValueError(f"trial {index} target is not one of its needle entities")
+        depths = [record.get("depth") for record in records]
+        if any(not isinstance(depth, (int, float)) or isinstance(depth, bool) or not 0.0 < float(depth) < 1.0 for depth in depths):
+            raise ValueError(f"trial {index} contains an invalid random depth")
     return header, trials, digest
 
 
@@ -138,6 +159,7 @@ def main() -> None:
     parser.add_argument("--model", required=True)
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--mode", choices=("fullkv", "qcc"), required=True)
+    parser.add_argument("--run-id", required=True)
     parser.add_argument("--adapter", type=Path)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--dtype", choices=("float16", "bfloat16", "float32"), default="bfloat16")
@@ -207,6 +229,9 @@ def main() -> None:
                 "trial": index,
                 "expected": spec["expected"],
                 "target_entity": spec["target_entity"],
+                "random_depth": spec.get("random_depth") is True,
+                "multi_needle": spec.get("multi_needle") is True,
+                "semantic_distractor": spec.get("semantic_distractor") is True,
             }
             try:
                 ids, actual_depths = build_trial_ids(tokenizer, spec, context_tokens)
@@ -267,6 +292,7 @@ def main() -> None:
     summary = {
         "schema": "qcc-real-retrieval-result-v1",
         "mode": args.mode,
+        "run_id": args.run_id,
         "model_id": args.model,
         "parameter_count": parameter_count,
         "pretrained": True,
@@ -276,6 +302,7 @@ def main() -> None:
         "oracle_admission": False if args.mode == "qcc" else None,
         "official": False,
         "protocol_locked": True,
+        "matched_full_kv": False,
         "manifest_sha256": manifest_hash,
         "context_tokens": context_tokens,
         "native_context_tokens": native_context,

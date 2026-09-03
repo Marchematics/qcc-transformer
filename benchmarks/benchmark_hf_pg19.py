@@ -110,6 +110,7 @@ def main() -> None:
     parser.add_argument("--trust-remote-code", action="store_true")
     parser.add_argument("--official-source", default="deepmind/pg19:test")
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--run-id", required=True)
     args = parser.parse_args()
     if args.chunk_tokens <= 0:
         raise ValueError("chunk_tokens must be positive")
@@ -171,11 +172,15 @@ def main() -> None:
         "benchmark": "pg19",
         "mode": args.mode,
         "model_id": args.model,
+        "run_id": args.run_id,
         "real_model": True,
         "synthetic": False,
         "official": True,
+        "matched_full_kv": True,
+        "qcc_only": False,
         "official_source": args.official_source,
         "split": "test",
+        "full_suite": args.limit is None,
         "metric": "perplexity",
         "metric_direction": "lower_is_better",
         "perplexity": perplexity,
@@ -186,6 +191,7 @@ def main() -> None:
         "predicted_tokens": total_predicted,
         "chunk_tokens": args.chunk_tokens,
         "patched_layers": patched_layers,
+        "output": str(args.output),
         "per_document": per_document,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)

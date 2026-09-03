@@ -8,6 +8,7 @@ same script/workload must be used for QCC, FP8 Full-KV and compression baselines
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -221,8 +222,14 @@ def main() -> None:
     parser.add_argument("--model", required=True)
     parser.add_argument("--workload", type=Path, required=True)
     parser.add_argument("--label", required=True, help="qcc/fp8-fullkv/baseline-name")
+    parser.add_argument("--run-id", default=None, help="shared provenance id for a paired gate run")
+    parser.add_argument("--model-id", default=None, help="immutable checkpoint id; defaults to --model")
     parser.add_argument("--max-tokens", type=int, default=32)
     parser.add_argument("--concurrency", type=int, default=1)
+    parser.add_argument("--slo-ttft-ms", type=float, default=None,
+                        help="fixed-SLA p95 TTFT limit; required with --slo-tpot-ms for SLA evidence")
+    parser.add_argument("--slo-tpot-ms", type=float, default=None,
+                        help="fixed-SLA p95 TPOT limit; required with --slo-ttft-ms for SLA evidence")
     parser.add_argument("--limit", type=int)
     parser.add_argument("--timeout", type=float, default=900.0)
     parser.add_argument("--warmup", type=int, default=1)
@@ -234,8 +241,14 @@ def main() -> None:
     args = parser.parse_args()
     if args.concurrency <= 0 or args.max_tokens <= 0 or args.warmup < 0:
         raise ValueError("concurrency/max-tokens must be positive and warmup non-negative")
+    if (args.slo_ttft_ms is None) != (args.slo_tpot_ms is None):
+        raise ValueError("slo-ttft-ms and slo-tpot-ms must be supplied together")
+    if args.slo_ttft_ms is not None and (args.slo_ttft_ms <= 0 or args.slo_tpot_ms <= 0):
+        raise ValueError("SLA limits must be positive")
 
     prompts = load_prompts(args.workload, args.limit)
+    workload_sha256 = hashlib.sha256(args.workload.read_bytes()).hexdigest()
+    model_id = args.model_id or args.model
     # Unmeasured warmup requests remove startup/graph-capture effects from the primary run.
     for index in range(min(args.warmup, len(prompts))):
         warm = run_one(
@@ -275,13 +288,36 @@ def main() -> None:
     tpot = [item.tpot_s for item in successful if item.tpot_s is not None]
     e2e = [item.e2e_s for item in successful]
     completion_tokens = sum(item.completion_tokens for item in successful)
+    sla = None
+    sla_pass = False
+    if args.slo_ttft_ms is not None and args.slo_tpot_ms is not None:
+        p95_ttft_ms = (percentile(ttft, 0.95) or math.inf) * 1000.0
+        p95_tpot_ms = (percentile(tpot, 0.95) or math.inf) * 1000.0
+        sla = {
+            "criterion": "all requests successful and p95 TTFT/TPOT within limits",
+            "ttft_p95_limit_ms": args.slo_ttft_ms,
+            "tpot_p95_limit_ms": args.slo_tpot_ms,
+            "ttft_p95_ms": p95_ttft_ms,
+            "tpot_p95_ms": p95_tpot_ms,
+        }
+        sla_pass = (
+            len(successful) == len(results)
+            and p95_ttft_ms <= args.slo_ttft_ms
+            and p95_tpot_ms <= args.slo_tpot_ms
+        )
     report = {
         "schema": "qcc-vllm-serving-v1",
+        "run_id": args.run_id,
         "label": args.label,
         "model": args.model,
+        "model_id": model_id,
+        "real_model": True,
+        "synthetic": False,
+        "protocol_locked": True,
         "context_length": args.context_length,
         "gpu": args.gpu,
         "vllm_version": args.vllm_version,
+        "workload_sha256": workload_sha256,
         "stock_vllm": True,
         "streaming": True,
         "workload": str(args.workload),
@@ -290,6 +326,8 @@ def main() -> None:
         "failed_requests": len(failures),
         "failure_rate": len(failures) / len(results),
         "concurrency": args.concurrency,
+        "sla": sla,
+        "sla_pass": sla_pass,
         "max_tokens": args.max_tokens,
         "wall_s": wall,
         "completion_tokens": completion_tokens,
@@ -299,6 +337,9 @@ def main() -> None:
         "tpot_s": summarize(tpot),
         "e2e_s": summarize(e2e),
         "server_peak_gpu_memory_mib": memory.peak_mib,
+        "server_peak_gpu_memory_bytes": (
+            int(memory.peak_mib * 1024 * 1024) if memory.peak_mib is not None else None
+        ),
         "requests": [asdict(item) for item in results],
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)

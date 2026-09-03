@@ -34,6 +34,11 @@ def assemble(run_id: str, model_id: str, paths: dict[str, Path]) -> dict[str, An
             raise ValueError(f"cannot read {section}: {exc}") from exc
         if not isinstance(value, dict):
             raise ValueError(f"{section} evidence must be a JSON object")
+        # Section comparators may emit one auditable multi-section file. Allow
+        # that file to be supplied directly while still storing only the
+        # requested section in the final bundle.
+        if section in value and isinstance(value[section], dict):
+            value = value[section]
         if section != "model":
             if value.get("run_id") != run_id:
                 raise ValueError(f"{section}.run_id does not match {run_id}")

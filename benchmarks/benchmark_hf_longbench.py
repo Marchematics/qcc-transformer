@@ -75,6 +75,7 @@ def main() -> None:
     parser.add_argument("--trust-remote-code", action="store_true")
     parser.add_argument("--limit-per-dataset", type=int)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--run-id", required=True)
     args = parser.parse_args()
     if args.mode == "qcc" and args.adapter is None:
         raise ValueError("--adapter is required for qcc mode")
@@ -202,13 +203,16 @@ def main() -> None:
         "benchmark": "longbench",
         "mode": args.mode,
         "model_id": args.model,
+        "run_id": args.run_id,
         "real_model": True,
         "synthetic": False,
         "official": True,
+        "matched_full_kv": True,
+        "qcc_only": False,
         "official_evaluator": str(eval_path),
         "official_eval_stdout": proc.stdout,
         "native_context_tokens": max_context,
-        "full_suite": True,
+        "full_suite": args.limit_per_dataset is None,
         "datasets": datasets,
         "dataset_scores": scores,
         "quality_score": macro,
@@ -216,6 +220,7 @@ def main() -> None:
         "generated_rows": generated_rows,
         "prediction_dir": str(prediction_dir),
         "patched_layers": patched_layers,
+        "output": str(args.output),
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2, ensure_ascii=False, sort_keys=True))

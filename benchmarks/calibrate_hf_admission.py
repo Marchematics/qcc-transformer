@@ -136,6 +136,7 @@ def _teacher_examples(
     num_teacher_queries: int,
     teacher_topk: int,
     positive_fraction: float,
+    archive_position_invariant: bool,
 ) -> list[tuple[Tensor, Tensor, Tensor]]:
     qcc = wrapper.qcc
     projection = qcc.q_proj
@@ -151,7 +152,18 @@ def _teacher_examples(
         positions = torch.arange(
             hidden.shape[1], device=device, dtype=torch.long
         ).view(1, -1)
-        q_teacher, k_teacher = qcc._apply_rope(qh, kh, positions)
+        rotated_q, rotated_k = qcc._apply_rope(qh, kh, positions)
+        # Admission labels must be generated in the same coordinate system
+        # used by the deployed archive.  With position-invariant addressing,
+        # inference stores/reads raw projections so that RoPE phases do not
+        # make the same content look unrelated at distant positions.  The
+        # previous calibration code labelled rotated K/Q while training the
+        # predictor on raw K/V, creating a systematic teacher/student mismatch
+        # that became much worse as context length increased.
+        if archive_position_invariant:
+            q_teacher, k_teacher = qh, kh
+        else:
+            q_teacher, k_teacher = rotated_q, rotated_k
         salience = sampled_future_attention_salience(
             q_teacher,
             k_teacher,
@@ -258,6 +270,12 @@ def main() -> None:
     parser.add_argument("--teacher-queries", type=int, default=128)
     parser.add_argument("--teacher-topk", type=int, default=8)
     parser.add_argument("--positive-fraction", type=float, default=0.02)
+    parser.add_argument(
+        "--archive-position-invariant",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="label admission in raw Q/K coordinates, matching the default deployed archive",
+    )
     parser.add_argument("--steps", type=int, default=100)
     parser.add_argument("--lr", type=float, default=0.02)
     parser.add_argument("--dtype", choices=("auto", "float16", "bfloat16", "float32"), default="auto")
@@ -323,6 +341,7 @@ def main() -> None:
         window_size=args.window_size,
         num_codes=args.num_codes,
         kv_head_policy=args.kv_head_policy,
+        archive_position_invariant=args.archive_position_invariant,
         use_triton=False,
         hybrid_kwargs={
             "exact_num_sets": args.exact_num_sets,
@@ -358,6 +377,7 @@ def main() -> None:
             num_teacher_queries=args.teacher_queries,
             teacher_topk=args.teacher_topk,
             positive_fraction=args.positive_fraction,
+            archive_position_invariant=args.archive_position_invariant,
         )
         held_examples = _teacher_examples(
             wrapper,
@@ -367,6 +387,7 @@ def main() -> None:
             num_teacher_queries=args.teacher_queries,
             teacher_topk=args.teacher_topk,
             positive_fraction=args.positive_fraction,
+            archive_position_invariant=args.archive_position_invariant,
         )
         layer_reports[str(layer_index)] = _train_layer(
             archive,
@@ -385,6 +406,7 @@ def main() -> None:
     metadata = {
         "run_id": args.run_id,
         "base_model": args.model,
+        "model_id": str(args.model),
         "pretrained": True,
         "real_checkpoint": True,
         "calibration": "full_kv_future_attention_salience",
@@ -393,12 +415,18 @@ def main() -> None:
         "exact_num_sets": args.exact_num_sets,
         "exact_ways": args.exact_ways,
         "max_inserts_per_chunk": args.max_inserts_per_chunk,
+        "archive_position_invariant": args.archive_position_invariant,
         "selected_layers": sorted(selected_layers),
         "trainable_parameters": trainable,
         "total_parameters": total,
         "trainable_fraction": trainable / max(1, total),
+        "trainable_parameter_count": trainable,
+        "parameter_count": total,
+        "trainable_parameter_fraction": trainable / max(1, total),
         "adapter_parameters": adapter_parameters,
         "hf_zero_business_code": True,
+        "hf_zero_code_changes": True,
+        "vllm_zero_code_changes": True,
     }
     save_retrofit_adapter(model, args.output, **metadata)
     report = {

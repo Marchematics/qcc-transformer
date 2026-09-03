@@ -91,6 +91,9 @@ def audit(payload: dict[str, Any]) -> dict[str, Any]:
         params = _number(model.get("parameter_count"), "model.parameter_count", failures)
         if params is not None:
             _require(MIN_PARAMS <= params <= MAX_PARAMS, "parameter_count must be within 1B..7B", failures)
+        native_context = _number(model.get("native_context_tokens"), "model.native_context_tokens", failures)
+        if native_context is not None:
+            _require(native_context >= 128_000, "model native context is below 128K", failures)
 
     # 1/2: one real pretrained model, official long-context quality >=98% Full-KV.
     quality = payload.get("quality")
@@ -124,6 +127,9 @@ def audit(payload: dict[str, Any]) -> dict[str, Any]:
         if throughput is not None:
             _require(throughput >= THROUGHPUT_SPEEDUP, f"vLLM throughput speedup {throughput:.6f} < {THROUGHPUT_SPEEDUP:.1f}", failures)
         _require(isinstance(latency.get("vllm_version"), str) and bool(latency.get("vllm_version")), "vllm_version is required", failures)
+        _require(isinstance(latency.get("gpu"), str) and bool(latency.get("gpu")), "vllm GPU identity is required", failures)
+        workload_hash = latency.get("workload_sha256")
+        _require(isinstance(workload_hash, str) and len(workload_hash) == 64, "vllm workload_sha256 is required", failures)
 
     # 4: actual attention-state reduction and fixed-SLA concurrency.
     memory = payload.get("memory")
@@ -139,6 +145,14 @@ def audit(payload: dict[str, Any]) -> dict[str, Any]:
                 reduction = 1.0 - qcc_state / full_state
                 summary["attention_state_reduction"] = reduction
                 _require(reduction >= STATE_REDUCTION, f"attention-state reduction {reduction:.6f} < {STATE_REDUCTION:.2f}", failures)
+        full_peak = _number(memory.get("full_kv_peak_memory_bytes"), "memory.full_kv_peak_memory_bytes", failures)
+        qcc_peak = _number(memory.get("qcc_peak_memory_bytes"), "memory.qcc_peak_memory_bytes", failures)
+        if full_peak is not None and qcc_peak is not None:
+            _require(full_peak > 0 and qcc_peak >= 0, "peak memory bytes must be non-negative with Full-KV > 0", failures)
+            if full_peak > 0:
+                peak_reduction = 1.0 - qcc_peak / full_peak
+                summary["peak_memory_reduction"] = peak_reduction
+                _require(peak_reduction >= STATE_REDUCTION, f"peak memory reduction {peak_reduction:.6f} < {STATE_REDUCTION:.2f}", failures)
         if full_conc is not None and qcc_conc is not None:
             _require(full_conc > 0, "full_kv_concurrency must be > 0", failures)
             if full_conc > 0:
@@ -170,6 +184,9 @@ def audit(payload: dict[str, Any]) -> dict[str, Any]:
             _require(trials >= 1000, "retrieval_1m requires at least 1000 trials", failures)
         if context is not None:
             _require(context >= 1_000_000, "retrieval_1m context is below 1M tokens", failures)
+        native = _number(retrieval.get("native_context_tokens"), "retrieval_1m.native_context_tokens", failures)
+        if native is not None and context is not None:
+            _require(native >= context, "retrieval_1m native context is below the evaluated context", failures)
         if qcc is not None:
             _require(qcc >= RETRIEVAL_RATE, f"1M retrieval rate {qcc:.6f} < {RETRIEVAL_RATE:.2f}", failures)
         if full is not None:
@@ -181,6 +198,8 @@ def audit(payload: dict[str, Any]) -> dict[str, Any]:
         for field in ("random_depth", "multi_needle", "semantic_distractor"):
             _require(retrieval.get(field) is True, f"retrieval_1m.{field} evidence is missing", failures)
         _require(retrieval.get("oracle_admission") is False, "retrieval_1m uses oracle admission", failures)
+        manifest_hash = retrieval.get("manifest_sha256")
+        _require(isinstance(manifest_hash, str) and len(manifest_hash) == 64, "retrieval_1m manifest_sha256 is required", failures)
 
     # 6: no average-score masking of catastrophic retrieval failures.
     tail = payload.get("tail_safety")
@@ -191,10 +210,31 @@ def audit(payload: dict[str, Any]) -> dict[str, Any]:
         buckets = tail.get("critical_buckets")
         _require(isinstance(buckets, list) and bool(buckets), "tail_safety.critical_buckets is missing", failures)
         if isinstance(buckets, list):
+            names: set[str] = set()
             for index, bucket in enumerate(buckets):
+                task = bucket.get("task") if isinstance(bucket, dict) else None
+                context = bucket.get("context_tokens") if isinstance(bucket, dict) else None
+                label = bucket.get("bucket") if isinstance(bucket, dict) else None
+                _require(isinstance(task, str) and bool(task), f"tail_safety.critical_buckets[{index}].task is required", failures)
+                _require(isinstance(label, str) and bool(label), f"tail_safety.critical_buckets[{index}].bucket is required", failures)
+                if isinstance(label, str) and label:
+                    names.add(label)
+                context_value = _number(context, f"tail_safety.critical_buckets[{index}].context_tokens", failures)
+                if context_value is not None:
+                    _require(context_value >= 128_000, f"tail_safety bucket {index} is below 128K", failures)
+                trials_value = _number(bucket.get("trials") if isinstance(bucket, dict) else None, f"tail_safety.critical_buckets[{index}].trials", failures)
+                if trials_value is not None:
+                    _require(trials_value > 0, f"tail_safety bucket {index} is empty", failures)
+                full_score = _number(bucket.get("full_kv_score") if isinstance(bucket, dict) else None, f"tail_safety.critical_buckets[{index}].full_kv_score", failures)
+                qcc_score = _number(bucket.get("qcc_score") if isinstance(bucket, dict) else None, f"tail_safety.critical_buckets[{index}].qcc_score", failures)
                 ratio = _number(bucket.get("qcc_full_kv_ratio") if isinstance(bucket, dict) else None, f"tail_safety.critical_buckets[{index}].qcc_full_kv_ratio", failures)
+                if full_score is not None and qcc_score is not None and ratio is not None:
+                    _require(full_score > 0, f"tail_safety bucket {index} Full-KV score must be > 0", failures)
+                    if full_score > 0:
+                        _require(math.isclose(ratio, qcc_score / full_score, rel_tol=1e-6, abs_tol=1e-9), f"tail_safety bucket {index} ratio is not recomputed from raw scores", failures)
                 if ratio is not None:
                     _require(ratio >= TAIL_RATIO, f"tail bucket {index} ratio {ratio:.6f} < {TAIL_RATIO:.2f}", failures)
+            _require({"0-25%", "25-50%", "50-75%", "75-100%"}.issubset(names), "tail_safety must cover all random-depth buckets", failures)
 
     # 7: dominate FP8 Full-KV plus two compression alternatives on matched evidence.
     pareto = payload.get("pareto_dominance")
@@ -207,6 +247,23 @@ def audit(payload: dict[str, Any]) -> dict[str, Any]:
             _require(len(baselines) >= 3, "pareto dominance requires FP8 plus two compression baselines", failures)
             for index, item in enumerate(baselines):
                 _require(isinstance(item, dict) and item.get("qcc_dominates") is True, f"pareto baseline {index} is not dominated", failures)
+                if isinstance(item, dict):
+                    for field in ("baseline_quality_score", "baseline_state_bytes", "baseline_p95_tpot_ms", "baseline_throughput_tokens_per_s", "qcc_quality_score", "qcc_state_bytes", "qcc_p95_tpot_ms", "qcc_throughput_tokens_per_s"):
+                        _number(item.get(field), f"pareto_dominance.baselines[{index}].{field}", failures)
+                    baseline_quality = item.get("baseline_quality_score")
+                    qcc_quality = item.get("qcc_quality_score")
+                    baseline_state = item.get("baseline_state_bytes")
+                    qcc_state = item.get("qcc_state_bytes")
+                    baseline_tail = item.get("baseline_p95_tpot_ms")
+                    qcc_tail = item.get("qcc_p95_tpot_ms")
+                    baseline_throughput = item.get("baseline_throughput_tokens_per_s")
+                    qcc_throughput = item.get("qcc_throughput_tokens_per_s")
+                    if all(isinstance(value, (int, float)) and not isinstance(value, bool) for value in (baseline_quality, qcc_quality, baseline_state, qcc_state, baseline_tail, qcc_tail, baseline_throughput, qcc_throughput)):
+                        _require(qcc_quality >= baseline_quality, f"pareto baseline {index} quality is not dominated", failures)
+                        _require(qcc_state <= baseline_state, f"pareto baseline {index} state is not dominated", failures)
+                        _require(qcc_tail <= baseline_tail, f"pareto baseline {index} p95 latency is not dominated", failures)
+                        _require(qcc_throughput >= baseline_throughput, f"pareto baseline {index} throughput is not dominated", failures)
+                        _require(any((qcc_quality > baseline_quality, qcc_state < baseline_state, qcc_tail < baseline_tail, qcc_throughput > baseline_throughput)), f"pareto baseline {index} has no strict improvement", failures)
 
     # 8: tail production latency must improve without hiding a throughput tradeoff.
     production = payload.get("production_latency")
@@ -220,6 +277,10 @@ def audit(payload: dict[str, Any]) -> dict[str, Any]:
             _require(p95 >= 1.0, "p95 TPOT must not regress", failures)
         if p99 is not None:
             _require(p99 >= 1.0, "p99 TPOT must not regress", failures)
+        for field in ("p95_ttft_speedup", "p99_ttft_speedup"):
+            value = _number(production.get(field), f"production_latency.{field}", failures)
+            if value is not None:
+                _require(value >= 1.0, f"{field} must not regress", failures)
         _require(production.get("throughput_latency_tradeoff") is False, "throughput/latency tradeoff evidence is not acceptable", failures)
 
     # 9: constant-state/near-constant-TPOT scaling through 1M.
@@ -261,6 +322,11 @@ def audit(payload: dict[str, Any]) -> dict[str, Any]:
             value = _number(general.get(field), f"generalization.{field}", failures)
             if value is not None:
                 _require(value >= MIN_REPRODUCTIONS, f"generalization.{field} must be >= {MIN_REPRODUCTIONS}", failures)
+        model_ids = general.get("model_ids")
+        gpu_ids = general.get("gpu_generation_ids")
+        reproduction_ids = general.get("reproduction_run_ids")
+        for value, label in ((model_ids, "model_ids"), (gpu_ids, "gpu_generation_ids"), (reproduction_ids, "reproduction_run_ids")):
+            _require(isinstance(value, list) and len(set(value)) >= MIN_REPRODUCTIONS, f"generalization.{label} must list >= {MIN_REPRODUCTIONS} distinct entries", failures)
 
     return {"passed": not failures, "failures": failures, "summary": summary}
 

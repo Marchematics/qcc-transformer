@@ -18,7 +18,13 @@ from pathlib import Path
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from qcc_transformer import patch_hf_model, reset_hf_qcc_cache
+from qcc_transformer import (
+    enable_qkv_only_deployment_profile,
+    load_hybrid_retrofit_adapter,
+    load_retrofit_adapter,
+    patch_hf_model,
+    reset_hf_qcc_cache,
+)
 
 
 def _records(path: Path, max_examples: int | None):
@@ -48,6 +54,8 @@ def _run_model(
     records: list[tuple[int, dict]],
     device: torch.device,
     max_new_tokens: int,
+    *,
+    reset_qcc: bool = False,
 ) -> list[dict]:
     results: list[dict] = []
     for line_number, record in records:
@@ -57,6 +65,12 @@ def _run_model(
             "length_chars": len(record["input"]),
         }
         try:
+            if reset_qcc:
+                # Each official record is an independent request.  QCC has no
+                # physical past-KV object for HF to reset implicitly, so the
+                # boundary must be explicit or later records inherit the
+                # archive state of earlier records.
+                reset_hf_qcc_cache(model, batch_size=1)
             encoded = tokenizer(record["input"], return_tensors="pt", add_special_tokens=False)
             encoded = {key: value.to(device) for key, value in encoded.items()}
             result["tokens"] = int(encoded["input_ids"].shape[-1])
@@ -86,6 +100,11 @@ def main() -> None:
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--window-size", type=int, default=128)
     parser.add_argument("--num-codes", type=int, default=64)
+    parser.add_argument("--adapter", type=Path, default=None)
+    parser.add_argument("--hybrid", action="store_true", help="use the calibrated exact-tier hybrid retrofit")
+    parser.add_argument("--exact-num-sets", type=int, default=32)
+    parser.add_argument("--exact-ways", type=int, default=4)
+    parser.add_argument("--archive-mix", type=float, default=0.125)
     parser.add_argument(
         "--archive-position-invariant",
         action=argparse.BooleanOptionalAction,
@@ -94,6 +113,7 @@ def main() -> None:
     )
     parser.add_argument("--kv-head-policy", choices=("reject", "repeat"), default="reject")
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--run-id", required=True)
     parser.add_argument("--trust-remote-code", action="store_true")
     args = parser.parse_args()
     if args.max_new_tokens <= 0:
@@ -115,21 +135,56 @@ def main() -> None:
     if device.type == "cuda":
         torch.cuda.empty_cache()
     patched = AutoModelForCausalLM.from_pretrained(args.model, **common).to(device).eval()
-    replaced = patch_hf_model(
-        patched,
-        window_size=args.window_size,
-        num_codes=args.num_codes,
-        archive_position_invariant=args.archive_position_invariant,
-        kv_head_policy=args.kv_head_policy,
+    if args.adapter is not None and args.hybrid:
+        replaced = load_hybrid_retrofit_adapter(
+            patched,
+            args.adapter,
+            hybrid_kwargs={"exact_num_sets": args.exact_num_sets, "exact_ways": args.exact_ways},
+            window_size=args.window_size,
+            num_codes=args.num_codes,
+            archive_position_invariant=args.archive_position_invariant,
+            kv_head_policy=args.kv_head_policy,
+        )
+        enable_qkv_only_deployment_profile(patched, archive_mix=args.archive_mix)
+    elif args.adapter is not None:
+        replaced = load_retrofit_adapter(
+            patched,
+            args.adapter,
+            window_size=args.window_size,
+            num_codes=args.num_codes,
+            archive_position_invariant=args.archive_position_invariant,
+            kv_head_policy=args.kv_head_policy,
+        )
+        enable_qkv_only_deployment_profile(patched, archive_mix=args.archive_mix)
+    else:
+        replaced = patch_hf_model(
+            patched,
+            window_size=args.window_size,
+            num_codes=args.num_codes,
+            archive_position_invariant=args.archive_position_invariant,
+            kv_head_policy=args.kv_head_policy,
+        )
+    qcc_results = _run_model(
+        patched, tokenizer, records, device, args.max_new_tokens, reset_qcc=True
     )
-    reset_hf_qcc_cache(patched, batch_size=1)
-    qcc_results = _run_model(patched, tokenizer, records, device, args.max_new_tokens)
     baseline_correct = sum(bool(item["correct"]) for item in baseline_results)
     qcc_correct = sum(bool(item["correct"]) for item in qcc_results)
     result = {
         "model": args.model,
+        "model_id": args.model,
+        "run_id": args.run_id,
+        "benchmark": "ruler",
         "records": len(records),
+        "native_context_tokens": int(getattr(patched.config, "max_position_embeddings", 0)),
         "patched_layers": replaced,
+        "real_model": True,
+        "synthetic": False,
+        "official": True,
+        "official_evaluator": "NVIDIA RULER prepared JSONL exact answer scorer",
+        "full_suite": args.max_examples is None,
+        "matched_full_kv": True,
+        "qcc_only": False,
+        "output": str(args.output),
         "baseline_full_kv": {
             "correct": baseline_correct,
             "accuracy": baseline_correct / len(records),
@@ -144,7 +199,14 @@ def main() -> None:
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2), encoding="utf-8")
-    print(json.dumps({k: result[k] for k in ("model", "records", "patched_layers", "baseline_full_kv", "qcc_retrofit") if k != "baseline_full_kv" or True}, indent=2)[:4000])
+    print(json.dumps({
+        "model": result["model"],
+        "run_id": result["run_id"],
+        "records": result["records"],
+        "baseline_accuracy": result["baseline_full_kv"]["accuracy"],
+        "qcc_accuracy": result["qcc_retrofit"]["accuracy"],
+        "patched_layers": result["patched_layers"],
+    }, indent=2))
 
 
 if __name__ == "__main__":
