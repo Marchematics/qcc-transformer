@@ -229,6 +229,9 @@ def main() -> None:
     parser.add_argument("--server-pid", type=int)
     parser.add_argument("--context-length", type=int)
     parser.add_argument("--gpu", default=None)
+    parser.add_argument("--gpu-generation", default=None)
+    parser.add_argument("--model-family", default=None)
+    parser.add_argument("--reproduction-id", default=None)
     parser.add_argument("--vllm-version", default=None)
     parser.add_argument("--model-id", default=None)
     parser.add_argument("--run-id", default=None)
@@ -297,6 +300,9 @@ def main() -> None:
         "protocol_locked": args.protocol_locked,
         "context_length": args.context_length,
         "gpu": args.gpu,
+        "gpu_generation": args.gpu_generation,
+        "model_family": args.model_family,
+        "reproduction_id": args.reproduction_id,
         "vllm_version": args.vllm_version,
         "stock_vllm": True,
         "streaming": True,
