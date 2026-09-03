@@ -87,6 +87,8 @@
 
 该脚本的多 chunk 校准同时保留每个 chunk 的全局文本起点，并将其传入 teacher 的 `position_ids` 及后续 RoPE salience 计算；LongRoPE 模型因此不会把高位置样本错误地当作位置 0 的前缀。
 
+teacher 特征现在通过未 patch attention 模块的 forward-pre-hook 直接捕获归一化后的 `hidden_states`（兼容位置参数和 keyword 参数），再复用原始 Q/K/V 投影；这避免用残差流替代 attention 输入训练 admission predictor。
+
 ### 3.6 未校准安全 gate（已实现，待远程验证）
 
 - `QCCSelfAttention` 新增 `gate_bias_init`；HF retrofit 默认值为 `2.0`，让新 adapter 初始更接近 exact local path，避免随机 archive 以 50/50 比例污染 pretrained logits；

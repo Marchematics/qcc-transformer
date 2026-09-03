@@ -107,34 +107,59 @@ def _collect_hidden_states(
     selected_layers: set[int],
     device: torch.device,
 ) -> list[tuple[dict[int, Tensor], int]]:
-    records: list[tuple[dict[int, Tensor], int]] = []
-    for ids, position_start in chunks:
-        position_ids = torch.arange(
-            position_start,
-            position_start + ids.numel(),
-            device=device,
-            dtype=torch.long,
-        ).view(1, -1)
-        output = model(
-            input_ids=ids.unsqueeze(0).to(device),
-            position_ids=position_ids,
-            use_cache=False,
-            output_hidden_states=True,
-            return_dict=True,
+    attention_modules = [
+        module
+        for _, module in model.named_modules()
+        if (
+            all(hasattr(module, field) for field in ("q_proj", "k_proj", "v_proj", "o_proj"))
+            or (hasattr(module, "qkv_proj") and hasattr(module, "o_proj"))
         )
-        hidden_states = output.hidden_states
-        if hidden_states is None:
-            raise RuntimeError("teacher did not return hidden states")
-        records.append((
-            {
-                index: hidden_states[index].detach().cpu()
-                for index in selected_layers
-            },
-            position_start,
-        ))
-        del output, hidden_states
-        if device.type == "cuda":
-            torch.cuda.empty_cache()
+    ]
+    if not attention_modules or max(selected_layers, default=-1) >= len(attention_modules):
+        raise RuntimeError("could not locate the selected teacher attention modules")
+
+    captured: dict[int, Tensor] = {}
+    hooks = []
+    for index in sorted(selected_layers):
+        module = attention_modules[index]
+
+        def capture(_module, inputs, kwargs, *, layer_index=index):
+            hidden = inputs[0] if inputs else kwargs.get("hidden_states")
+            if hidden is None:
+                raise RuntimeError("teacher attention received no hidden-state input")
+            captured[layer_index] = hidden.detach().cpu()
+
+        hooks.append(module.register_forward_pre_hook(capture, with_kwargs=True))
+
+    records: list[tuple[dict[int, Tensor], int]] = []
+    try:
+        for ids, position_start in chunks:
+            captured.clear()
+            position_ids = torch.arange(
+                position_start,
+                position_start + ids.numel(),
+                device=device,
+                dtype=torch.long,
+            ).view(1, -1)
+            output = model(
+                input_ids=ids.unsqueeze(0).to(device),
+                position_ids=position_ids,
+                use_cache=False,
+                output_hidden_states=False,
+                return_dict=True,
+            )
+            del output
+            missing = selected_layers.difference(captured)
+            if missing:
+                raise RuntimeError(
+                    f"teacher did not expose attention inputs for layers {sorted(missing)}"
+                )
+            records.append((dict(captured), position_start))
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
+    finally:
+        for hook in hooks:
+            hook.remove()
     return records
 
 
