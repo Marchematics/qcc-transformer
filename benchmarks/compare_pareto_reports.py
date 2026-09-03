@@ -42,6 +42,8 @@ def _baseline_name(label: Any) -> str:
 def compare_pareto(qcc: dict[str, Any], baselines: list[dict[str, Any]]) -> dict[str, Any]:
     if len(baselines) < 3:
         raise ValueError("Pareto comparison requires FP8 plus at least two compression baselines")
+    if not isinstance(qcc.get("run_id"), str) or not qcc.get("run_id"):
+        raise ValueError("Pareto comparison requires a non-empty matched run_id")
     names: set[str] = set()
     comparisons: list[dict[str, Any]] = []
     for baseline in baselines:
@@ -54,13 +56,15 @@ def compare_pareto(qcc: dict[str, Any], baselines: list[dict[str, Any]]) -> dict
             )
         names.add(name)
         paired = compare_reports(qcc, baseline)
+        if paired["provenance"].get("context_length", 0) < 128_000:
+            raise ValueError("Pareto comparison requires a 128K serving workload")
         if paired["provenance"].get("run_id") != qcc.get("run_id"):
             raise ValueError(
                 f"baseline {name} is not from the same matched run as QCC"
             )
         memory_reduction = paired["derived"].get("server_peak_gpu_memory_reduction")
         memory_dominates = (
-            isinstance(memory_reduction, (int, float)) and memory_reduction >= 0.0
+            isinstance(memory_reduction, (int, float)) and memory_reduction > 0.0
         )
         comparisons.append(
             {

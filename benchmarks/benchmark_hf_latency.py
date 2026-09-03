@@ -188,6 +188,18 @@ def main() -> None:
         load_in_4bit=args.load_in_4bit,
     )
     model_device = model_input_device(baseline, device)
+    native_context_values = [
+        getattr(baseline.config, name, None)
+        for name in ("max_position_embeddings", "n_positions", "max_sequence_length")
+    ]
+    native_context_values = [
+        int(value)
+        for value in native_context_values
+        if isinstance(value, int) and value > 0
+    ]
+    native_context_tokens = max(native_context_values) if native_context_values else None
+    if native_context_tokens is None:
+        raise RuntimeError("model does not declare a native context length")
     encoded = {key: value.to(model_device) for key, value in encoded.items()}
     baseline_result = _measure(
         baseline, encoded, model_device, args.num_decode_steps,
@@ -208,6 +220,7 @@ def main() -> None:
             patched,
             window_size=args.window_size,
             num_codes=args.num_codes,
+            max_position_embeddings=native_context_tokens,
             archive_position_invariant=args.archive_position_invariant,
             kv_head_policy=args.kv_head_policy,
             use_triton=args.use_triton,
@@ -223,6 +236,7 @@ def main() -> None:
             },
             window_size=args.window_size,
             num_codes=args.num_codes,
+            max_position_embeddings=native_context_tokens,
             archive_position_invariant=args.archive_position_invariant,
             kv_head_policy=args.kv_head_policy,
             use_triton=args.use_triton,
@@ -237,6 +251,7 @@ def main() -> None:
     )
     result = {
         "model": args.model,
+        "native_context_tokens": native_context_tokens,
         "tokens": int(encoded["input_ids"].shape[-1]),
         "adapter": str(args.adapter) if args.adapter is not None else None,
         "exact_num_sets": args.exact_num_sets if args.adapter is not None else None,

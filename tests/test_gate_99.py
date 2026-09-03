@@ -20,6 +20,7 @@ def _evidence() -> dict:
     model_id = "org/qwen-1.5b"
     quality = {
         name: {
+            "benchmark": name,
             "model_id": model_id,
             "qcc_score": 98.5,
             "full_kv_score": 99.0,
@@ -29,6 +30,7 @@ def _evidence() -> dict:
             "synthetic": False,
             "qcc_only": False,
             "run_id": run_id,
+            "full_suite": True,
             "native_context_tokens": 131_072,
             "task_ratios": {"task:all": 0.99, "length:128K+": 0.99},
         }
@@ -48,12 +50,15 @@ def _evidence() -> dict:
             **custom,
             "stock_vllm": True,
             "context_tokens": 128_000,
+            "native_context_tokens": 131_072,
+            "workload_context_exact": True,
             "tpot_speedup": 5.1,
             "throughput_speedup": 2.1,
             "vllm_version": "0.29.0",
         },
         "memory": {
             **custom,
+            "context_tokens": 128_000,
             "full_kv_attention_state_bytes": 1000,
             "qcc_attention_state_bytes": 180,
             "full_kv_concurrency": 1,
@@ -71,6 +76,7 @@ def _evidence() -> dict:
             **custom,
             "trials": 1000,
             "context_tokens": 1_000_000,
+            "native_context_tokens": 1_000_000,
             "qcc_success_rate": 0.995,
             "full_kv_success_rate": 1.0,
             "all_needles_required": True,
@@ -98,6 +104,7 @@ def _evidence() -> dict:
                 {"name": "compresskv", "qcc_dominates": True, "memory_dominates": True},
                 {"name": "h2o", "qcc_dominates": True, "memory_dominates": True},
             ],
+            "all_dominated": True,
         },
         "production_latency": {
             **custom,
@@ -126,6 +133,22 @@ def _evidence() -> dict:
             "model_families": 2,
             "gpu_generations": 2,
             "independent_reproductions": 2,
+            "evaluations": [
+                {
+                    "model_family": "qwen",
+                    "gpu_generation": "ampere",
+                    "reproduction_id": "a",
+                    "native_context_tokens": 131_072,
+                    "source": "https://github.com/example/a",
+                },
+                {
+                    "model_family": "phi",
+                    "gpu_generation": "hopper",
+                    "reproduction_id": "b",
+                    "native_context_tokens": 131_072,
+                    "source": "https://github.com/example/b",
+                },
+            ],
         },
     }
 

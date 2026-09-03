@@ -232,6 +232,11 @@ def main() -> None:
             f"model native context {native_context_tokens} is below requested "
             f"{args.min_native_context}"
         )
+    if native_context_tokens is None or native_context_tokens < args.total_tokens:
+        raise RuntimeError(
+            f"model native context {native_context_tokens} is below requested "
+            f"{args.total_tokens}"
+        )
     baseline_result = _run_stream(
         baseline, tokens, baseline_device, args.chunk_size, decode_steps=args.decode_steps
     )
@@ -256,6 +261,7 @@ def main() -> None:
             patched,
             window_size=args.window_size,
             num_codes=args.num_codes,
+            max_position_embeddings=native_context_tokens,
             kv_head_policy=args.kv_head_policy,
         )
     else:
@@ -269,6 +275,7 @@ def main() -> None:
             },
             window_size=args.window_size,
             num_codes=args.num_codes,
+            max_position_embeddings=native_context_tokens,
             archive_position_invariant=True,
             kv_head_policy=args.kv_head_policy,
         )

@@ -166,6 +166,8 @@ def main() -> None:
     )
     model_device = model_input_device(baseline, device)
     native_context_tokens = native_context(baseline.config)
+    if native_context_tokens is None:
+        raise RuntimeError("model does not declare a native context length")
     if args.min_native_context is not None and (
         native_context_tokens is None or native_context_tokens < args.min_native_context
     ):
@@ -193,6 +195,7 @@ def main() -> None:
             patched,
             window_size=args.window_size,
             num_codes=args.num_codes,
+            max_position_embeddings=native_context_tokens,
             archive_position_invariant=args.archive_position_invariant,
             kv_head_policy=args.kv_head_policy,
         )
@@ -207,6 +210,7 @@ def main() -> None:
             },
             window_size=args.window_size,
             num_codes=args.num_codes,
+            max_position_embeddings=native_context_tokens,
             archive_position_invariant=args.archive_position_invariant,
             kv_head_policy=args.kv_head_policy,
         )

@@ -179,6 +179,7 @@ def main() -> None:
             },
             window_size=args.window_size,
             num_codes=args.num_codes,
+            max_position_embeddings=native_context_tokens,
             archive_position_invariant=True,
             kv_head_policy=args.kv_head_policy,
         )

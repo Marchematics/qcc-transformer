@@ -122,6 +122,8 @@ def _paired_scores(
         raise ValueError(f"{benchmark} reports disagree on native_context_tokens")
     if full.get("split") != qcc.get("split"):
         raise ValueError(f"{benchmark} reports disagree on split")
+    if not isinstance(full_tasks, dict) or not full_tasks:
+        raise ValueError(f"{benchmark} task score maps are required")
     return qcc_score, full_score, task_ratios, full_context
 
 

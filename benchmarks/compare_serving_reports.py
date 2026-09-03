@@ -90,8 +90,11 @@ def compare_reports(qcc: dict[str, Any], baseline: dict[str, Any]) -> dict[str, 
         raise ValueError("serving comparison requires a registered workload protocol")
     model_id = qcc.get("model_id", qcc.get("model"))
     baseline_model_id = baseline.get("model_id", baseline.get("model"))
-    if model_id != baseline_model_id or model_id is None:
+    if model_id != baseline_model_id or not isinstance(model_id, str) or not model_id:
         raise ValueError("matched serving reports disagree on model_id")
+    run_id = qcc.get("run_id")
+    if not isinstance(run_id, str) or not run_id or baseline.get("run_id") != run_id:
+        raise ValueError("matched serving reports require the same non-empty run_id")
     context_length = _same_required_field(qcc, baseline, "context_length")
     concurrency = _same_required_field(qcc, baseline, "concurrency")
     max_tokens = _same_required_field(qcc, baseline, "max_tokens")
@@ -111,12 +114,17 @@ def compare_reports(qcc: dict[str, Any], baseline: dict[str, Any]) -> dict[str, 
     if context_length >= 128_000:
         if qcc.get("workload_context_exact") is not True or baseline.get("workload_context_exact") is not True:
             raise ValueError("128K serving reports must verify exact prompt token counts")
+        native_context_tokens = _same_required_field(
+            qcc, baseline, "native_context_tokens"
+        )
         for name, report in (("qcc", qcc), ("baseline", baseline)):
             native = report.get("native_context_tokens")
             if isinstance(native, bool) or not isinstance(native, int) or native < context_length:
                 raise ValueError(
                     f"{name} serving report must declare native context >= requested length"
                 )
+    else:
+        native_context_tokens = None
 
     qcc_ttft_p50 = _summary_value(qcc, "ttft_s", "p50")
     base_ttft_p50 = _summary_value(baseline, "ttft_s", "p50")
@@ -182,9 +190,11 @@ def compare_reports(qcc: dict[str, Any], baseline: dict[str, Any]) -> dict[str, 
         and ttft_regression <= 0.0
         and p95_ttft_speedup >= 1.0
         and p99_ttft_speedup >= 1.0
+        and p50_tpot_speedup >= 1.0
         and p95_tpot_speedup >= 1.0
         and p99_tpot_speedup >= 1.0
         and throughput_speedup >= 1.0
+        and request_throughput_speedup >= 1.0
     )
 
     qcc_memory = qcc.get("server_peak_gpu_memory_mib")
@@ -218,7 +228,9 @@ def compare_reports(qcc: dict[str, Any], baseline: dict[str, Any]) -> dict[str, 
         "max_tokens": max_tokens,
         "workload": workload,
         "vllm_version": qcc.get("vllm_version"),
-        "run_id": qcc.get("run_id") if qcc.get("run_id") == baseline.get("run_id") else None,
+        "native_context_tokens": native_context_tokens,
+        "workload_context_exact": qcc.get("workload_context_exact"),
+        "run_id": run_id,
         "matched_full_kv": True,
         "real_model": qcc.get("real_model"),
         "synthetic": qcc.get("synthetic"),

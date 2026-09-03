@@ -46,6 +46,8 @@ def test_serving_comparison_keeps_tail_and_throughput_separate():
     assert result["derived"]["throughput_latency_tradeoff"] is False
     assert result["derived"]["qcc_dominates"] is True
     assert result["vllm_latency"]["qcc_only"] is False
+    assert result["vllm_latency"]["native_context_tokens"] == 131_072
+    assert result["vllm_latency"]["workload_context_exact"] is True
     assert result["production_latency"]["real_model"] is True
 
 

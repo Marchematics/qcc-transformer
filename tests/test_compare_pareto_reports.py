@@ -47,3 +47,15 @@ def test_pareto_requires_and_joins_fp8_and_compression_baselines():
     assert result["all_dominated"] is True
     assert result["baselines"][0]["name"] == "fp8_full_kv"
     assert len(result["baselines"]) == 3
+
+
+def test_pareto_requires_128k_workload():
+    qcc = _report("qcc", tpot=2.0, throughput=220.0)
+    baseline = _report("fp8-fullkv", tpot=10.0, throughput=100.0)
+    baseline["context_length"] = 64_000
+    try:
+        compare_pareto(qcc, [baseline, _report("snapkv", tpot=8.0, throughput=90.0), _report("h2o", tpot=6.0, throughput=80.0)])
+    except ValueError as exc:
+        assert "128K" in str(exc)
+    else:
+        raise AssertionError("short serving workload must be rejected")

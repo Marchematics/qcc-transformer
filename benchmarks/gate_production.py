@@ -102,6 +102,16 @@ def audit(payload: dict[str, Any]) -> dict[str, Any]:
         for benchmark in ("ruler", "longbench", "pg19"):
             section = quality.get(benchmark)
             if _common(section, f"quality.{benchmark}", model_id=model_id, run_id=run_id, failures=failures, official=True):
+                _require(
+                    section.get("benchmark") == benchmark,
+                    f"quality.{benchmark}.benchmark is missing or mismatched",
+                    failures,
+                )
+                _require(
+                    section.get("full_suite") is True,
+                    f"quality.{benchmark} is not a complete official suite",
+                    failures,
+                )
                 context = _number(section.get("native_context_tokens"), f"quality.{benchmark}.native_context_tokens", failures)
                 if context is not None:
                     _require(context >= MIN_QUALITY_CONTEXT, f"quality.{benchmark} native context is below 128K", failures)
@@ -149,6 +159,22 @@ def audit(payload: dict[str, Any]) -> dict[str, Any]:
         throughput = _number(latency.get("throughput_speedup"), "vllm_latency.throughput_speedup", failures)
         if context is not None:
             _require(context >= 128_000, "vllm context_tokens is below 128K", failures)
+            native = _number(
+                latency.get("native_context_tokens"),
+                "vllm_latency.native_context_tokens",
+                failures,
+            )
+            if native is not None:
+                _require(
+                    native >= context,
+                    "vllm native context is below the requested workload",
+                    failures,
+                )
+            _require(
+                latency.get("workload_context_exact") is True,
+                "vllm 128K workload token count is not exact",
+                failures,
+            )
         if tpot is not None:
             _require(tpot >= TPOT_SPEEDUP, f"vLLM TPOT speedup {tpot:.6f} < {TPOT_SPEEDUP:.1f}", failures)
         if throughput is not None:
@@ -158,6 +184,20 @@ def audit(payload: dict[str, Any]) -> dict[str, Any]:
     # 4: actual attention-state reduction and fixed-SLA concurrency.
     memory = payload.get("memory")
     if _common(memory, "memory", model_id=model_id, run_id=run_id, failures=failures, official=False):
+        context = _number(memory.get("context_tokens"), "memory.context_tokens", failures)
+        native = _number(
+            memory.get("native_context_tokens"),
+            "memory.native_context_tokens",
+            failures,
+        )
+        if context is not None:
+            _require(context >= 128_000, "memory context_tokens is below 128K", failures)
+        if context is not None and native is not None:
+            _require(
+                native >= context,
+                "memory native context is below the requested workload",
+                failures,
+            )
         full_state = _number(memory.get("full_kv_attention_state_bytes"), "memory.full_kv_attention_state_bytes", failures)
         qcc_state = _number(memory.get("qcc_attention_state_bytes"), "memory.qcc_attention_state_bytes", failures)
         full_conc = _number(memory.get("full_kv_concurrency"), "memory.full_kv_concurrency", failures)
@@ -200,6 +240,17 @@ def audit(payload: dict[str, Any]) -> dict[str, Any]:
             _require(trials >= 1000, "retrieval_1m requires at least 1000 trials", failures)
         if context is not None:
             _require(context >= 1_000_000, "retrieval_1m context is below 1M tokens", failures)
+            native = _number(
+                retrieval.get("native_context_tokens"),
+                "retrieval_1m.native_context_tokens",
+                failures,
+            )
+            if native is not None:
+                _require(
+                    native >= context,
+                    "retrieval_1m native context is below the requested workload",
+                    failures,
+                )
         if qcc is not None:
             _require(qcc >= RETRIEVAL_RATE, f"1M retrieval rate {qcc:.6f} < {RETRIEVAL_RATE:.2f}", failures)
         if full is not None:
@@ -272,6 +323,11 @@ def audit(payload: dict[str, Any]) -> dict[str, Any]:
     if _common(pareto, "pareto_dominance", model_id=model_id, run_id=run_id, failures=failures, official=False):
         baselines = pareto.get("baselines")
         _require(isinstance(baselines, list), "pareto_dominance.baselines is missing", failures)
+        _require(
+            pareto.get("all_dominated") is True,
+            "pareto dominance is not complete across all baselines",
+            failures,
+        )
         if isinstance(baselines, list):
             names = {item.get("name") for item in baselines if isinstance(item, dict)}
             _require("fp8_full_kv" in names, "pareto dominance must include fp8_full_kv", failures)
@@ -335,6 +391,66 @@ def audit(payload: dict[str, Any]) -> dict[str, Any]:
     # 10: independent generalization, not just reruns on one stack.
     general = payload.get("generalization")
     if _common(general, "generalization", model_id=model_id, run_id=run_id, failures=failures, official=False, matched=False):
+        evaluations = general.get("evaluations")
+        _require(
+            isinstance(evaluations, list) and bool(evaluations),
+            "generalization.evaluations is missing",
+            failures,
+        )
+        evaluation_families: set[str] = set()
+        evaluation_gpus: set[str] = set()
+        evaluation_reproductions: set[str] = set()
+        if isinstance(evaluations, list):
+            for index, evaluation in enumerate(evaluations):
+                if not isinstance(evaluation, dict):
+                    failures.append(f"generalization.evaluations[{index}] must be an object")
+                    continue
+                for field, values in (
+                    ("model_family", evaluation_families),
+                    ("gpu_generation", evaluation_gpus),
+                    ("reproduction_id", evaluation_reproductions),
+                ):
+                    value = evaluation.get(field)
+                    _require(
+                        isinstance(value, str) and bool(value.strip()),
+                        f"generalization.evaluations[{index}].{field} is missing",
+                        failures,
+                    )
+                    if isinstance(value, str) and value.strip():
+                        values.add(value)
+                context = _number(
+                    evaluation.get("native_context_tokens"),
+                    f"generalization.evaluations[{index}].native_context_tokens",
+                    failures,
+                )
+                if context is not None:
+                    _require(
+                        context >= MIN_QUALITY_CONTEXT,
+                        f"generalization.evaluations[{index}] is below 128K",
+                        failures,
+                    )
+                _require(
+                    isinstance(evaluation.get("source"), str)
+                    and bool(evaluation.get("source", "").strip()),
+                    f"generalization.evaluations[{index}].source is missing",
+                    failures,
+                )
+        if isinstance(evaluations, list):
+            _require(
+                len(evaluation_families) >= MIN_REPRODUCTIONS,
+                "generalization evaluations do not cover two model families",
+                failures,
+            )
+            _require(
+                len(evaluation_gpus) >= MIN_REPRODUCTIONS,
+                "generalization evaluations do not cover two GPU generations",
+                failures,
+            )
+            _require(
+                len(evaluation_reproductions) >= MIN_REPRODUCTIONS,
+                "generalization evaluations do not contain two independent reproductions",
+                failures,
+            )
         for field in ("model_families", "gpu_generations", "independent_reproductions"):
             value = _number(general.get(field), f"generalization.{field}", failures)
             if value is not None:
