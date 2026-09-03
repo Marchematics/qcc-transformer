@@ -134,7 +134,10 @@ class PackedHybridReferenceState:
         raw = page.view(torch.uint8).reshape(-1)
         if raw.numel() < self.layout.total_bytes:
             raise ValueError("page is smaller than packed layout")
-        raw[: self.layout.total_bytes].zero_()
+        # Clear the complete allocator word, including dtype-rounding padding.
+        # vLLM can recycle that tail as part of the physical page, and leaving
+        # it untouched makes two freshly assigned pages observably different.
+        raw.zero_()
         typed_segment_view(page, self.layout, "exact_scores").fill_(-torch.inf)
         # counters = ring_start, ring_length, seen_tokens, exact_bank_step
         typed_segment_view(page, self.layout, "counters").zero_()
