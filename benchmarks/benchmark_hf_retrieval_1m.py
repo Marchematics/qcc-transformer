@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import gc
-import hashlib
 import json
 import math
 import re
@@ -21,6 +20,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from qcc_transformer.hybrid_archive import load_hybrid_retrofit_adapter
+from qcc_transformer.hf_loading import load_hf_causal_lm, model_input_device
 from qcc_transformer.production_profile import enable_qkv_only_deployment_profile
 from qcc_transformer.retrofit import reset_hf_qcc_cache
 
@@ -36,9 +36,8 @@ _HEADER = (
 )
 
 
-def load_manifest(path: Path) -> tuple[dict[str, Any], list[dict[str, Any]], str]:
+def load_manifest(path: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     content = path.read_bytes()
-    digest = hashlib.sha256(content).hexdigest()
     lines = [line for line in content.decode().splitlines() if line.strip()]
     if len(lines) < 2:
         raise ValueError("manifest requires header plus trials")
@@ -50,7 +49,7 @@ def load_manifest(path: Path) -> tuple[dict[str, Any], list[dict[str, Any]], str
         raise ValueError("retrieval manifest is not protocol-locked")
     if len(trials) != int(header.get("trials", -1)) or len(trials) < 1000:
         raise ValueError("strict retrieval manifest must contain at least 1000 trials")
-    return header, trials, digest
+    return header, trials
 
 
 def _tile(pattern: torch.Tensor, count: int) -> torch.Tensor:
@@ -141,11 +140,13 @@ def main() -> None:
     parser.add_argument("--adapter", type=Path)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--dtype", choices=("float16", "bfloat16", "float32"), default="bfloat16")
+    parser.add_argument("--load-in-4bit", action="store_true", help="load the real checkpoint through bitsandbytes NF4")
     parser.add_argument("--max-new-tokens", type=int, default=16)
     parser.add_argument("--window-size", type=int, default=128)
     parser.add_argument("--num-codes", type=int, default=64)
-    parser.add_argument("--exact-num-sets", type=int, default=32)
+    parser.add_argument("--exact-num-sets", type=int, default=128)
     parser.add_argument("--exact-ways", type=int, default=4)
+    parser.add_argument("--exact-probe-sets", type=int, default=None)
     parser.add_argument("--archive-mix", type=float, default=0.125)
     parser.add_argument("--kv-head-policy", choices=("reject", "repeat"), default="repeat")
     parser.add_argument("--require-native-context", action=argparse.BooleanOptionalAction, default=True)
@@ -157,7 +158,7 @@ def main() -> None:
     if args.mode == "qcc" and args.adapter is None:
         raise ValueError("--adapter is required for qcc mode")
 
-    header, trials, manifest_hash = load_manifest(args.manifest)
+    header, trials = load_manifest(args.manifest)
     context_tokens = int(header["context_tokens"])
     try:
         from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -168,7 +169,14 @@ def main() -> None:
     dtype = _dtype(args.dtype)
     common = {"trust_remote_code": args.trust_remote_code}
     tokenizer = AutoTokenizer.from_pretrained(args.model, **common)
-    model = AutoModelForCausalLM.from_pretrained(args.model, torch_dtype=dtype, **common).to(device).eval()
+    model = load_hf_causal_lm(
+        args.model,
+        dtype=dtype,
+        device=device,
+        trust_remote_code=args.trust_remote_code,
+        load_in_4bit=args.load_in_4bit,
+    )
+    model_device = model_input_device(model, device)
     native_context = _native_context(model)
     if args.require_native_context and (native_context is None or native_context < context_tokens):
         raise RuntimeError(
@@ -180,7 +188,11 @@ def main() -> None:
         patched_layers = load_hybrid_retrofit_adapter(
             model,
             args.adapter,
-            hybrid_kwargs={"exact_num_sets": args.exact_num_sets, "exact_ways": args.exact_ways},
+            hybrid_kwargs={
+                "exact_num_sets": args.exact_num_sets,
+                "exact_ways": args.exact_ways,
+                "exact_probe_sets": args.exact_probe_sets,
+            },
             window_size=args.window_size,
             num_codes=args.num_codes,
             max_position_embeddings=context_tokens,
@@ -220,7 +232,7 @@ def main() -> None:
                 target_depth = actual_depths[target_sorted_index]
                 row["target_depth"] = target_depth
                 row["depth_bucket"] = depth_bucket(target_depth)
-                encoded = ids.to(device)
+                encoded = ids.to(model_device)
                 if args.mode == "qcc":
                     reset_hf_qcc_cache(model, batch_size=1)
                 with torch.inference_mode():
@@ -276,7 +288,6 @@ def main() -> None:
         "oracle_admission": False if args.mode == "qcc" else None,
         "official": False,
         "protocol_locked": True,
-        "manifest_sha256": manifest_hash,
         "context_tokens": context_tokens,
         "native_context_tokens": native_context,
         "native_context_required": args.require_native_context,

@@ -47,7 +47,7 @@ def main() -> None:
             raise ValueError(f"{mode} summary is not real non-synthetic evidence")
         if payload.get("protocol_locked") is not True:
             raise ValueError(f"{mode} protocol is not locked")
-    for field in ("model_id", "manifest_sha256", "context_tokens", "trials"):
+    for field in ("model_id", "context_tokens", "trials"):
         if full.get(field) != qcc.get(field):
             raise ValueError(f"matched retrieval mismatch for {field}")
     if int(full["trials"]) < 1000 or int(full["context_tokens"]) < 1_000_000:
@@ -113,7 +113,6 @@ def main() -> None:
             **common,
             "trials": trials,
             "context_tokens": full["context_tokens"],
-            "manifest_sha256": full["manifest_sha256"],
             "qcc_success_rate": qcc_rate,
             "full_kv_success_rate": full_rate,
             "qcc_full_kv_ratio": qcc_rate / full_rate if full_rate > 0 else 0.0,

@@ -12,14 +12,17 @@ from qcc_transformer.retrofit import (
     save_retrofit_adapter,
     reset_hf_qcc_cache,
 )
+from qcc_transformer.hybrid_archive import patch_hf_model_hybrid
+from benchmarks.calibrate_hf_admission import _load_initial_adapter
 
 
 class _Attention(nn.Module):
     def __init__(self, *, kv_heads: int = 4):
         super().__init__()
         self.q_proj = nn.Linear(16, 16, bias=False)
-        self.k_proj = nn.Linear(16, 16, bias=False)
-        self.v_proj = nn.Linear(16, 16, bias=False)
+        kv_width = 16 if kv_heads == 4 else 8
+        self.k_proj = nn.Linear(16, kv_width, bias=False)
+        self.v_proj = nn.Linear(16, kv_width, bias=False)
         self.o_proj = nn.Linear(16, 16, bias=False)
         self.num_heads = 4
         self.num_key_value_heads = kv_heads
@@ -157,6 +160,24 @@ def test_patch_hf_supports_modern_shared_cache_call():
     assert output[0].shape == (1, 4, 16)
 
 
+def test_modern_generation_without_physical_cache_keeps_qcc_state():
+    model = _Model()
+    patch_hf_model(model, window_size=4, num_codes=4, use_triton=False)
+    first = model.attn(
+        torch.randn(1, 4, 16), past_key_values=object(), use_cache=True
+    )
+    assert len(first) == 2
+    assert model.attn.qcc._seen_tokens == 4
+    # A QCC retrofit intentionally returns no physical past-KV object.  A
+    # subsequent framework call may therefore pass None; that must not reset
+    # the bounded archive between generated tokens.
+    second = model.attn(
+        torch.randn(1, 1, 16), past_key_values=None, use_cache=True
+    )
+    assert len(second) == 2
+    assert model.attn.qcc._seen_tokens == 5
+
+
 def test_patch_hf_exposes_differentiable_calibration_path():
     model = _Model()
     patch_hf_model(model, window_size=4, num_codes=4, use_triton=False)
@@ -181,6 +202,27 @@ def test_retrofit_adapter_round_trip(tmp_path):
         assert torch.equal(value, dict(target.named_parameters())[name].cpu())
 
 
+def test_regular_adapter_can_seed_hybrid_admission_calibration(tmp_path):
+    source = _Model()
+    patch_hf_model(source, window_size=4, num_codes=4, use_triton=False)
+    path = tmp_path / "regular_adapter.pt"
+    torch.save({"state_dict": retrofit_adapter_state(source)}, path)
+
+    target = _Model()
+    patch_hf_model_hybrid(
+        target,
+        window_size=4,
+        num_codes=4,
+        use_triton=False,
+        hybrid_kwargs={"exact_num_sets": 4, "exact_ways": 2},
+    )
+    _load_initial_adapter(target, path)
+    source_state = retrofit_adapter_state(source)
+    target_state = dict(target.named_parameters())
+    for name, value in source_state.items():
+        torch.testing.assert_close(target_state[name].cpu(), value)
+
+
 def test_patch_hf_rejects_grouped_query_attention():
     with pytest.raises(ValueError, match="GQA/MQA"):
         patch_hf_model(_Model(kv_heads=2), use_triton=False)
@@ -188,12 +230,35 @@ def test_patch_hf_rejects_grouped_query_attention():
 
 def test_patch_hf_gqa_repeat_policy_and_idempotence():
     model = _Model(kv_heads=2)
-    # The test fixture uses equal-width projections, but the explicit policy
-    # still permits a model whose config advertises grouped heads.
     replaced = patch_hf_model(model, use_triton=False, kv_head_policy="repeat")
     assert replaced == ["attn"]
     assert patch_hf_model(model, use_triton=False, kv_head_policy="repeat") == []
     assert reset_hf_qcc_cache(model) == 1
+
+
+def test_gqa_projection_fuses_raw_qkv_before_repeat():
+    model = _Model(kv_heads=2)
+    patch_hf_model(model, use_triton=False, kv_head_policy="repeat")
+    hidden = torch.randn(1, 3, 16)
+    q, k, v, gate = model.attn.qcc._project_qkv_gate(hidden)
+    base = model.attn.base_attention
+    expected_q = base.q_proj(hidden)
+    expected_k = base.k_proj(hidden).view(1, 3, 2, 4).repeat_interleave(2, dim=-2).reshape(1, 3, 16)
+    expected_v = base.v_proj(hidden).view(1, 3, 2, 4).repeat_interleave(2, dim=-2).reshape(1, 3, 16)
+    assert q.shape == k.shape == v.shape == (1, 3, 16)
+    torch.testing.assert_close(q, expected_q)
+    torch.testing.assert_close(k, expected_k)
+    torch.testing.assert_close(v, expected_v)
+    assert gate.shape == (1, 3, 4)
+
+
+def test_fused_projection_casts_fp32_adapter_gate_to_backbone_dtype():
+    model = _Model()
+    patch_hf_model(model, window_size=4, num_codes=4, use_triton=False)
+    model.attn.qcc.gate.double()
+    hidden = torch.randn(1, 3, 16)
+    q, k, v, gate = model.attn.qcc._project_qkv_gate(hidden)
+    assert q.dtype == k.dtype == v.dtype == gate.dtype == hidden.dtype
 
 
 def test_fidelity_gate_and_adapter_manifest(tmp_path):

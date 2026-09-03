@@ -1097,6 +1097,129 @@ try:  # pragma: no cover - exercised only on a Triton-enabled GPU runner
             + offs_d * stride_od
         )
         tl.store(output_ptr + output_offsets, output, mask=mask_d)
+
+    @triton.jit
+    def _qcc_exact_read_kernel(
+        output_ptr,
+        confidence_ptr,
+        query_ptr,
+        probe_ptr,
+        key_ptr,
+        value_ptr,
+        score_ptr,
+        num_heads,
+        query_length,
+        probe_sets,
+        ways,
+        stride_ob,
+        stride_oh,
+        stride_ot,
+        stride_od,
+        stride_qb,
+        stride_qh,
+        stride_qt,
+        stride_qd,
+        stride_pb,
+        stride_ph,
+        stride_pt,
+        stride_pp,
+        stride_kb,
+        stride_kh,
+        stride_km,
+        stride_kw,
+        stride_kd,
+        stride_vb,
+        stride_vh,
+        stride_vm,
+        stride_vw,
+        stride_vd,
+        stride_sb,
+        stride_sh,
+        stride_sm,
+        stride_sw,
+        BLOCK_D: tl.constexpr,
+        PROBE_SETS: tl.constexpr,
+        WAYS: tl.constexpr,
+        HEAD_DIM: tl.constexpr,
+    ):
+        """Read the routed exact bank without a Python/tensor launch per head."""
+
+        pid = tl.program_id(0)
+        tokens_per_batch = num_heads * query_length
+        batch = pid // tokens_per_batch
+        rem = pid % tokens_per_batch
+        head = rem // query_length
+        time = rem % query_length
+        offs_d = tl.arange(0, BLOCK_D)
+        mask_d = offs_d < HEAD_DIM
+        query = tl.load(
+            query_ptr
+            + batch * stride_qb
+            + head * stride_qh
+            + time * stride_qt
+            + offs_d * stride_qd,
+            mask=mask_d,
+            other=0.0,
+        ).to(tl.float32)
+        query_norm = tl.sqrt(tl.sum(query * query, axis=0) + 1.0e-6)
+        query = query / query_norm
+        best_similarity = tl.full((), -1.0e9, tl.float32)
+        best_value = tl.zeros((BLOCK_D,), tl.float32)
+        found = tl.full((), 0, tl.int32)
+        for probe in range(PROBE_SETS):
+            set_index = tl.load(
+                probe_ptr
+                + batch * stride_pb
+                + head * stride_ph
+                + time * stride_pt
+                + probe * stride_pp
+            ).to(tl.int32)
+            for way in range(WAYS):
+                score = tl.load(
+                    score_ptr
+                    + batch * stride_sb
+                    + head * stride_sh
+                    + set_index * stride_sm
+                    + way * stride_sw
+                ).to(tl.float32)
+                key = tl.load(
+                    key_ptr
+                    + batch * stride_kb
+                    + head * stride_kh
+                    + set_index * stride_km
+                    + way * stride_kw
+                    + offs_d * stride_kd,
+                    mask=mask_d,
+                    other=0.0,
+                ).to(tl.float32)
+                key_norm = tl.sqrt(tl.sum(key * key, axis=0) + 1.0e-6)
+                similarity = tl.sum(query * (key / key_norm), axis=0)
+                valid = score > -1.0e30
+                take = valid & (similarity > best_similarity)
+                value = tl.load(
+                    value_ptr
+                    + batch * stride_vb
+                    + head * stride_vh
+                    + set_index * stride_vm
+                    + way * stride_vw
+                    + offs_d * stride_vd,
+                    mask=mask_d,
+                    other=0.0,
+                ).to(tl.float32)
+                best_value = tl.where(take, value, best_value)
+                best_similarity = tl.where(take, similarity, best_similarity)
+                found = tl.where(take, 1, found)
+        output_offsets = (
+            batch * stride_ob
+            + head * stride_oh
+            + time * stride_ot
+            + offs_d * stride_od
+        )
+        tl.store(output_ptr + output_offsets, best_value, mask=mask_d)
+        tl.store(
+            confidence_ptr + batch * query_length * num_heads + head * query_length + time,
+            tl.where(found > 0, best_similarity, -1.0),
+        )
 except ImportError:  # pragma: no cover - normal CPU installation
     TRITON_AVAILABLE = False
 
@@ -1130,6 +1253,68 @@ def triton_local_decode_attention(
         BLOCK_D=block_dim, BLOCK_W=block_window, HEAD_DIM=dim,
     )
     return output
+
+
+def triton_exact_read_chunk(
+    query: torch.Tensor,
+    probe: torch.Tensor,
+    keys: torch.Tensor,
+    values: torch.Tensor,
+    scores: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Read a routed exact-bank chunk in one Triton program per query/head."""
+
+    if not TRITON_AVAILABLE or not query.is_cuda:
+        raise RuntimeError("Triton CUDA runtime is unavailable")
+    if query.ndim != 4 or probe.ndim != 4:
+        raise ValueError("query and probe must be rank-4 tensors")
+    if keys.ndim != 5 or values.shape != keys.shape or scores.ndim != 4:
+        raise ValueError("exact bank tensors have invalid ranks")
+    batch, heads, tokens, dim = query.shape
+    if probe.shape[:3] != (batch, heads, tokens):
+        raise ValueError("probe shape does not match query")
+    num_sets, ways = keys.shape[2:4]
+    if keys.shape[:2] != (batch, heads) or keys.shape[-1] != dim:
+        raise ValueError("exact key shape does not match query")
+    if scores.shape != (batch, heads, num_sets, ways):
+        raise ValueError("exact score shape does not match keys")
+    probe_count = probe.shape[-1]
+    if probe_count <= 0 or probe_count > num_sets:
+        raise ValueError("invalid exact probe count")
+    query = query.contiguous()
+    probe = probe.to(dtype=torch.int32).contiguous()
+    keys = keys.contiguous()
+    values = values.contiguous()
+    scores = scores.contiguous()
+    output = torch.empty_like(query)
+    confidence = torch.empty(
+        (batch, heads, tokens), device=query.device, dtype=torch.float32
+    )
+    block_dim = 1 << max(4, (dim - 1).bit_length())
+    _qcc_exact_read_kernel[(batch * heads * tokens,)](
+        output,
+        confidence,
+        query,
+        probe,
+        keys,
+        values,
+        scores,
+        heads,
+        tokens,
+        probe_count,
+        ways,
+        *output.stride(),
+        *query.stride(),
+        *probe.stride(),
+        *keys.stride(),
+        *values.stride(),
+        *scores.stride(),
+        BLOCK_D=block_dim,
+        PROBE_SETS=probe_count,
+        WAYS=ways,
+        HEAD_DIM=dim,
+    )
+    return output, confidence
 
 
 def triton_local_chunk_attention(

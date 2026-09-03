@@ -99,7 +99,7 @@ class HybridQCCArchive(QCCArchive):
         prefix_landmark: bool = False,
         prefix_pair_landmark: bool = False,
         landmark_temperature: float = 1.0,
-        exact_num_sets: int = 32,
+        exact_num_sets: int = 128,
         exact_ways: int = 4,
         exact_probe_sets: int | None = None,
         admission_threshold: float = 0.0,
@@ -140,7 +140,7 @@ class HybridQCCArchive(QCCArchive):
             exact_confidence_temperature
         ):
             raise ValueError("exact_confidence_temperature must be positive and finite")
-        probes = exact_num_sets if exact_probe_sets is None else exact_probe_sets
+        probes = min(4, exact_num_sets) if exact_probe_sets is None else exact_probe_sets
         self.exact_bank = SetAssociativeLandmarkBank(
             num_heads=num_heads,
             head_dim=head_dim,
@@ -280,8 +280,21 @@ class HybridQCCArchive(QCCArchive):
         )
 
     @torch.no_grad()
-    def _admit_one(self, key: Tensor, value: Tensor, score: Tensor) -> None:
+    def _admit_one(
+        self,
+        key: Tensor,
+        value: Tensor,
+        score: Tensor,
+        *,
+        write_mask: Tensor | None = None,
+    ) -> None:
         mask = score >= self.admission_threshold
+        if write_mask is not None:
+            if write_mask.shape == (key.shape[0],):
+                write_mask = write_mask[:, None].expand_as(mask)
+            if write_mask.shape != mask.shape:
+                raise ValueError("write_mask must match [batch, heads]")
+            mask = mask & write_mask.to(device=mask.device, dtype=torch.bool)
         if bool(mask.any()):
             self.exact_bank.update(
                 key,
@@ -316,8 +329,6 @@ class HybridQCCArchive(QCCArchive):
         confidence = torch.full(
             query.shape[:-1], -1.0, device=query.device, dtype=torch.float32
         )
-        event_score = score.max(dim=1).values
-
         if batch != 1:
             # Calibration can use larger batches. Keep this path exact and
             # simple; serving keeps one state per logical vLLM request (B=1).
@@ -328,14 +339,20 @@ class HybridQCCArchive(QCCArchive):
                 confidence[:, :, index] = conf
             return exact, confidence
 
-        candidates = torch.nonzero(
-            event_score[0] >= self.admission_threshold, as_tuple=False
-        ).flatten()
-        if candidates.numel() > self.max_inserts_per_chunk:
-            selected_score = event_score[0, candidates]
-            keep = selected_score.topk(self.max_inserts_per_chunk).indices
-            candidates = candidates[keep]
-        candidates = candidates.sort().values
+        # Select independently per head.  A global token top-k lets one head
+        # consume the whole budget and silently drops retrieval-critical events
+        # for the other heads.  The budget is fixed per head, so total mutable
+        # state remains bounded by the bank geometry.
+        selected = torch.zeros_like(score[0], dtype=torch.bool)
+        for head in range(score.shape[1]):
+            head_score = score[0, head]
+            eligible = head_score >= self.admission_threshold
+            indices = torch.nonzero(eligible, as_tuple=False).flatten()
+            if indices.numel() > self.max_inserts_per_chunk:
+                keep = head_score[indices].topk(self.max_inserts_per_chunk).indices
+                indices = indices[keep]
+            selected[head, indices] = True
+        candidates = torch.nonzero(selected.any(dim=0), as_tuple=False).flatten()
 
         cursor = 0
         for position_tensor in candidates:
@@ -350,6 +367,7 @@ class HybridQCCArchive(QCCArchive):
                 key[:, :, position],
                 value[:, :, position],
                 score[:, :, position],
+                write_mask=selected[:, position].unsqueeze(0),
             )
             cursor = position
         if cursor < tokens:

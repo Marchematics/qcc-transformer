@@ -19,6 +19,9 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from qcc_transformer import patch_hf_model, reset_hf_qcc_cache
+from qcc_transformer.hybrid_archive import load_hybrid_retrofit_adapter
+from qcc_transformer.hf_loading import load_hf_causal_lm, model_input_device
+from qcc_transformer.production_profile import enable_qkv_only_deployment_profile
 
 
 def _records(path: Path, max_examples: int | None):
@@ -48,6 +51,8 @@ def _run_model(
     records: list[tuple[int, dict]],
     device: torch.device,
     max_new_tokens: int,
+    *,
+    qcc: bool = False,
 ) -> list[dict]:
     results: list[dict] = []
     for line_number, record in records:
@@ -57,6 +62,11 @@ def _run_model(
             "length_chars": len(record["input"]),
         }
         try:
+            # Each RULER record is an independent serving request.  The
+            # retrofit owns its history outside Transformers' cache, so the
+            # request boundary must be explicit for every record.
+            if qcc:
+                reset_hf_qcc_cache(model, batch_size=1)
             encoded = tokenizer(record["input"], return_tensors="pt", add_special_tokens=False)
             encoded = {key: value.to(device) for key, value in encoded.items()}
             result["tokens"] = int(encoded["input_ids"].shape[-1])
@@ -83,9 +93,15 @@ def main() -> None:
     parser.add_argument("--ruler-jsonl", type=Path, required=True)
     parser.add_argument("--max-examples", type=int, default=None)
     parser.add_argument("--max-new-tokens", type=int, default=32)
+    parser.add_argument("--dtype", choices=("auto", "float16", "bfloat16", "float32"), default="auto")
+    parser.add_argument("--load-in-4bit", action="store_true", help="load the real checkpoint through bitsandbytes NF4")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--window-size", type=int, default=128)
     parser.add_argument("--num-codes", type=int, default=64)
+    parser.add_argument("--adapter", type=Path, default=None)
+    parser.add_argument("--exact-num-sets", type=int, default=128)
+    parser.add_argument("--exact-ways", type=int, default=4)
+    parser.add_argument("--exact-probe-sets", type=int, default=None)
     parser.add_argument(
         "--archive-position-invariant",
         action=argparse.BooleanOptionalAction,
@@ -106,24 +122,62 @@ def main() -> None:
     except ImportError as exc:  # pragma: no cover
         raise SystemExit("install qcc-transformer[hf] to run this benchmark") from exc
     device = torch.device(args.device)
+    dtype = None if args.dtype == "auto" else {
+        "float16": torch.float16,
+        "bfloat16": torch.bfloat16,
+        "float32": torch.float32,
+    }[args.dtype]
     common = {"trust_remote_code": args.trust_remote_code}
     tokenizer = AutoTokenizer.from_pretrained(args.model, **common)
-    baseline = AutoModelForCausalLM.from_pretrained(args.model, **common).to(device).eval()
-    baseline_results = _run_model(baseline, tokenizer, records, device, args.max_new_tokens)
+    baseline = load_hf_causal_lm(
+        args.model,
+        dtype=dtype,
+        device=device,
+        trust_remote_code=args.trust_remote_code,
+        load_in_4bit=args.load_in_4bit,
+    )
+    model_device = model_input_device(baseline, device)
+    baseline_results = _run_model(
+        baseline, tokenizer, records, model_device, args.max_new_tokens, qcc=False
+    )
     del baseline
     gc.collect()
     if device.type == "cuda":
         torch.cuda.empty_cache()
-    patched = AutoModelForCausalLM.from_pretrained(args.model, **common).to(device).eval()
-    replaced = patch_hf_model(
-        patched,
-        window_size=args.window_size,
-        num_codes=args.num_codes,
-        archive_position_invariant=args.archive_position_invariant,
-        kv_head_policy=args.kv_head_policy,
+    patched = load_hf_causal_lm(
+        args.model,
+        dtype=dtype,
+        device=device,
+        trust_remote_code=args.trust_remote_code,
+        load_in_4bit=args.load_in_4bit,
     )
-    reset_hf_qcc_cache(patched, batch_size=1)
-    qcc_results = _run_model(patched, tokenizer, records, device, args.max_new_tokens)
+    patched_device = model_input_device(patched, device)
+    if args.adapter is None:
+        replaced = patch_hf_model(
+            patched,
+            window_size=args.window_size,
+            num_codes=args.num_codes,
+            archive_position_invariant=args.archive_position_invariant,
+            kv_head_policy=args.kv_head_policy,
+        )
+    else:
+        replaced = load_hybrid_retrofit_adapter(
+            patched,
+            args.adapter,
+            hybrid_kwargs={
+                "exact_num_sets": args.exact_num_sets,
+                "exact_ways": args.exact_ways,
+                "exact_probe_sets": args.exact_probe_sets,
+            },
+            window_size=args.window_size,
+            num_codes=args.num_codes,
+            archive_position_invariant=args.archive_position_invariant,
+            kv_head_policy=args.kv_head_policy,
+        )
+        enable_qkv_only_deployment_profile(patched)
+    qcc_results = _run_model(
+        patched, tokenizer, records, patched_device, args.max_new_tokens, qcc=True
+    )
     baseline_correct = sum(bool(item["correct"]) for item in baseline_results)
     qcc_correct = sum(bool(item["correct"]) for item in qcc_results)
     result = {

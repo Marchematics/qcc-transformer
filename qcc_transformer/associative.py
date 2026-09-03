@@ -108,10 +108,18 @@ class SetAssociativeLandmarkBank(nn.Module):
             self.reset_state(key.shape[0], device=key.device, dtype=key.dtype)
 
     def _set_logits(self, x: Tensor) -> Tensor:
+        # Routing must be invariant to the norm difference between a query and
+        # its matching key.  The old raw dot product made the learned set
+        # assignment depend on activation scale, which is especially unstable
+        # after RoPE and across model families.
+        normalized_x = F.normalize(x.to(self._keys.dtype), dim=-1)
+        normalized_codes = F.normalize(
+            self.set_codes.to(x.device, self._keys.dtype), dim=-1
+        )
         return torch.einsum(
             "bhd,hmd->bhm",
-            x.to(self._keys.dtype),
-            self.set_codes.to(x.device, self._keys.dtype),
+            normalized_x,
+            normalized_codes,
         ) / math.sqrt(self.head_dim)
 
     @torch.no_grad()
@@ -214,6 +222,11 @@ class SetAssociativeLandmarkBank(nn.Module):
         if query.ndim != 3 or query.shape[1:] != (self.num_heads, self.head_dim):
             raise ValueError("query must have shape [batch, heads, head_dim]")
         self._ensure_state(query)
+        if query.is_cuda and hard:
+            response, confidence = self.read_chunk(
+                query.unsqueeze(2), hard=hard
+            )
+            return response.squeeze(2), confidence.squeeze(2)
         set_logits = self._set_logits(query)
         probe = set_logits.topk(self.probe_sets, dim=-1).indices
         batch_index = torch.arange(query.shape[0], device=query.device)[:, None, None]
@@ -276,11 +289,47 @@ class SetAssociativeLandmarkBank(nn.Module):
             return query.new_empty(query.shape), query.new_empty(batch, heads, 0)
         self._ensure_state(query[:, :, 0])
 
-        codes = self.set_codes.to(query.device, self._keys.dtype)
+        # Do not materialize [batch, heads, tokens, probe, ways, dim] for an
+        # entire million-token prefill.  The exact bank is constant-size, so a
+        # bounded query tile preserves the same result while keeping temporary
+        # memory independent of the requested context length.
+        block_size = 1024
+        if tokens > block_size:
+            responses = []
+            confidences = []
+            for start in range(0, tokens, block_size):
+                response, confidence = self.read_chunk(
+                    query[:, :, start : start + block_size], hard=hard
+                )
+                responses.append(response)
+                confidences.append(confidence)
+            return torch.cat(responses, dim=2), torch.cat(confidences, dim=2)
+
+        codes = F.normalize(
+            self.set_codes.to(query.device, self._keys.dtype), dim=-1
+        )
+        normalized_query = F.normalize(query.to(self._keys.dtype), dim=-1)
         set_logits = torch.einsum(
-            "bhtd,hmd->bhtm", query.to(self._keys.dtype), codes
+            "bhtd,hmd->bhtm", normalized_query, codes
         ) / math.sqrt(self.head_dim)
         probe = set_logits.topk(self.probe_sets, dim=-1).indices
+
+        # The exact tier is on the serving critical path.  When Triton is
+        # available, keep set selection as one small tensor op and fuse the
+        # routed cosine search/value gather into one kernel launch per query.
+        if query.is_cuda and hard:
+            try:
+                from .triton_kernels import TRITON_AVAILABLE, triton_exact_read_chunk
+            except ImportError:  # pragma: no cover - optional CUDA dependency
+                TRITON_AVAILABLE = False
+            if TRITON_AVAILABLE:
+                return triton_exact_read_chunk(
+                    query,
+                    probe,
+                    self._keys,
+                    self._values,
+                    self._scores,
+                )
 
         keys_all = self._keys[:, :, None].expand(
             batch, heads, tokens, self.num_sets, self.ways, dim

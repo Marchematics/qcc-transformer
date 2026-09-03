@@ -94,6 +94,7 @@ class PackedHybridReferenceState:
                 use_triton=use_triton,
                 exact_num_sets=config.exact_num_sets,
                 exact_ways=config.exact_ways,
+                exact_probe_sets=config.exact_probe_sets,
                 admission_threshold=config.admission_threshold,
                 max_inserts_per_chunk=config.max_inserts_per_chunk,
                 exact_confidence_threshold=config.exact_confidence_threshold,
@@ -248,16 +249,30 @@ class PackedHybridReferenceState:
         key = expand_gqa(key, self.config.num_heads)
         value = expand_gqa(value, self.config.num_heads)
         old_k, old_v, old_start, old_length = self._ordered_ring(page, query.dtype)
-        local = self._local_attention(
-            query, old_k, old_v, key.to(query.dtype), value.to(query.dtype), self.config.window_size
-        )
+        key = key.to(query.dtype)
+        value = value.to(query.dtype)
+        local = None
+        if self.archive.use_triton and query.is_cuda:
+            try:
+                from .triton_kernels import TRITON_AVAILABLE, triton_local_chunk_attention
+            except ImportError:  # pragma: no cover - optional CUDA dependency
+                TRITON_AVAILABLE = False
+            if TRITON_AVAILABLE:
+                local = triton_local_chunk_attention(
+                    query, torch.cat((old_k, key), dim=2), torch.cat((old_v, value), dim=2),
+                    old_length=old_length, window_size=self.config.window_size,
+                )
+        if local is None:
+            local = self._local_attention(
+                query, old_k, old_v, key, value, self.config.window_size
+            )
 
         archive_out = torch.zeros_like(local)
         event_start = max(0, self.config.window_size - old_length)
         event_count = query.shape[2] - event_start
         if event_count > 0:
-            combined_k = torch.cat((old_k, key.to(query.dtype)), dim=2)
-            combined_v = torch.cat((old_v, value.to(query.dtype)), dim=2)
+            combined_k = torch.cat((old_k, key), dim=2)
+            combined_v = torch.cat((old_v, value), dim=2)
             bound = self._bind_archive_page(page)
             self.archive.to(device=query.device)
             self.archive.update_read_chunk(
@@ -275,7 +290,7 @@ class PackedHybridReferenceState:
             (1.0 - self.config.archive_mix) * local + self.config.archive_mix * archive_out,
             local,
         )
-        self._update_ring(page, key.to(query.dtype), value.to(query.dtype), old_start, old_length)
+        self._update_ring(page, key, value, old_start, old_length)
         return result
 
 

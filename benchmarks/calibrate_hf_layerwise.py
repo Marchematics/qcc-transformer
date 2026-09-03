@@ -20,6 +20,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from qcc_transformer import patch_hf_model, save_retrofit_adapter
+from qcc_transformer.hf_loading import load_hf_causal_lm, model_input_device
 
 
 def _chunked_mse(student: torch.Tensor, teacher_cpu: torch.Tensor, *, chunk_size: int = 8192) -> torch.Tensor:
@@ -161,6 +162,8 @@ def main() -> None:
         help="number of sequential training chunks to distill (cycles across chunks each step)",
     )
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument("--dtype", choices=("auto", "float16", "bfloat16", "float32"), default="auto")
+    parser.add_argument("--load-in-4bit", action="store_true", help="load the real checkpoint through bitsandbytes NF4")
     parser.add_argument("--trust-remote-code", action="store_true")
     parser.add_argument("--kv-head-policy", choices=("reject", "repeat"), default="repeat")
     parser.add_argument(
@@ -209,7 +212,13 @@ def main() -> None:
     except ImportError as exc:
         raise SystemExit("install qcc-transformer[hf]") from exc
 
-    device = torch.device(args.device)
+    requested_device = torch.device(args.device)
+    dtype = None if args.dtype == "auto" else {
+        "float16": torch.float16,
+        "bfloat16": torch.bfloat16,
+        "float32": torch.float32,
+    }[args.dtype]
+    device = requested_device
     common = {"trust_remote_code": args.trust_remote_code}
     tokenizer = AutoTokenizer.from_pretrained(args.model, **common)
 
@@ -245,7 +254,17 @@ def main() -> None:
 
     # Capture teacher logits and release immediately
     print("Loading teacher model...", file=sys.stderr)
-    baseline = AutoModelForCausalLM.from_pretrained(args.model, **common).to(device).eval()
+    baseline = load_hf_causal_lm(
+        args.model,
+        dtype=dtype,
+        device=requested_device,
+        trust_remote_code=args.trust_remote_code,
+        load_in_4bit=args.load_in_4bit,
+    )
+    device = model_input_device(baseline, requested_device)
+    train_batches = [{key: value.to(device) for key, value in batch.items()} for batch in train_batches]
+    if held_out_encoded is not None:
+        held_out_encoded = {key: value.to(device) for key, value in held_out_encoded.items()}
 
     with torch.no_grad():
         train_teachers = [baseline(**batch, use_cache=False).logits.float().cpu() for batch in train_batches]
@@ -258,7 +277,17 @@ def main() -> None:
         torch.cuda.empty_cache()
 
     print("Loading student model...", file=sys.stderr)
-    patched = AutoModelForCausalLM.from_pretrained(args.model, **common).to(device)
+    patched = load_hf_causal_lm(
+        args.model,
+        dtype=dtype,
+        device=requested_device,
+        trust_remote_code=args.trust_remote_code,
+        load_in_4bit=args.load_in_4bit,
+    )
+    device = model_input_device(patched, requested_device)
+    train_batches = [{key: value.to(device) for key, value in batch.items()} for batch in train_batches]
+    if held_out_encoded is not None:
+        held_out_encoded = {key: value.to(device) for key, value in held_out_encoded.items()}
     replaced = patch_hf_model(
         patched,
         window_size=args.window_size,
@@ -272,6 +301,14 @@ def main() -> None:
         kv_head_policy=args.kv_head_policy,
         gate_bias_init=args.gate_bias_init,
     )
+    # Keep trainable adapter gates in fp32 when the frozen backbone is loaded
+    # in fp16/bf16.  The attention projection path casts the gate back to the
+    # backbone dtype, preserving inference behavior while avoiding half-
+    # precision AdamW updates during calibration.
+    for module in patched.modules():
+        qcc = getattr(module, "qcc", None)
+        if qcc is not None:
+            qcc.gate.float()
 
     if args.gradient_checkpointing and hasattr(patched, "gradient_checkpointing_enable"):
         patched.config.use_cache = False
@@ -335,6 +372,10 @@ def main() -> None:
             train_teachers[batch_index],
             cosine_weight=args.cosine_weight,
         )
+        if not torch.isfinite(loss):
+            raise FloatingPointError(
+                "calibration diverged; lower --lr or reduce --max-tokens"
+            )
         loss.backward()
         torch.nn.utils.clip_grad_norm_(trainable, 1.0)
         optimizer.step()

@@ -19,6 +19,9 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from qcc_transformer import patch_hf_model, reset_hf_qcc_cache
+from qcc_transformer.hybrid_archive import load_hybrid_retrofit_adapter
+from qcc_transformer.hf_loading import load_hf_causal_lm, model_input_device
+from qcc_transformer.production_profile import enable_qkv_only_deployment_profile
 
 
 def _sync(device: torch.device) -> None:
@@ -96,6 +99,13 @@ def main() -> None:
     parser.add_argument("--chunk-size", type=int, default=512)
     parser.add_argument("--window-size", type=int, default=128)
     parser.add_argument("--num-codes", type=int, default=16)
+    parser.add_argument("--adapter", type=Path, default=None)
+    parser.add_argument("--exact-num-sets", type=int, default=128)
+    parser.add_argument("--exact-ways", type=int, default=4)
+    parser.add_argument("--exact-probe-sets", type=int, default=None)
+    parser.add_argument("--archive-mix", type=float, default=0.125)
+    parser.add_argument("--dtype", choices=("float16", "bfloat16", "float32"), default="bfloat16")
+    parser.add_argument("--load-in-4bit", action="store_true", help="load the real checkpoint through bitsandbytes NF4")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--kv-head-policy", choices=("reject", "repeat"), default="repeat")
     parser.add_argument("--trust-remote-code", action="store_true")
@@ -106,6 +116,7 @@ def main() -> None:
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     device = torch.device(args.device)
+    dtype = {"float16": torch.float16, "bfloat16": torch.bfloat16, "float32": torch.float32}[args.dtype]
     common = {"trust_remote_code": args.trust_remote_code}
     tokenizer = AutoTokenizer.from_pretrained(args.model, **common)
     stream = _token_stream(tokenizer, args.total_tokens)
@@ -114,22 +125,52 @@ def main() -> None:
     # shared-prefix workload when the goal is independent-request concurrency.
     tokens = torch.stack([stream.roll(shifts=index) for index in range(args.batch_size)])
 
-    baseline = AutoModelForCausalLM.from_pretrained(args.model, **common).to(device).eval()
-    baseline_result = _run_stream(baseline, tokens, device, args.chunk_size)
+    baseline = load_hf_causal_lm(
+        args.model,
+        dtype=dtype,
+        device=device,
+        trust_remote_code=args.trust_remote_code,
+        load_in_4bit=args.load_in_4bit,
+    )
+    baseline_device = model_input_device(baseline, device)
+    baseline_result = _run_stream(baseline, tokens, baseline_device, args.chunk_size)
     del baseline
     gc.collect()
     if device.type == "cuda":
         torch.cuda.empty_cache()
 
-    patched = AutoModelForCausalLM.from_pretrained(args.model, **common).to(device).eval()
-    replaced = patch_hf_model(
-        patched,
-        window_size=args.window_size,
-        num_codes=args.num_codes,
-        kv_head_policy=args.kv_head_policy,
+    patched = load_hf_causal_lm(
+        args.model,
+        dtype=dtype,
+        device=device,
+        trust_remote_code=args.trust_remote_code,
+        load_in_4bit=args.load_in_4bit,
     )
+    patched_device = model_input_device(patched, device)
+    if args.adapter is None:
+        replaced = patch_hf_model(
+            patched,
+            window_size=args.window_size,
+            num_codes=args.num_codes,
+            kv_head_policy=args.kv_head_policy,
+        )
+    else:
+        replaced = load_hybrid_retrofit_adapter(
+            patched,
+            args.adapter,
+            hybrid_kwargs={
+                "exact_num_sets": args.exact_num_sets,
+                "exact_ways": args.exact_ways,
+                "exact_probe_sets": args.exact_probe_sets,
+            },
+            window_size=args.window_size,
+            num_codes=args.num_codes,
+            archive_position_invariant=True,
+            kv_head_policy=args.kv_head_policy,
+        )
+        enable_qkv_only_deployment_profile(patched, archive_mix=args.archive_mix)
     reset_hf_qcc_cache(patched, batch_size=args.batch_size)
-    qcc_result = _run_stream(patched, tokens, device, args.chunk_size)
+    qcc_result = _run_stream(patched, tokens, patched_device, args.chunk_size)
     result = {
         "model": args.model,
         "model_id": str(args.model),
@@ -138,6 +179,10 @@ def main() -> None:
         "chunk_size": args.chunk_size,
         "window_size": args.window_size,
         "num_codes": args.num_codes,
+        "adapter": str(args.adapter) if args.adapter is not None else None,
+        "exact_num_sets": args.exact_num_sets if args.adapter is not None else None,
+        "exact_ways": args.exact_ways if args.adapter is not None else None,
+        "exact_probe_sets": args.exact_probe_sets if args.adapter is not None else None,
         "patched_layers": replaced,
         "baseline_full_kv": baseline_result,
         "qcc_retrofit": qcc_result,

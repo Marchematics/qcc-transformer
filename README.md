@@ -20,6 +20,24 @@ source .venv/bin/activate
 pip install -e '.[dev]'
 ```
 
+For a real 1--7B checkpoint on a smaller CUDA card, the optional bitsandbytes
+loader keeps the pretrained weights quantized while leaving the QCC retrofit
+and cache state unchanged:
+
+```bash
+pip install -e '.[hf-quant]'
+python benchmarks/benchmark_hf_retrofit.py \
+  --model Qwen/Qwen2.5-7B-Instruct-1M --device cuda \
+  --dtype float16 --load-in-4bit --kv-head-policy repeat \
+  --prompt-file heldout.txt --output artifacts/hf/qwen_retrofit.json
+```
+
+The same `--load-in-4bit` option is available on the real-HF retrieval,
+RULER, LongBench, PG-19, latency, memory, concurrency, and calibration
+entry points.  Quantizing weights does not make a million-token Full-KV
+control fit on a small card: use hardware that can hold both matched runs
+before interpreting a 1M paired result.
+
 ### Real-model retrofit (experimental)
 
 Load a compatible Hugging Face decoder first, then opt in to bounded QCC
@@ -113,6 +131,25 @@ directional logit loss into the historical MSE objective, which is useful when
 top-1/ranking fidelity lags behind the training MSE.  Set the weight to `0` to
 reproduce prior runs exactly.
 
+For the hybrid exact tier, first calibrate the regular QCC adapter, then pass it
+as `--init-adapter` to `benchmarks/calibrate_hf_admission.py`.  That second
+calibration labels admissions from sampled future Full-KV attention and stores
+the recurrent archive, exact bank, predictor, and mix parameters together:
+
+```bash
+python benchmarks/calibrate_hf_admission.py \
+  --model <model-id-or-local-snapshot> \
+  --train-file train.txt --held-out-file heldout.txt \
+  --init-adapter artifacts/hf/qcc_adapter.pt \
+  --output artifacts/hf/qcc_hybrid_adapter.pt \
+  --exact-num-sets 128 --exact-ways 4 --kv-head-policy repeat
+```
+
+Use the resulting file with `--adapter` on the real-HF retrieval, latency,
+memory, concurrency, RULER, LongBench, or PG-19 runners.  `--exact-probe-sets`
+can increase routing coverage for a quality run; keep the setting identical
+between matched QCC runs and measure its serving cost separately.
+
 For a parameter-free safety variant, `--archive-norm-gating` attenuates the
 archive contribution when its response norm disagrees with the exact local
 window. It preserves O(1) state and is included in the final 10-GPU sweep as a
@@ -126,9 +163,11 @@ python benchmarks/benchmark_hf_latency.py \
   --window-size 128 --num-codes 64 --kv-head-policy repeat
 ```
 
-The script resets QCC state at the request boundary and reports matched TTFT,
-TPOT, and speedup.  It does not claim that a short prompt predicts 128K/1M
-behavior; use the long-context harness and task datasets for those gates.
+The script resets QCC state at each request boundary and reports matched TTFT,
+TPOT, p50/p95/p99 tails, and speedup.  Use `--repeats 5 --warmup 1` for a
+small serving-tail sample.  It does not claim that a short prompt predicts
+128K/1M behavior; use the long-context harness and task datasets for those
+measurements.
 
 To run an official NVIDIA RULER split, first prepare it with RULER's own
 `scripts/data/prepare.py`, convert nothing, and invoke:

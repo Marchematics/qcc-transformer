@@ -19,6 +19,7 @@ import torch.nn.functional as F
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from qcc_transformer.hybrid_archive import load_hybrid_retrofit_adapter
+from qcc_transformer.hf_loading import load_hf_causal_lm, model_input_device
 from qcc_transformer.production_profile import enable_qkv_only_deployment_profile
 from qcc_transformer.retrofit import reset_hf_qcc_cache
 
@@ -99,12 +100,14 @@ def main() -> None:
     parser.add_argument("--adapter", type=Path)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--dtype", choices=("float16", "bfloat16", "float32"), default="bfloat16")
+    parser.add_argument("--load-in-4bit", action="store_true", help="load the real checkpoint through bitsandbytes NF4")
     parser.add_argument("--chunk-tokens", type=int, default=2048)
     parser.add_argument("--limit", type=int)
     parser.add_argument("--window-size", type=int, default=128)
     parser.add_argument("--num-codes", type=int, default=64)
-    parser.add_argument("--exact-num-sets", type=int, default=32)
+    parser.add_argument("--exact-num-sets", type=int, default=128)
     parser.add_argument("--exact-ways", type=int, default=4)
+    parser.add_argument("--exact-probe-sets", type=int, default=None)
     parser.add_argument("--archive-mix", type=float, default=0.125)
     parser.add_argument("--kv-head-policy", choices=("reject", "repeat"), default="repeat")
     parser.add_argument("--trust-remote-code", action="store_true")
@@ -123,13 +126,25 @@ def main() -> None:
     dtype = {"float16": torch.float16, "bfloat16": torch.bfloat16, "float32": torch.float32}[args.dtype]
     common = {"trust_remote_code": args.trust_remote_code}
     tokenizer = AutoTokenizer.from_pretrained(args.model, **common)
-    model = AutoModelForCausalLM.from_pretrained(args.model, torch_dtype=dtype, **common).to(args.device).eval()
+    requested_device = torch.device(args.device)
+    model = load_hf_causal_lm(
+        args.model,
+        dtype=dtype,
+        device=requested_device,
+        trust_remote_code=args.trust_remote_code,
+        load_in_4bit=args.load_in_4bit,
+    )
+    model_device = model_input_device(model, requested_device)
     patched_layers: list[str] = []
     if args.mode == "qcc":
         patched_layers = load_hybrid_retrofit_adapter(
             model,
             args.adapter,
-            hybrid_kwargs={"exact_num_sets": args.exact_num_sets, "exact_ways": args.exact_ways},
+            hybrid_kwargs={
+                "exact_num_sets": args.exact_num_sets,
+                "exact_ways": args.exact_ways,
+                "exact_probe_sets": args.exact_probe_sets,
+            },
             window_size=args.window_size,
             num_codes=args.num_codes,
             archive_position_invariant=True,
@@ -142,7 +157,7 @@ def main() -> None:
     total_predicted = 0
     per_document: list[dict[str, Any]] = []
     for index, text in enumerate(documents):
-        ids = tokenizer(text, add_special_tokens=False, return_tensors="pt")["input_ids"].to(args.device)
+        ids = tokenizer(text, add_special_tokens=False, return_tensors="pt")["input_ids"].to(model_device)
         try:
             nll, predicted = document_nll(
                 model, ids, chunk_tokens=args.chunk_tokens, qcc=args.mode == "qcc"
