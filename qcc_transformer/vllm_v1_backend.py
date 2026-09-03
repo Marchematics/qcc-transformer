@@ -178,6 +178,45 @@ class QCCV1AttentionImpl(AttentionImpl[QCCV1AttentionMetadata]):
             raise RuntimeError("QCC packed state page must be contiguous under selected layout")
         return page
 
+    def _forward_decode_batch(
+        self,
+        kv_cache: torch.Tensor,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        metadata: QCCV1AttentionMetadata,
+        output: torch.Tensor,
+    ) -> torch.Tensor:
+        """Run one-token scheduler rows through the batched packed-page path.
+
+        vLLM's decode scheduler already lays out one token per active request.
+        Gathering those pages once lets the runtime execute local attention and
+        the archive over a request batch.  The page remains the ownership unit;
+        the gathered tensor is written back before returning to the scheduler.
+        """
+
+        num_requests = int(metadata.query_start_loc_cpu.shape[0] - 1)
+        starts_cpu = metadata.query_start_loc_cpu[:-1].to(dtype=torch.long)
+        token_indices = starts_cpu.to(device=query.device)
+        physical = metadata.block_table[:num_requests, 0].to(
+            device=kv_cache.device, dtype=torch.long
+        )
+        gathered = kv_cache.index_select(0, physical).contiguous()
+        pages = gathered.view(num_requests, -1)
+        q = query.index_select(0, token_indices)
+        k = key.index_select(0, token_indices)
+        v = value.index_select(0, token_indices)
+        logical = metadata.logical_positions.index_select(0, token_indices)
+        result = self.runtime.forward_decode_batch(pages, q, k, v, logical)
+        kv_cache.index_copy_(0, physical, pages.view_as(gathered))
+        if output.ndim == 3:
+            output.index_copy_(0, token_indices, result)
+        elif output.ndim == 2:
+            output.index_copy_(0, token_indices, result.reshape(num_requests, -1))
+        else:
+            raise ValueError("unexpected vLLM attention output rank")
+        return output
+
     def forward(
         self,
         layer: torch.nn.Module,
@@ -204,6 +243,17 @@ class QCCV1AttentionImpl(AttentionImpl[QCCV1AttentionMetadata]):
         value = value[:num_tokens]
 
         num_requests = attn_metadata.query_start_loc_cpu.shape[0] - 1
+        query_start = attn_metadata.query_start_loc_cpu[:-1]
+        query_end = attn_metadata.query_start_loc_cpu[1:]
+        if num_requests > 1 and bool(torch.all((query_end - query_start) == 1).item()):
+            return self._forward_decode_batch(
+                kv_cache,
+                query,
+                key,
+                value,
+                attn_metadata,
+                output,
+            )
         for request_index in range(num_requests):
             start = int(attn_metadata.query_start_loc_cpu[request_index].item())
             end = int(attn_metadata.query_start_loc_cpu[request_index + 1].item())

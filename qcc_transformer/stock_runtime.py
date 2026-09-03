@@ -139,6 +139,248 @@ class PackedHybridReferenceState:
         # counters = ring_start, ring_length, seen_tokens, exact_bank_step
         typed_segment_view(page, self.layout, "counters").zero_()
 
+    @staticmethod
+    def _segment_dtype(name: str) -> torch.dtype:
+        return {
+            "uint8": torch.uint8,
+            "uint16": torch.uint16,
+            "float32": torch.float32,
+            "int64": torch.int64,
+        }[name]
+
+    def _batched_segment_view(
+        self,
+        pages: Tensor,
+        name: str,
+        *,
+        dtype: torch.dtype | None = None,
+    ) -> Tensor:
+        """Return ``[batch, *segment.shape]`` from contiguous packed pages.
+
+        vLLM presents a circular-buffer allocation as a page per request.  An
+        indexed gather of those pages is contiguous but no longer compatible
+        with :func:`typed_segment_view`, whose offsets describe one page.  This
+        helper keeps the same byte layout while adding the batch dimension, so
+        a decode batch can be processed by one archive call and one page write
+        back instead of one Python call per request.
+        """
+
+        if pages.ndim != 2 or not pages.is_contiguous():
+            raise ValueError("batched packed pages must be contiguous [batch, bytes]")
+        segment = self.layout.segment(name)
+        raw = pages.view(torch.uint8).reshape(pages.shape[0], -1)
+        if raw.shape[1] < self.layout.total_bytes:
+            raise ValueError("batched packed pages are smaller than the configured layout")
+        source_dtype = self._segment_dtype(segment.dtype)
+        target_dtype = source_dtype if dtype is None else dtype
+        if torch.empty((), dtype=target_dtype).element_size() != torch.empty(
+            (), dtype=source_dtype
+        ).element_size():
+            raise ValueError(f"segment {name} cannot be viewed as {target_dtype}")
+        data = raw.narrow(1, segment.offset, segment.size_bytes)
+        return data.view(target_dtype).reshape(pages.shape[0], *segment.shape)
+
+    def _batched_local_view(
+        self, pages: Tensor, name: str, dtype: torch.dtype
+    ) -> Tensor:
+        if torch.empty((), dtype=dtype).element_size() != self.config.local_element_bytes:
+            raise ValueError(
+                f"local cache expects {self.config.local_element_bytes}-byte activations, got {dtype}"
+            )
+        return self._batched_segment_view(pages, name, dtype=dtype)
+
+    def _reset_batched_pages(self, pages: Tensor, reset_mask: Tensor) -> None:
+        """Reset only rows assigned to a new logical request."""
+
+        if reset_mask.ndim != 1 or reset_mask.shape[0] != pages.shape[0]:
+            raise ValueError("reset_mask must have one entry per packed page")
+        if not bool(reset_mask.any()):
+            return
+        raw = pages.view(torch.uint8).reshape(pages.shape[0], -1)
+        raw[reset_mask].zero_()
+        self._batched_segment_view(pages, "exact_scores")[reset_mask].fill_(-torch.inf)
+        self._batched_segment_view(pages, "counters")[reset_mask].zero_()
+
+    def _bind_archive_pages(self, pages: Tensor) -> tuple[Tensor, ...]:
+        """Bind a gathered page batch to the archive's mutable tensors."""
+
+        numerator = self._batched_segment_view(pages, "recurrent_numerator")
+        denominator = self._batched_segment_view(pages, "recurrent_denominator")
+        last_step = self._batched_segment_view(pages, "recurrent_last_step")
+        exact_keys = self._batched_segment_view(pages, "exact_keys")
+        exact_values = self._batched_segment_view(pages, "exact_values")
+        exact_scores = self._batched_segment_view(pages, "exact_scores")
+        exact_ages = self._batched_segment_view(pages, "exact_ages")
+        self.archive._numerator = numerator
+        self.archive._denominator = denominator
+        self.archive._last_step = last_step
+        self.archive._step = 0
+        self.archive.exact_bank._keys = exact_keys
+        self.archive.exact_bank._values = exact_values
+        self.archive.exact_bank._scores = exact_scores
+        self.archive.exact_bank._ages = exact_ages
+        self.archive.exact_bank._step = 0
+        return (
+            numerator,
+            denominator,
+            last_step,
+            exact_keys,
+            exact_values,
+            exact_scores,
+            exact_ages,
+        )
+
+    @torch.no_grad()
+    def forward_decode_batch(
+        self,
+        pages: Tensor,
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        logical_positions: Tensor,
+    ) -> Tensor:
+        """Process one token for many scheduler-owned pages in one call.
+
+        ``pages`` is a contiguous ``[batch, bytes]`` gather of the physical
+        CircularBufferSpec pages.  Query is ``[batch, query_heads, dim]`` and
+        K/V may use fewer grouped-query heads.  The operation keeps all
+        request-local counters and state in their corresponding page; only the
+        temporary gathered tensor is batched.
+
+        This is the serving fast path for decode.  Prefill continues to use the
+        reference block method because requests can have different prompt
+        lengths and eviction boundaries.
+        """
+
+        if pages.ndim != 2 or not pages.is_contiguous():
+            raise ValueError("pages must be contiguous [batch, bytes]")
+        if query.ndim != 3 or key.ndim != 3 or value.shape != key.shape:
+            raise ValueError("query/key/value must be [batch, heads, dim]")
+        batch = pages.shape[0]
+        if query.shape[0] != batch or key.shape[0] != batch:
+            raise ValueError("page and Q/K/V batch sizes must match")
+        if query.shape[1:] != (self.config.num_heads, self.config.head_dim):
+            raise ValueError("query shape does not match packed config")
+        if logical_positions.ndim != 1 or logical_positions.shape[0] != batch:
+            raise ValueError("logical_positions must have one entry per page")
+        if logical_positions.device != pages.device:
+            logical_positions = logical_positions.to(pages.device)
+
+        counters = self._batched_segment_view(pages, "counters")
+        reset_mask = logical_positions == 0
+        self._reset_batched_pages(pages, reset_mask)
+        counters = self._batched_segment_view(pages, "counters")
+        seen = counters[:, 2]
+        if bool(torch.any(seen != logical_positions).item()):
+            raise RuntimeError(
+                "QCC packed-state discontinuity: scheduler must preserve each request page"
+            )
+
+        query = query.to(device=pages.device)
+        key = key.to(device=pages.device)
+        value = value.to(device=pages.device)
+        key = expand_gqa(key.unsqueeze(2), self.config.num_heads).squeeze(2)
+        value = expand_gqa(value.unsqueeze(2), self.config.num_heads).squeeze(2)
+        local_keys = self._batched_local_view(pages, "local_keys", query.dtype)
+        local_values = self._batched_local_view(pages, "local_values", query.dtype)
+        start = counters[:, 0].to(torch.long)
+        length = counters[:, 1].to(torch.long)
+        if bool(torch.any(start < 0).item()) or bool(
+            torch.any(start >= self.config.window_size).item()
+        ):
+            raise RuntimeError("corrupt packed local-ring start counters")
+        if bool(torch.any(length < 0).item()) or bool(
+            torch.any(length > self.config.window_size).item()
+        ):
+            raise RuntimeError("corrupt packed local-ring length counters")
+
+        ring_positions = (
+            start[:, None] + torch.arange(self.config.window_size, device=pages.device)
+        ) % self.config.window_size
+        gather_index = ring_positions[:, None, :, None].expand(
+            batch, self.config.num_heads, self.config.window_size, self.config.head_dim
+        )
+        ordered_keys = local_keys.gather(2, gather_index)
+        ordered_values = local_values.gather(2, gather_index)
+        local_keys_with_current = torch.cat((ordered_keys, key.unsqueeze(2)), dim=2)
+        local_values_with_current = torch.cat((ordered_values, value.unsqueeze(2)), dim=2)
+        positions = torch.arange(self.config.window_size, device=pages.device)
+        lower = (length + 1 - self.config.window_size).clamp_min(0)
+        valid_old = (positions[None, :] >= lower[:, None]) & (
+            positions[None, :] < length[:, None]
+        )
+        valid = torch.cat(
+            (valid_old, torch.ones((batch, 1), device=pages.device, dtype=torch.bool)),
+            dim=1,
+        )
+        logits = torch.einsum(
+            "bhd,bhkd->bhk", query, local_keys_with_current
+        ) / math.sqrt(self.config.head_dim)
+        logits = logits.masked_fill(
+            ~valid[:, None, :], torch.finfo(logits.dtype).min
+        )
+        local = torch.einsum(
+            "bhk,bhkd->bhd", torch.softmax(logits.float(), dim=-1).to(query.dtype),
+            local_values_with_current,
+        )
+
+        archive_out = torch.zeros_like(local)
+        evict_mask = length >= self.config.window_size
+        active_indices = torch.nonzero(evict_mask, as_tuple=False).flatten()
+        if active_indices.numel():
+            active_pages = pages.index_select(0, active_indices).contiguous()
+            active_key = ordered_keys.index_select(0, active_indices)[:, :, 0]
+            active_value = ordered_values.index_select(0, active_indices)[:, :, 0]
+            active_query = query.index_select(0, active_indices).unsqueeze(2)
+            active_key_block = active_key.unsqueeze(2)
+            active_value_block = active_value.unsqueeze(2)
+            bound = self._bind_archive_pages(active_pages)
+            active_counters = self._batched_segment_view(active_pages, "counters")
+            old_steps = active_counters[:, 3].clone()
+            # Exact-bank ages are absolute in each page, while one batched
+            # bank instance uses a shared local step. Rebase ages to zero,
+            # process one event, then restore each request's own epoch.
+            self.archive.exact_bank._ages.sub_(old_steps[:, None, None, None])
+            active_archive = self.archive.update_read_chunk(
+                active_key_block,
+                active_value_block,
+                active_query,
+            ).squeeze(2)
+            self.archive.exact_bank._ages.add_((old_steps + 1)[:, None, None, None])
+            active_counters[:, 3] = old_steps + 1
+            archive_out.index_copy_(0, active_indices, active_archive)
+            pages.index_copy_(0, active_indices, active_pages)
+
+        active = seen >= self.config.window_size
+        output = torch.where(
+            active[:, None, None],
+            (1.0 - self.config.archive_mix) * local
+            + self.config.archive_mix * archive_out,
+            local,
+        )
+
+        write_index = torch.where(
+            length < self.config.window_size,
+            (start + length) % self.config.window_size,
+            start,
+        )
+        batch_index = torch.arange(batch, device=pages.device)[:, None]
+        head_index = torch.arange(self.config.num_heads, device=pages.device)[None, :]
+        write_index = write_index[:, None].expand(batch, self.config.num_heads)
+        local_keys[batch_index, head_index, write_index] = key
+        local_values[batch_index, head_index, write_index] = value
+        counters[:, 0] = torch.where(
+            length < self.config.window_size,
+            start,
+            (start + 1) % self.config.window_size,
+        )
+        counters[:, 1] = torch.minimum(
+            length + 1,
+            torch.full_like(length, self.config.window_size),
+        )
+        counters[:, 2] = seen + 1
+        return output
+
     def _ordered_ring(self, page: Tensor, dtype: torch.dtype) -> tuple[Tensor, Tensor, int, int]:
         counters = typed_segment_view(page, self.layout, "counters")
         start = int(counters[0].item())

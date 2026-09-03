@@ -1,11 +1,72 @@
 import torch
 
+from qcc_transformer.hybrid_archive import HybridQCCArchive
+from qcc_transformer.stock_runtime import PackedHybridReferenceState
 from qcc_transformer.vllm_stock import (
     QCCPackedStateLayout,
     QCCStockVLLMConfig,
     typed_segment_view,
     validate_layout,
 )
+
+
+def test_packed_decode_batch_matches_independent_page_references() -> None:
+    torch.manual_seed(71)
+    config = QCCStockVLLMConfig(
+        num_heads=2,
+        head_dim=4,
+        window_size=3,
+        num_codes=4,
+        exact_num_sets=4,
+        exact_ways=2,
+        local_element_bytes=4,
+    )
+    archive = HybridQCCArchive(
+        config.num_heads,
+        config.head_dim,
+        num_codes=config.num_codes,
+        decay_rates=config.decay_rates(),
+        window_size=config.window_size,
+        use_triton=False,
+        exact_num_sets=config.exact_num_sets,
+        exact_ways=config.exact_ways,
+    )
+    batched = PackedHybridReferenceState(config, archive=archive, use_triton=False)
+    single_a = PackedHybridReferenceState(config, archive=archive, use_triton=False)
+    single_b = PackedHybridReferenceState(config, archive=archive, use_triton=False)
+    pages = torch.cat(
+        [batched.allocate_page(dtype=torch.float32) for _ in range(2)], dim=0
+    ).view(2, -1)
+    page_a = single_a.allocate_page(dtype=torch.float32)
+    page_b = single_b.allocate_page(dtype=torch.float32)
+
+    for step in range(8):
+        query = torch.randn(2, config.num_heads, config.head_dim)
+        key = torch.randn_like(query)
+        value = torch.randn_like(query)
+        actual = batched.forward_decode_batch(
+            pages,
+            query,
+            key,
+            value,
+            torch.full((2,), step, dtype=torch.long),
+        )
+        expected_a = single_a.forward(
+            page_a,
+            query[:1].unsqueeze(2),
+            key[:1].unsqueeze(2),
+            value[:1].unsqueeze(2),
+        ).squeeze(2)
+        expected_b = single_b.forward(
+            page_b,
+            query[1:].unsqueeze(2),
+            key[1:].unsqueeze(2),
+            value[1:].unsqueeze(2),
+        ).squeeze(2)
+        expected = torch.cat((expected_a, expected_b), dim=0)
+        torch.testing.assert_close(actual, expected, atol=1e-5, rtol=1e-5)
+        torch.testing.assert_close(pages[0], page_a, atol=0, rtol=0)
+        torch.testing.assert_close(pages[1], page_b, atol=0, rtol=0)
 
 
 def test_packed_layout_segments_do_not_overlap_and_are_aligned() -> None:

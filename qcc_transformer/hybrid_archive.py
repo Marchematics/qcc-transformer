@@ -140,7 +140,11 @@ class HybridQCCArchive(QCCArchive):
             exact_confidence_temperature
         ):
             raise ValueError("exact_confidence_temperature must be positive and finite")
-        probes = min(4, exact_num_sets) if exact_probe_sets is None else exact_probe_sets
+        # The exact bank is the quality-recovery tier.  By default, search the
+        # complete fixed table so an untrained set codebook cannot hide a
+        # salient record in an unprobed bucket.  Deployments with a measured
+        # latency budget may still set ``exact_probe_sets`` explicitly.
+        probes = exact_num_sets if exact_probe_sets is None else exact_probe_sets
         self.exact_bank = SetAssociativeLandmarkBank(
             num_heads=num_heads,
             head_dim=head_dim,

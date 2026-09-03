@@ -149,12 +149,26 @@ class SetAssociativeLandmarkBank(nn.Module):
         self._ensure_state(key)
         self._step += 1
 
-        set_logits = self._set_logits(key)
-        set_index = set_logits.argmax(dim=-1)
         batch_index = torch.arange(key.shape[0], device=key.device)[:, None]
         head_index = torch.arange(self.num_heads, device=key.device)[None, :]
-        slots_key = self._keys[batch_index, head_index, set_index]
-        slots_score = self._scores[batch_index, head_index, set_index]
+        global_bank = self.probe_sets == self.num_sets
+        if global_bank:
+            # When every set is probed, routing a write to only one set wastes
+            # capacity and makes collisions depend on an untrained codebook.
+            # Treat the bank as one fixed global exact table in that mode. It
+            # retains the strongest admitted associations across all slots,
+            # while the bounded state size and read cost remain unchanged.
+            slots_key = self._keys.reshape(
+                key.shape[0], self.num_heads, self.num_sets * self.ways, self.head_dim
+            )
+            slots_score = self._scores.reshape(
+                key.shape[0], self.num_heads, self.num_sets * self.ways
+            )
+        else:
+            set_logits = self._set_logits(key)
+            set_index = set_logits.argmax(dim=-1)
+            slots_key = self._keys[batch_index, head_index, set_index]
+            slots_score = self._scores[batch_index, head_index, set_index]
         valid = torch.isfinite(slots_score)
 
         normalized_key = F.normalize(key.to(self._keys.dtype), dim=-1)
@@ -181,12 +195,16 @@ class SetAssociativeLandmarkBank(nn.Module):
         empty = ~valid
         has_empty = empty.any(dim=-1)
         empty_index = empty.to(torch.int64).argmax(dim=-1)
-        age = (self._step - self._ages[batch_index, head_index, set_index]).to(
-            self._scores.dtype
-        )
+        if global_bank:
+            ages = self._ages.reshape(
+                key.shape[0], self.num_heads, self.num_sets * self.ways
+            )
+        else:
+            ages = self._ages[batch_index, head_index, set_index]
+        age = (self._step - ages).to(self._scores.dtype)
         replacement_score = slots_score - self.recency_weight / (1.0 + age)
         weakest_index = replacement_score.argmin(dim=-1)
-        way_index = torch.where(has_empty, empty_index, weakest_index)
+        slot_index = torch.where(has_empty, empty_index, weakest_index)
         weakest_score = replacement_score.gather(
             -1, weakest_index.unsqueeze(-1)
         ).squeeze(-1)
@@ -201,10 +219,14 @@ class SetAssociativeLandmarkBank(nn.Module):
                 device=key.device, dtype=torch.bool
             )
 
-        write_batch = batch_index.expand_as(set_index)[should_write]
-        write_head = head_index.expand_as(set_index)[should_write]
-        write_set = set_index[should_write]
-        write_way = way_index[should_write]
+        write_batch = batch_index.expand_as(slot_index)[should_write]
+        write_head = head_index.expand_as(slot_index)[should_write]
+        if global_bank:
+            write_set = torch.div(slot_index[should_write], self.ways, rounding_mode="floor")
+            write_way = slot_index[should_write] % self.ways
+        else:
+            write_set = set_index[should_write]
+            write_way = slot_index[should_write]
         self._keys[write_batch, write_head, write_set, write_way] = key.to(
             self._keys.dtype
         )[should_write]

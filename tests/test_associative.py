@@ -92,6 +92,33 @@ def test_probe_sets_recovers_second_best_routing_set() -> None:
     torch.testing.assert_close(response, value_b, rtol=0, atol=0)
 
 
+def test_full_probe_bank_uses_capacity_across_sets() -> None:
+    bank = SetAssociativeLandmarkBank(
+        num_heads=1,
+        head_dim=4,
+        num_sets=4,
+        ways=1,
+        probe_sets=4,
+        diversity_weight=0.0,
+    )
+    keys = torch.eye(4).reshape(1, 1, 4, 4)
+    values = (10.0 * keys).clone()
+    with torch.no_grad():
+        bank.set_codes.zero_()
+        bank.admission_vector.zero_()
+    for index in range(4):
+        bank.update(
+            keys[:, :, index],
+            values[:, :, index],
+            admission_bias=torch.full((1, 1), 10.0 + index),
+        )
+    assert int(torch.isfinite(bank.state.scores).sum()) == 4
+    for index in range(4):
+        response, confidence = bank.read(keys[:, :, index], hard=True)
+        torch.testing.assert_close(response, values[:, :, index], rtol=0, atol=0)
+        assert float(confidence.item()) > 0.99
+
+
 def test_write_mask_skips_low_salience_rows() -> None:
     torch.manual_seed(33)
     bank = SetAssociativeLandmarkBank(
