@@ -181,6 +181,11 @@ def compare_reports(qcc: dict[str, Any], baseline: dict[str, Any]) -> dict[str, 
         "vllm_version": qcc.get("vllm_version"),
         "run_id": qcc.get("run_id") if qcc.get("run_id") == baseline.get("run_id") else None,
         "matched_full_kv": True,
+        "real_model": qcc.get("real_model"),
+        "synthetic": qcc.get("synthetic"),
+        "official": False,
+        "protocol_locked": qcc.get("protocol_locked"),
+        "qcc_only": False,
     }
     return {
         "schema": "qcc-vllm-serving-comparison-v1",

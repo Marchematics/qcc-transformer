@@ -18,6 +18,9 @@ def _report(label: str, *, tpot: float, throughput: float, ttft: float) -> dict:
         "vllm_version": "0.10.0",
         "stock_vllm": True,
         "streaming": True,
+        "real_model": True,
+        "synthetic": False,
+        "protocol_locked": True,
         "throughput_tokens_per_s": throughput,
         "request_throughput_per_s": throughput / 32.0,
         "server_peak_gpu_memory_mib": 1000.0,
@@ -36,6 +39,8 @@ def test_serving_comparison_keeps_tail_and_throughput_separate():
     assert result["derived"]["ttft_regression"] < 0.0
     assert result["derived"]["throughput_latency_tradeoff"] is False
     assert result["derived"]["qcc_dominates"] is True
+    assert result["vllm_latency"]["qcc_only"] is False
+    assert result["production_latency"]["real_model"] is True
 
 
 def test_serving_comparison_marks_tail_regression_even_with_higher_throughput():
