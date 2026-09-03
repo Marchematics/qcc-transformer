@@ -1,6 +1,6 @@
 # QCC Transformer 本地交接文件
 
-更新时间：2026-09-03（Asia/Shanghai）
+更新时间：2026-09-04（Asia/Shanghai）
 交接对象：下一位继续实现、评测或部署 QCC Transformer 的工程师/模型
 状态：代码已推送；99 gate 尚未通过；不要把当前结果包装成已达标结果。
 
@@ -31,25 +31,18 @@
 
 ### 远程 GPU 工作区
 
-- SSH：`ssh frankwang122222@100.127.220.34`
-- 用户要求的资源根目录：`/home/frankwang122222/zjh/工作目录/工作文件`
-- 实际 QCC 项目目录（当前可用的 canonical project path）：`/home/frankwang122222/zjh/zjh/工作文件/qcc-transformer-next`
-- 真实 checkpoint：`/home/frankwang122222/zjh/zjh/工作文件/qcc-transformer-next/models/qwen2.5-1.5b`
-- 远程实验产物：`<project>/artifacts/hf_99/`，包括 `sweep/`、`sweep2/`、`sweep3/`
-
-中文路径在某些 shell/同步工具中会出现编码问题；远程进入项目时可以使用：
-
-```bash
-cd /home/frankwang122222/zjh/zjh/*/qcc-transformer-next
-```
-
-不要把 SSH 密码写入脚本、日志或本文件；使用现有 SSH agent/密钥或交互式认证。
+- 入口：阿里云 PAI DSW 的 `Terminal`，不使用 SSH。
+- 实例：`dsw-7epb81cc8iok7hzw8r`，地域 `cn-shanghai`。
+- 项目目录：`/mnt/workspace/qcc-transformer`。
+- 真实 checkpoint：`/mnt/workspace/qcc-transformer/models/phi-4-mini-instruct-ms`。
+- 远程实验产物：`<project>/artifacts/hf_99/` 和 `/tmp/phi_*.log`。
+- 终端内已提供 `aliyun` CLI，并通过 DSW URI profile 获取临时凭据；不要把凭据写入脚本、日志或本文件。
 
 ### GitHub
 
 - 仓库：<https://github.com/Marchematics/qcc-transformer>
 - 分支：`main`
-- 当前已推送提交：`ede94fc Fix HF RoPE retrofit and position-invariant archive`
+- 当前代码已推送到 `main`；实验日志和模型权重不进入 Git。
 - 本地工作树中未跟踪的实验日志/产物不属于代码提交，见第 5 节。
 
 ## 3. 已实现内容
@@ -93,7 +86,12 @@ cd /home/frankwang122222/zjh/zjh/*/qcc-transformer-next
 - 传入 `--gate-bias-init 0.0` 可复现旧的 50/50 ablation；校准脚本和 adapter manifest 会记录该值；
 - 该改动只改善初始化稳定性，不等于长程质量或 99 gate 证据。
 
-### 3.6 最新远程诊断
+### 3.6 Phi 远程代码兼容
+
+- `qcc_transformer.hf_loading.load_hf_causal_lm` 在 `trust_remote_code=True` 时为旧版 Phi3/Phi4 远程代码补充缺失的 `transformers.utils.LossKwargs` 类型别名。
+- 该补丁只影响远程代码导入的类型注解，不改变模型权重或注意力计算；现有校准测试覆盖了该兼容路径。
+
+### 3.7 最新远程诊断
 
 - CPU teacher logits + 分块损失修复后，单卡 3-step smoke 可完成且不 OOM；全层 20-step smoke 也可完成；
 - 10 卡 `layerwise10_20260903_021353`：9/10 配置完成，最佳 held-out cosine `0.8414`，`codes=64` 配置 OOM；所有配置均未通过 `0.99` fidelity gate；
@@ -184,8 +182,8 @@ python benchmarks/gate_99.py --evidence artifacts/gates/<run_id>.json
   `--trust-remote-code --num-train-chunks 4`；不再把 32K 的 Qwen2.5-1.5B 当作
   128K gate 模型。
 - `qcc_transformer/vllm.py` 的默认 `archive_mix` 从 `0.5` 调整为 `0.125`，与 HF `gate_bias_init=2` 的质量优先初始化一致；复现实验时可显式传入 `archive_mix=0.5`。
-- 本地回归：`61 passed`（CUDA/Triton 条件测试按环境跳过）；最新提交 `e3d17a7` 已推送 GitHub。
-- 2026-09-03 复查时远程 SSH 与 Colab 均无可用活动会话；重新启动长任务前先检查连接和 GPU 占用。
+- 本地回归：全部现有测试通过（CUDA/Triton 条件测试按环境跳过）；Phi 远程代码兼容修复已推送 GitHub。
+- 2026-09-04 复查时 DSW 终端连接曾短暂超时；重新启动长任务前先检查终端状态和 GPU 占用。
 - 本地 tiny-random-Llama CPU smoke 已验证 `--cosine-weight 0.3` 与多 chunk
   参数路径可运行（1 step，held-out cosine `0.99537`；仅 API smoke，不是 gate 证据）。
 - 新增 `benchmarks/benchmark_hf_concurrency.py`，可扫独立请求 batch；底层
@@ -215,9 +213,11 @@ git diff --check
 
 ### 远程进入项目
 
+在 PAI DSW 实例的 `Terminal` 中执行：
+
 ```bash
-ssh frankwang122222@100.127.220.34
-cd /home/frankwang122222/zjh/zjh/工作文件/qcc-transformer-next
+cd /mnt/workspace/qcc-transformer
+git pull --ff-only origin main
 ```
 
 ### 真实 HF matched fidelity（示例）
@@ -236,4 +236,4 @@ python benchmarks/benchmark_hf_retrofit.py \
 - 所有新实验必须记录 `run_id`、模型路径/hash、数据来源、卡号、CUDA/PyTorch/Transformers 版本、命令行、原始日志和输出 JSON；
 - 不覆盖已有 artifacts；新实验使用新目录或新文件名；
 - 任何性能/质量数字先跑 `gate_99.py` 和相应审计，再写入 README 或论文；
-- 用户要求的“实现并推到 GitHub”已完成到 `ede94fc`，后续代码改动需单独提交并推送，避免把大模型和大日志提交进 Git。
+- 用户要求的“实现并推到 GitHub”已完成；后续代码改动需单独提交并推送，避免把大模型和大日志提交进 Git。
