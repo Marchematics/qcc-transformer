@@ -211,9 +211,9 @@ The vLLM primitive defaults to `archive_mix=0.125`, matching the
 quality-first local/archive gate initialization used by the HF retrofit; set
 `archive_mix=0.5` explicitly when reproducing the historical 50/50 ablation.
 
-This avoids pinning an unstable vLLM ABI while making the cache state and
-shape contract explicit; upstream vLLM still needs a version-specific backend
-registration and matched quality benchmark.
+This keeps the dependency-free primitive available for custom integrations while
+the stock adapter below handles the current upstream vLLM state-cache ABI.
+Matched quality and serving benchmarks are still required for performance claims.
 
 The package includes a stock vLLM v1 adapter. With vLLM 0.11 or newer, the
 entry point registers `QCCModernAttentionBackend` and maps each QCC attention

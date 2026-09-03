@@ -166,7 +166,9 @@ artifacts/remote_gpu/retrain_20260902/
 2. calibration 已增加 CPU teacher logits 和词表分块损失，但 24GB 卡在 `max_tokens=512`、`codes=64` 时仍会 OOM；更长序列需要进一步分块 activation/逐层蒸馏。
 3. gate 初始化虽已默认偏向 local path，但仍需在真实长程 held-out 数据上校准 archive，不能将初始化效果当作最终质量。
 4. 尚无官方 RULER、LongBench、PG-19 的 matched Full-KV/QCC 结果；尚无真实 128K vLLM TPOT、吞吐、peak memory/concurrency 证据。
-5. 尚未完成正式 vLLM backend registration；当前 primitive 不能冒充零改动 upstream backend。
+5. 正式 vLLM backend registration 已实现为旧 `CircularBufferSpec` 与 vLLM 0.11+
+   `MambaSpec` 两条路径，但远程尚未完成端到端 serving 验证；当前 primitive 不能
+   冒充真实性能证据。
 6. 当前没有一个 `gate_99.py` evidence bundle 返回 `passed: true`；不得宣称“99 gate 已通过”“≥98% 全面质量”或“颠覆级加速”。
 
 ## 7. 下一阶段目标（按优先级）
