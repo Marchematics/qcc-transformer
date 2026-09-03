@@ -1936,7 +1936,7 @@ class QCCSelfAttention(nn.Module):
         return self.out_proj(head_out.transpose(1, 2).reshape(bsz, length, self.d_model))
 
     def _forward_train_chunked(
-        self, hidden: Tensor, q: Tensor, k: Tensor, v: Tensor,
+        self, hidden: Tensor, q: Tensor, k: Tensor, v: Tensor, gate_proj: Tensor,
         archive_hint: Optional[Tensor] = None,
         archive_query_source: Optional[Tensor] = None,
         archive_key_source: Optional[Tensor] = None,
@@ -2223,9 +2223,9 @@ class QCCSelfAttention(nn.Module):
             self.archive._landmark_key = key_state.detach()
             self.archive._landmark_value = value_state.detach()
         gate = (
-            torch.zeros_like(self.gate(hidden)).transpose(1, 2).unsqueeze(-1)
+            torch.zeros_like(gate_proj).transpose(1, 2).unsqueeze(-1)
             if self.archive.prefix_landmark
-            else torch.sigmoid(self.gate(hidden)).transpose(1, 2).unsqueeze(-1)
+            else torch.sigmoid(gate_proj).transpose(1, 2).unsqueeze(-1)
         )
         mixed_out = self._mix_local_archive(local_out, archive_out, gate)
         active = (torch.arange(length, device=hidden.device) >= window).view(
@@ -2239,7 +2239,7 @@ class QCCSelfAttention(nn.Module):
         return self.out_proj(head_out.transpose(1, 2).reshape(bsz, length, self.d_model))
 
     def _forward_inference(
-        self, hidden: Tensor, q: Tensor, k: Tensor, v: Tensor,
+        self, hidden: Tensor, q: Tensor, k: Tensor, v: Tensor, gate_proj: Tensor,
         archive_hint: Optional[Tensor] = None,
         archive_query_source: Optional[Tensor] = None,
         archive_key_source: Optional[Tensor] = None,
@@ -2260,26 +2260,35 @@ class QCCSelfAttention(nn.Module):
             # tensor and launching separate einsums for logits and values. The
             # key slice contains at most ``window + block_size - 1`` tokens;
             # the boolean mask keeps exact causal local-window semantics.
-            block_size = self.archive.scan_block_size
-            local_outputs: list[Tensor] = []
-            for start in range(0, length, block_size):
-                end = min(length, start + block_size)
-                key_start = max(0, start - window + 1)
-                key_positions = torch.arange(key_start, end, device=hidden.device)
-                query_positions = torch.arange(start, end, device=hidden.device)
-                valid = (key_positions[None, :] <= query_positions[:, None]) & (
-                    key_positions[None, :] >= query_positions[:, None] - window + 1
-                )
-                local_outputs.append(
-                    _scaled_dot_product_attention(
-                        q[:, :, start:end],
-                        k[:, :, key_start:end],
-                        v[:, :, key_start:end],
-                        attn_mask=valid,
-                        dropout_p=0.0,
+            local_out = None
+            if self.use_triton:
+                from .triton_kernels import TRITON_AVAILABLE, triton_local_chunk_attention
+
+                if TRITON_AVAILABLE:
+                    local_out = triton_local_chunk_attention(
+                        q, k, v, old_length=0, window_size=window
                     )
-                )
-            local_out = torch.cat(local_outputs, dim=2)
+            if local_out is None:
+                block_size = self.archive.scan_block_size
+                local_outputs: list[Tensor] = []
+                for start in range(0, length, block_size):
+                    end = min(length, start + block_size)
+                    key_start = max(0, start - window + 1)
+                    key_positions = torch.arange(key_start, end, device=hidden.device)
+                    query_positions = torch.arange(start, end, device=hidden.device)
+                    valid = (key_positions[None, :] <= query_positions[:, None]) & (
+                        key_positions[None, :] >= query_positions[:, None] - window + 1
+                    )
+                    local_outputs.append(
+                        _scaled_dot_product_attention(
+                            q[:, :, start:end],
+                            k[:, :, key_start:end],
+                            v[:, :, key_start:end],
+                            attn_mask=valid,
+                            dropout_p=0.0,
+                        )
+                    )
+                local_out = torch.cat(local_outputs, dim=2)
         else:
             # The CPU SDPA backend currently pays a relatively high per-block
             # mask setup cost. Keep the reference's single vectorized unfold
@@ -2316,7 +2325,7 @@ class QCCSelfAttention(nn.Module):
                     archive_q[:, :, self.window_size :],
                     output=archive_out[:, :, self.window_size :],
                 )
-            gate = torch.sigmoid(self.gate(hidden)).transpose(1, 2).unsqueeze(-1)
+            gate = torch.sigmoid(gate_proj).transpose(1, 2).unsqueeze(-1)
             mixed_out = self._mix_local_archive(local_out, archive_out, gate)
             active = (torch.arange(length, device=hidden.device) >= self.window_size).view(1, 1, length, 1)
             head_out = torch.where(active, mixed_out, local_out)
@@ -2336,7 +2345,7 @@ class QCCSelfAttention(nn.Module):
         if hidden.ndim != 3 or hidden.shape[-1] != self.d_model:
             raise ValueError("hidden must have shape [batch, sequence, d_model]")
         bsz, length, _ = hidden.shape
-        q_proj, k_proj, v_proj, _ = self._project_qkv_gate(hidden)
+        q_proj, k_proj, v_proj, gate_proj = self._project_qkv_gate(hidden)
         q_raw = self._split_heads(q_proj)
         k_raw = self._split_heads(k_proj)
         v = self._split_heads(v_proj)
@@ -2351,6 +2360,7 @@ class QCCSelfAttention(nn.Module):
                 q,
                 k,
                 v,
+                gate_proj,
                 archive_hint=archive_hint,
                 archive_query_source=archive_q_source,
                 archive_key_source=archive_k_source,
@@ -2371,6 +2381,7 @@ class QCCSelfAttention(nn.Module):
                 q,
                 k,
                 v,
+                gate_proj,
                 archive_hint=archive_hint,
                 archive_query_source=archive_q_source,
                 archive_key_source=archive_k_source,
