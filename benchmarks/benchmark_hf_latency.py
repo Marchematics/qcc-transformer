@@ -85,7 +85,9 @@ def _measure(
         ttft = time.perf_counter() - started
         token = output.logits[:, -1:].argmax(dim=-1)
         physical_cache = None if qcc_model else getattr(output, "past_key_values", None)
-        attention_mask = encoded.get("attention_mask")
+        # Each repeat is an independent request. Keep the mask local so decode
+        # tokens appended by one repeat cannot leak into the next repeat.
+        request_attention_mask = encoded.get("attention_mask")
         samples = []
         with torch.no_grad():
             for _ in range(steps):
@@ -93,11 +95,11 @@ def _measure(
                 kwargs = {"input_ids": token, "use_cache": True}
                 if physical_cache is not None:
                     kwargs["past_key_values"] = physical_cache
-                    if attention_mask is not None:
-                        attention_mask = torch.cat(
-                            (attention_mask, torch.ones_like(token)), dim=-1
+                    if request_attention_mask is not None:
+                        request_attention_mask = torch.cat(
+                            (request_attention_mask, torch.ones_like(token)), dim=-1
                         )
-                        kwargs["attention_mask"] = attention_mask
+                        kwargs["attention_mask"] = request_attention_mask
                 output = model(**kwargs)
                 _sync(device)
                 samples.append((time.perf_counter() - started) * 1000.0)
