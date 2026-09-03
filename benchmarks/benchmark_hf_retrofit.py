@@ -83,19 +83,9 @@ def main() -> None:
     dtype = {"float16": torch.float16, "bfloat16": torch.bfloat16, "float32": torch.float32}[args.dtype]
     common = {"trust_remote_code": args.trust_remote_code}
     tokenizer = AutoTokenizer.from_pretrained(args.model, **common)
-    # Keep this count tied to the actual loaded checkpoint rather than a model
-    # name or config estimate.  The 99 gate uses it to enforce the 1--7B scope.
-    metadata_model = load_hf_causal_lm(
-        args.model,
-        dtype=dtype,
-        device=device,
-        trust_remote_code=args.trust_remote_code,
-        load_in_4bit=args.load_in_4bit,
-    )
-    parameter_count = sum(parameter.numel() for parameter in metadata_model.parameters())
-    del metadata_model
-    if device.type == "cuda":
-        torch.cuda.empty_cache()
+    # Count the actual checkpoint from the Full-KV instance that is already
+    # needed for the matched reference.  A separate metadata load creates an
+    # avoidable CPU/GPU peak on small cards, especially for real 1--7B models.
     baseline = load_hf_causal_lm(
         args.model,
         dtype=dtype,
@@ -103,6 +93,7 @@ def main() -> None:
         trust_remote_code=args.trust_remote_code,
         load_in_4bit=args.load_in_4bit,
     )
+    parameter_count = sum(parameter.numel() for parameter in baseline.parameters())
     model_device = model_input_device(baseline, device)
     references = []
     for prompt in prompts:
