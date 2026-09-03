@@ -197,12 +197,12 @@ class PackedHybridReferenceState:
 
         if reset_mask.ndim != 1 or reset_mask.shape[0] != pages.shape[0]:
             raise ValueError("reset_mask must have one entry per packed page")
-        if not bool(reset_mask.any()):
-            return
         raw = pages.view(torch.uint8).reshape(pages.shape[0], -1)
-        raw[reset_mask].zero_()
-        self._batched_segment_view(pages, "exact_scores")[reset_mask].fill_(-torch.inf)
-        self._batched_segment_view(pages, "counters")[reset_mask].zero_()
+        raw.masked_fill_(reset_mask[:, None], 0)
+        scores = self._batched_segment_view(pages, "exact_scores")
+        scores.masked_fill_(reset_mask[:, None, None, None], -torch.inf)
+        counters = self._batched_segment_view(pages, "counters")
+        counters.masked_fill_(reset_mask[:, None], 0)
 
     def _bind_archive_pages(self, pages: Tensor) -> tuple[Tensor, ...]:
         """Bind a gathered page batch to the archive's mutable tensors."""
@@ -291,10 +291,6 @@ class PackedHybridReferenceState:
         self._reset_batched_pages(pages, reset_mask)
         counters = self._batched_segment_view(pages, "counters")
         seen = counters[:, 2]
-        if bool(torch.any(seen != logical_positions).item()):
-            raise RuntimeError(
-                "QCC packed-state discontinuity: scheduler must preserve each request page"
-            )
 
         query = query.to(device=pages.device)
         key = key.to(device=pages.device)
@@ -305,14 +301,6 @@ class PackedHybridReferenceState:
         local_values = self._batched_local_view(pages, "local_values", query.dtype)
         start = counters[:, 0].to(torch.long)
         length = counters[:, 1].to(torch.long)
-        if bool(torch.any(start < 0).item()) or bool(
-            torch.any(start >= self.config.window_size).item()
-        ):
-            raise RuntimeError("corrupt packed local-ring start counters")
-        if bool(torch.any(length < 0).item()) or bool(
-            torch.any(length > self.config.window_size).item()
-        ):
-            raise RuntimeError("corrupt packed local-ring length counters")
 
         ordered_keys: Tensor | None = None
         ordered_values: Tensor | None = None

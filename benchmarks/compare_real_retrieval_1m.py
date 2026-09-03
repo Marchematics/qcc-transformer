@@ -121,6 +121,10 @@ def row_needle_results(
             raise ValueError(f"{label} needle {index} has no valid depth")
         if not isinstance(bucket, str) or not bucket:
             raise ValueError(f"{label} needle {index} has no depth bucket")
+        prediction = result.get("prediction")
+        expected_correct = isinstance(prediction, str) and prediction == expected
+        if bool(result.get("correct")) != expected_correct:
+            raise ValueError(f"{label} needle {index} score does not match its prediction")
         checked.append(result)
     return checked
 
@@ -139,7 +143,7 @@ def main() -> None:
     full = load(args.full_summary)
     qcc = load(args.qcc_summary)
     for payload, mode in ((full, "fullkv"), (qcc, "qcc")):
-        if payload.get("schema") != "qcc-real-retrieval-result-v1" or payload.get("mode") != mode:
+        if payload.get("schema") != "qcc-real-retrieval-result-v2" or payload.get("mode") != mode:
             raise ValueError(f"invalid {mode} summary")
         if payload.get("real_model") is not True or payload.get("synthetic") is not False:
             raise ValueError(f"{mode} summary is not real non-synthetic evidence")

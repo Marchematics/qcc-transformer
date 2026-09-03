@@ -402,7 +402,7 @@ def main() -> None:
         for name, counts in sorted(buckets.items())
     }
     summary = {
-        "schema": "qcc-real-retrieval-result-v1",
+        "schema": "qcc-real-retrieval-result-v2",
         "mode": args.mode,
         "model_id": args.model,
         "run_id": args.run_id,

@@ -178,6 +178,48 @@ def test_packed_decode_batch_handles_gqa_and_independent_progress() -> None:
         torch.testing.assert_close(pages[1], page_b, atol=0, rtol=0)
 
 
+def test_packed_decode_batch_reinitializes_recycled_pages() -> None:
+    torch.manual_seed(73)
+    config = QCCStockVLLMConfig(
+        num_heads=2,
+        head_dim=3,
+        window_size=3,
+        num_codes=3,
+        exact_num_sets=3,
+        exact_ways=2,
+        local_element_bytes=4,
+    )
+    archive = HybridQCCArchive(
+        config.num_heads,
+        config.head_dim,
+        num_codes=config.num_codes,
+        decay_rates=config.decay_rates(),
+        window_size=config.window_size,
+        use_triton=False,
+        exact_num_sets=config.exact_num_sets,
+        exact_ways=config.exact_ways,
+    )
+    recycled = PackedHybridReferenceState(config, archive=archive, use_triton=False)
+    fresh = PackedHybridReferenceState(config, archive=archive, use_triton=False)
+    pages = recycled.allocate_page(dtype=torch.float32).view(1, -1)
+    old_query = torch.randn(1, config.num_heads, config.head_dim)
+    old_key = torch.randn_like(old_query)
+    old_value = torch.randn_like(old_query)
+    recycled.forward_decode_batch(pages, old_query, old_key, old_value, torch.tensor([0]))
+    recycled.forward_decode_batch(pages, old_query, old_key, old_value, torch.tensor([1]))
+
+    query = torch.randn(1, config.num_heads, config.head_dim)
+    key = torch.randn_like(query)
+    value = torch.randn_like(query)
+    actual = recycled.forward_decode_batch(pages, query, key, value, torch.tensor([0]))
+    expected_page = fresh.allocate_page(dtype=torch.float32)
+    expected = fresh.forward(
+        expected_page, query.unsqueeze(2), key.unsqueeze(2), value.unsqueeze(2)
+    ).squeeze(2)
+    torch.testing.assert_close(actual, expected, atol=1e-5, rtol=1e-5)
+    torch.testing.assert_close(pages[0], expected_page, atol=0, rtol=0)
+
+
 def test_packed_layout_segments_do_not_overlap_and_are_aligned() -> None:
     layout = QCCPackedStateLayout(
         QCCStockVLLMConfig(num_heads=8, head_dim=16, window_size=32)
