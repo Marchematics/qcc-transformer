@@ -493,6 +493,26 @@ def test_query_stability_can_suppress_repeated_archive_reads() -> None:
     assert calls == 1
 
 
+def test_token_archive_read_stride_refreshes_after_eviction() -> None:
+    torch.manual_seed(42)
+    kwargs = dict(
+        d_model=16,
+        num_heads=4,
+        window_size=2,
+        num_codes=4,
+        use_triton=False,
+    )
+    strided = QCCSelfAttention(**kwargs, archive_read_stride=2).eval()
+    reference = QCCSelfAttention(**kwargs, archive_read_stride=1).eval()
+    reference.load_state_dict(strided.state_dict())
+    hidden = torch.randn(1, 9, kwargs["d_model"])
+    with torch.no_grad():
+        for index in range(hidden.shape[1]):
+            actual = strided.step(hidden[:, index], reset_cache=index == 0)
+            expected = reference.step(hidden[:, index], reset_cache=index == 0)
+            torch.testing.assert_close(actual, expected, rtol=2e-4, atol=2e-4)
+
+
 @pytest.mark.parametrize("use_archive", [True, False])
 def test_decode_chunk_matches_token_stream(use_archive: bool) -> None:
     torch.manual_seed(6)
