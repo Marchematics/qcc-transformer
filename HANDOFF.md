@@ -79,6 +79,7 @@
 - 优化器参数在构造前去重，避免 HF wrapper/nested module 引用同一参数时发生重复更新；
 - `scripts/test_single_layerwise.sh` 和 `scripts/run_layerwise_sweep.sh` 提供远程实验入口，但其中的结果尚未形成 gate 证据。
 - `scripts/run_layerwise_10gpu.sh` 可将 10 组配置分配到 10 张卡；最近一次 `layerwise10_20260903_021353` 有 9 组完成、1 组（`codes=64`）OOM，最佳 held-out cosine `0.8414`，全部 `held_out_gate_passed=false`。
+- `scripts/run_layerwise_sweep.sh` 与 `scripts/test_single_layerwise.sh` 已切换为终端可直接执行的默认值：项目目录 `/mnt/workspace/qcc-transformer`、模型 `models/phi-4-mini-instruct-ms`，并允许 `PROJECT_DIR`、`MODEL_PATH`、`OUTPUT_DIR`、`RUN_ID` 和 `HF_ENDPOINT` 环境变量覆盖；修复了未设置 `PYTHONPATH` 时在 `set -u` 下退出的问题。该修正已在提交 `10db081` 推送到 `main`。
 
 ### 3.5 未校准安全 gate（已实现，待远程验证）
 
@@ -135,7 +136,7 @@
 - 三轮 Qwen sweep 均为 QCC 项目实验，日志/adapter 位于远程 `artifacts/hf_99/sweep*`。
 - 远程曾发生磁盘 100% 满；已清理可重建的 `~/.cache/pip`（约 3.7GB）、过期 Hugging Face `.incomplete` 文件和本次同步产生的 `._*` 文件，释放约 4.5GB。
 - 未删除 HOTC2026、biohub、其它用户项目或用户已有 QCC artifacts。
-- Colab CLI 曾返回 `Service Unavailable`，当前没有活动 Colab session。
+- Colab CLI 当前没有活动 session；本次通过已认证 OAuth 重新分配 `qcc-terminal` 时，Colab assignment API 返回 `503 Service Unavailable`。认证 scopes 正常，属于服务端资源阻塞；恢复前不要循环重试或假定 GPU 已分配。
 - 远程未安装正式 vLLM；`qcc_transformer/vllm.py` 目前是 dependency-free primitive，不是 upstream vLLM 已注册 backend。远程项目顶层还有同名 `vllm.py`，做正式 vLLM 测试时要先确认 import 来源，避免 shadowing。
 
 本地以下未跟踪文件是有意保留的实验结果，不要误删：
