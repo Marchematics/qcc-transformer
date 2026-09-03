@@ -330,8 +330,17 @@ def validate_stock_vllm_api() -> dict[str, str]:
     return {name: "ok" for name in checks}
 
 
-def register_stock_vllm_backend() -> object:
-    """Register QCC as vLLM's CUSTOM attention backend."""
+def register_stock_vllm_backend() -> object | None:
+    """Register QCC as vLLM's CUSTOM attention backend when configured.
+
+    vLLM discovers ``vllm.general_plugins`` entry points in every process.  A
+    no-op without the two QCC environment variables keeps ordinary vLLM users
+    unaffected, while a configured worker gets the same registration as the
+    programmatic launcher.
+    """
+
+    if not os.environ.get(STOCK_CONFIG_ENV) or not os.environ.get(STOCK_ADAPTER_ENV):
+        return None
 
     validate_stock_vllm_api()
     from vllm.v1.attention.backends.registry import (
