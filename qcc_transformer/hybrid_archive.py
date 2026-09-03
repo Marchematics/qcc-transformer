@@ -101,7 +101,7 @@ class HybridQCCArchive(QCCArchive):
         landmark_temperature: float = 1.0,
         exact_num_sets: int = 128,
         exact_ways: int = 4,
-        exact_probe_sets: int | None = 4,
+        exact_probe_sets: int | None = None,
         admission_threshold: float = 0.0,
         admission_bias_init: float = -4.0,
         max_inserts_per_chunk: int = 8,
