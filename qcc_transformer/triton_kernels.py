@@ -140,64 +140,63 @@ try:  # pragma: no cover - exercised only on a Triton-enabled GPU runner
             mask=mask_d,
             other=0.0,
         ).to(tl.float32)
+        current_key = tl.load(
+            current_key_ptr
+            + batch * stride_ckb
+            + head * stride_ckh
+            + offs_d * stride_ckd,
+            mask=mask_d,
+            other=0.0,
+        ).to(tl.float32)
+        current_logit = tl.sum(q * current_key, axis=0) / tl.sqrt(
+            tl.full((), HEAD_DIM, tl.float32)
+        )
         logits = tl.zeros((BLOCK_W,), dtype=tl.float32)
         for index in range(BLOCK_W):
-            if index < WINDOW_SIZE:
-                physical = (start + index) % WINDOW_SIZE
-                key = tl.load(
-                    ring_key_ptr
-                    + batch * stride_rkb
-                    + head * stride_rkh
-                    + physical * stride_rkw
-                    + offs_d * stride_rkd,
-                    mask=mask_d & (index < length),
-                    other=0.0,
-                ).to(tl.float32)
-            elif index == WINDOW_SIZE:
-                key = tl.load(
-                    current_key_ptr
-                    + batch * stride_ckb
-                    + head * stride_ckh
-                    + offs_d * stride_ckd,
-                    mask=mask_d,
-                    other=0.0,
-                ).to(tl.float32)
-            else:
-                key = tl.zeros((BLOCK_D,), dtype=tl.float32)
+            physical = (start + index) % WINDOW_SIZE
+            key = tl.load(
+                ring_key_ptr
+                + batch * stride_rkb
+                + head * stride_rkh
+                + physical * stride_rkw
+                + offs_d * stride_rkd,
+                mask=mask_d & (index < length),
+                other=0.0,
+            ).to(tl.float32)
             dot = tl.sum(q * key, axis=0) / tl.sqrt(tl.full((), HEAD_DIM, tl.float32))
             logits = tl.where(offs_w == index, dot, logits)
-        valid = (offs_w < length) | (offs_w == WINDOW_SIZE)
+        valid = offs_w < length
         logits = tl.where(valid, logits, -float("inf"))
-        max_logit = tl.max(logits, axis=0)
+        max_logit = tl.maximum(tl.max(logits, axis=0), current_logit)
         weights = tl.exp(logits - max_logit)
         weights = tl.where(valid, weights, 0.0)
-        weights = weights / tl.sum(weights, axis=0)
+        current_weight = tl.exp(current_logit - max_logit)
+        denominator = tl.sum(weights, axis=0) + current_weight
+        weights = weights / denominator
+        current_weight = current_weight / denominator
         result = tl.zeros((BLOCK_D,), dtype=tl.float32)
         for index in range(BLOCK_W):
-            if index < WINDOW_SIZE:
-                physical = (start + index) % WINDOW_SIZE
-                value = tl.load(
-                    ring_value_ptr
-                    + batch * stride_rvb
-                    + head * stride_rvh
-                    + physical * stride_rvw
-                    + offs_d * stride_rvd,
-                    mask=mask_d & (index < length),
-                    other=0.0,
-                ).to(tl.float32)
-            elif index == WINDOW_SIZE:
-                value = tl.load(
-                    current_value_ptr
-                    + batch * stride_cvb
-                    + head * stride_cvh
-                    + offs_d * stride_cvd,
-                    mask=mask_d,
-                    other=0.0,
-                ).to(tl.float32)
-            else:
-                value = tl.zeros((BLOCK_D,), dtype=tl.float32)
+            physical = (start + index) % WINDOW_SIZE
+            value = tl.load(
+                ring_value_ptr
+                + batch * stride_rvb
+                + head * stride_rvh
+                + physical * stride_rvw
+                + offs_d * stride_rvd,
+                mask=mask_d & (index < length),
+                other=0.0,
+            ).to(tl.float32)
             weight = tl.sum(tl.where(offs_w == index, weights, 0.0), axis=0)
             result += weight * value
+        current_value = tl.load(
+            current_value_ptr
+            + batch * stride_cvb
+            + head * stride_cvh
+            + offs_d * stride_cvd,
+            mask=mask_d,
+            other=0.0,
+        ).to(tl.float32)
+        result += current_weight * current_value
         tl.store(
             output_ptr + batch * stride_ob + head * stride_oh + offs_d * stride_od,
             result,
@@ -1412,7 +1411,7 @@ def triton_local_ring_decode_attention(
     ring_length = ring_length.to(dtype=torch.int32).contiguous()
     output = torch.empty_like(query)
     block_dim = 1 << max(4, (dim - 1).bit_length())
-    block_window = 1 << max(0, window_size.bit_length())
+    block_window = 1 << max(0, (window_size - 1).bit_length())
     _qcc_local_ring_decode_kernel[(batch * heads,)](
         output,
         query,

@@ -405,6 +405,7 @@ class PackedHybridReferenceState:
                 active_key_block,
                 active_value_block,
                 active_query,
+                admission_score=admission_score.unsqueeze(2),
             ).squeeze(2)
             self.archive.exact_bank._ages.add_(old_steps[:, None, None, None])
             active_counters[:, 3] = old_steps + admitted.to(old_steps.dtype)

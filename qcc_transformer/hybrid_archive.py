@@ -404,9 +404,15 @@ class HybridQCCArchive(QCCArchive):
         query: Tensor,
         *,
         output: Tensor | None = None,
+        admission_score: Tensor | None = None,
     ) -> Tensor:
+        if admission_score is not None and (
+            admission_score.shape != key.shape[:3]
+            or admission_score.device != key.device
+        ):
+            raise ValueError("admission_score must have shape [batch, heads, events] on key.device")
         recurrent = super().update_read_chunk(key, value, query, output=None)
-        score = self.admission(key, value)
+        score = self.admission(key, value) if admission_score is None else admission_score
         exact, confidence = self._exact_chunk(key, value, query, score)
         result = self._blend_exact(recurrent, exact, confidence)
         if output is not None:
