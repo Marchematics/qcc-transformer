@@ -354,6 +354,9 @@ class PackedHybridReferenceState:
             active_query = query.index_select(0, active_indices).unsqueeze(2)
             active_key_block = active_key.unsqueeze(2)
             active_value_block = active_value.unsqueeze(2)
+            self.archive.to(device=pages.device)
+            admission_score = self.archive.admission(active_key, active_value)
+            admitted = (admission_score >= self.archive.admission_threshold).any(dim=1)
             bound = self._bind_archive_pages(active_pages)
             active_counters = self._batched_segment_view(active_pages, "counters")
             old_steps = active_counters[:, 3].clone()
@@ -369,7 +372,7 @@ class PackedHybridReferenceState:
                 active_query,
             ).squeeze(2)
             self.archive.exact_bank._ages.add_(old_steps[:, None, None, None])
-            active_counters[:, 3] = old_steps + 1
+            active_counters[:, 3] = old_steps + admitted.to(old_steps.dtype)
             self._flush_archive_pages(active_pages, bound)
             archive_out.index_copy_(0, active_indices, active_archive)
             pages.index_copy_(0, active_indices, active_pages)
