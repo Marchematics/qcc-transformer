@@ -147,7 +147,7 @@ def test_chunk_admission_reopens_budget_for_each_bounded_tile() -> None:
         hybrid.admission.key_weight.zero_()
         hybrid.admission.value_weight.zero_()
         hybrid.admission.bias.fill_(10.0)
-    key = torch.randn(1, 1, 9, 4)
+    key = torch.randn(1, 1, 10, 4)
     value = torch.randn_like(key)
     query = torch.randn_like(key)
     with torch.no_grad():
