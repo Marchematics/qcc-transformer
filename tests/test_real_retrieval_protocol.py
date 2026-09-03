@@ -21,6 +21,9 @@ def test_locked_trial_is_deterministic_unique_and_has_required_stressors():
     assert sum(item["kind"] == "needle" for item in records) == 4
     assert sum(item["kind"] == "semantic_distractor" for item in records) == 12
     assert len({item["code"] for item in records}) == 16
+    assert left["random_depth"] is True
+    assert left["multi_needle"] is True
+    assert left["semantic_distractor"] is True
     assert all(0.01 <= float(item["depth"]) <= 0.97 for item in records)
     targets = [
         item for item in records

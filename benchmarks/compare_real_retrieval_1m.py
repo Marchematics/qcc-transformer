@@ -47,6 +47,11 @@ def main() -> None:
             raise ValueError(f"{mode} summary is not real non-synthetic evidence")
         if payload.get("protocol_locked") is not True:
             raise ValueError(f"{mode} protocol is not locked")
+        if payload.get("run_id") != args.run_id:
+            raise ValueError(f"{mode} summary run_id does not match requested run")
+        for field in ("random_depth", "multi_needle", "semantic_distractor"):
+            if payload.get(field) is not True:
+                raise ValueError(f"{mode} summary is missing {field} evidence")
     for field in ("model_id", "context_tokens", "trials"):
         if full.get(field) != qcc.get(field):
             raise ValueError(f"matched retrieval mismatch for {field}")
@@ -116,9 +121,9 @@ def main() -> None:
             "qcc_success_rate": qcc_rate,
             "full_kv_success_rate": full_rate,
             "qcc_full_kv_ratio": qcc_rate / full_rate if full_rate > 0 else 0.0,
-            "random_depth": True,
-            "multi_needle": True,
-            "semantic_distractor": True,
+            "random_depth": full["random_depth"],
+            "multi_needle": full["multi_needle"],
+            "semantic_distractor": full["semantic_distractor"],
             "oracle_admission": False,
         },
         "tail_safety": {

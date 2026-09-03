@@ -107,6 +107,9 @@ def main() -> None:
         "needles": args.needles,
         "semantic_distractors": args.semantic_distractors,
         "context_tokens": args.context_tokens,
+        "random_depth": True,
+        "multi_needle": args.needles >= 2,
+        "semantic_distractor": args.semantic_distractors > 0,
         "scoring": "exact normalized access-code match in generated continuation",
     }
     rows = [json.dumps(header, sort_keys=True)]

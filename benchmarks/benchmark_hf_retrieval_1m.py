@@ -49,6 +49,46 @@ def load_manifest(path: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         raise ValueError("retrieval manifest is not protocol-locked")
     if len(trials) != int(header.get("trials", -1)) or len(trials) < 1000:
         raise ValueError("strict retrieval manifest must contain at least 1000 trials")
+    if int(header.get("context_tokens", 0)) < 1_000_000:
+        raise ValueError("strict retrieval manifest context must be at least 1M tokens")
+    if header.get("random_depth") is not True:
+        raise ValueError("retrieval manifest must enable random depth")
+    if header.get("multi_needle") is not True or int(header.get("needles", 0)) < 2:
+        raise ValueError("retrieval manifest must contain multiple needles")
+    if header.get("semantic_distractor") is not True or int(header.get("semantic_distractors", 0)) < 1:
+        raise ValueError("retrieval manifest must contain semantic distractors")
+    seen_trials: set[int] = set()
+    for trial in trials:
+        if not isinstance(trial, dict):
+            raise ValueError("retrieval manifest trials must be objects")
+        index = trial.get("trial")
+        if not isinstance(index, int) or index in seen_trials:
+            raise ValueError("retrieval manifest trial ids must be unique integers")
+        seen_trials.add(index)
+        records = trial.get("records")
+        if not isinstance(records, list):
+            raise ValueError(f"trial {index} records are missing")
+        needles = [record for record in records if isinstance(record, dict) and record.get("kind") == "needle"]
+        distractors = [
+            record for record in records
+            if isinstance(record, dict) and record.get("kind") == "semantic_distractor"
+        ]
+        if len(needles) < 2 or not distractors:
+            raise ValueError(f"trial {index} is missing multiple needles or semantic distractors")
+        target = trial.get("target_entity")
+        matches = [record for record in needles if record.get("entity") == target]
+        if len(matches) != 1 or matches[0].get("code") != trial.get("expected"):
+            raise ValueError(f"trial {index} has an invalid target/expected code pair")
+        depths = []
+        for record in records:
+            if not isinstance(record, dict) or not isinstance(record.get("text"), str):
+                raise ValueError(f"trial {index} contains an invalid record")
+            depth = record.get("depth")
+            if not isinstance(depth, (int, float)) or not 0.0 < float(depth) < 1.0:
+                raise ValueError(f"trial {index} contains an invalid random depth")
+            depths.append(float(depth))
+        if len(set(depths)) < 2:
+            raise ValueError(f"trial {index} does not contain varied depths")
     return header, trials
 
 
@@ -152,6 +192,7 @@ def main() -> None:
     parser.add_argument("--require-native-context", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--trust-remote-code", action="store_true")
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--run-id", required=True)
     parser.add_argument("--output-jsonl", type=Path, required=True)
     parser.add_argument("--summary", type=Path, required=True)
     args = parser.parse_args()
@@ -280,6 +321,7 @@ def main() -> None:
         "schema": "qcc-real-retrieval-result-v1",
         "mode": args.mode,
         "model_id": args.model,
+        "run_id": args.run_id,
         "parameter_count": parameter_count,
         "pretrained": True,
         "real_checkpoint": True,
@@ -294,9 +336,9 @@ def main() -> None:
         "trials": len(ordered),
         "correct": correct,
         "success_rate": correct / len(ordered),
-        "random_depth": True,
-        "multi_needle": True,
-        "semantic_distractor": True,
+        "random_depth": header["random_depth"],
+        "multi_needle": header["multi_needle"],
+        "semantic_distractor": header["semantic_distractor"],
         "depth_buckets": bucket_summary,
         "patched_layers": patched_layers,
         "output_jsonl": str(args.output_jsonl),

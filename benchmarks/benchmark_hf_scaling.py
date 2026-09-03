@@ -111,6 +111,8 @@ def main() -> None:
                 command.extend(["--exact-probe-sets", str(args.exact_probe_sets)])
         if args.run_id is not None:
             command.extend(["--run-id", args.run_id])
+        if args.protocol_locked is not None:
+            command.append("--protocol-locked" if args.protocol_locked else "--no-protocol-locked")
         with log.open("w", encoding="utf-8") as stream:
             completed = subprocess.run(
                 command, text=True, stdout=stream, stderr=subprocess.STDOUT, check=False
