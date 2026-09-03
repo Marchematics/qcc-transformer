@@ -149,6 +149,7 @@ teacher 特征现在通过未 patch attention 模块的 forward-pre-hook 直接�
 - 未删除 HOTC2026、biohub、其它用户项目或用户已有 QCC artifacts。
 - Colab CLI 当前没有活动 session；本次通过已认证 OAuth 重新分配 `qcc-terminal` 时，Colab assignment API 返回 `503 Service Unavailable`。认证 scopes 正常，属于服务端资源阻塞；恢复前不要循环重试或假定 GPU 已分配。
 - 2026-09-04 再次从本地 Terminal 执行 `colab new --gpu T4 --session qcc-terminal`，结果仍为 assignment API `503 Service Unavailable`；随后 `colab status` 确认 session 不存在。当前没有可运行的 Colab GPU 作业。
+- 同一轮未改用 SSH；一次 `colab new --gpu L4 --session qcc-l4` 和一次 `colab new --gpu A100 --session qcc-a100` 均被后端以账户无对应 accelerator quota/entitlement 拒绝。可用路径仍是 PAI DSW Terminal 或 Colab T4 服务恢复。
 - 远程尚未完成正式 vLLM 端到端运行；当前代码已提供 `vllm_modern_backend.py`，在现代 vLLM ABI（含 0.28）用 `MambaSpec` 分配每请求单页状态，并保留 0.11--0.27 的旧导入回退与 `CircularBufferSpec` 适配。`qcc_transformer/vllm.py` 仍是 dependency-free primitive，不能替代真实 serving 测量；远程项目顶层还有同名 `vllm.py`，测试时要先确认 import 来源，避免 shadowing。
 
 本地以下未跟踪文件是有意保留的实验结果，不要误删：
