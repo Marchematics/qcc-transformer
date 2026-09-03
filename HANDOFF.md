@@ -210,6 +210,8 @@ python benchmarks/gate_99.py --evidence artifacts/gates/<run_id>.json
   vLLM（含 0.28）的 `MambaSpec` 适配；后者通过插件自动 patch
   `Attention.get_kv_cache_spec`，仍需在真实 GPU 环境完成端到端 benchmark，不能
   把本地 API 检查当作 serving 结果。
+- 0.28 上游 `MambaSpec.mamba_type` 是严格枚举字段；QCC 自定义 attention 不写入
+  伪造的字符串类型，保留上游默认值以兼容 worker/KV-transfer 路径。
 - `QCCSelfAttention` 新增可选 `archive_norm_gating`（参数量不变、O(1) 状态），
   按 local/archive 响应范数一致性抑制异常远程读；默认关闭，10 卡 sweep 的
   GPU9 打开该消融。
