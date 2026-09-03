@@ -108,6 +108,12 @@ class QCCV1MetadataBuilder(AttentionMetadataBuilder[QCCV1AttentionMetadata]):
 class QCCV1AttentionImpl(AttentionImpl[QCCV1AttentionMetadata]):
     """Reference implementation backed by one packed state page per request."""
 
+    # A page is owned by one local scheduler rank. Cross-rank context parallelism
+    # would require an explicit state exchange for the recurrent archive; rejecting
+    # it keeps the one-page ownership contract exact until that collective exists.
+    supports_dcp = False
+    supports_pcp = False
+
     def __init__(
         self,
         num_heads: int,
@@ -201,6 +207,15 @@ class QCCV1AttentionImpl(AttentionImpl[QCCV1AttentionMetadata]):
         physical = metadata.block_table[:num_requests, 0].to(
             device=kv_cache.device, dtype=torch.long
         )
+        if bool(torch.any(physical < 0).item()) or bool(
+            torch.any(physical >= kv_cache.shape[0]).item()
+        ):
+            raise RuntimeError("QCC decode batch contains an invalid physical state block")
+        if torch.unique(physical).numel() != num_requests:
+            raise RuntimeError(
+                "QCC decode requests must own distinct state pages; shared prefix pages "
+                "are not compatible with mutable packed state"
+            )
         gathered = kv_cache.index_select(0, physical).contiguous()
         pages = gathered.view(num_requests, -1)
         q = query.index_select(0, token_indices)
@@ -245,7 +260,7 @@ class QCCV1AttentionImpl(AttentionImpl[QCCV1AttentionMetadata]):
         num_requests = attn_metadata.query_start_loc_cpu.shape[0] - 1
         query_start = attn_metadata.query_start_loc_cpu[:-1]
         query_end = attn_metadata.query_start_loc_cpu[1:]
-        if num_requests > 1 and bool(torch.all((query_end - query_start) == 1).item()):
+        if num_requests >= 1 and bool(torch.all((query_end - query_start) == 1).item()):
             return self._forward_decode_batch(
                 kv_cache,
                 query,
@@ -321,6 +336,10 @@ class QCCV1AttentionBackend(AttentionBackend):
             )
         if spec.head_size_v != spec.head_size:
             raise NotImplementedError("QCC stock backend currently requires equal K/V head dimensions")
+        if torch.empty((), dtype=spec.dtype).element_size() != config.local_element_bytes:
+            raise ValueError(
+                "QCC stock local cache dtype width does not match the configured packed page"
+            )
         layout = QCCPackedStateLayout(config)
         return CircularBufferSpec(
             block_size=1,

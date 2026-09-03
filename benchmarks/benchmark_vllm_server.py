@@ -272,6 +272,11 @@ def main() -> None:
         default=None,
         help="HF tokenizer used to verify every workload prompt has --context-length tokens",
     )
+    parser.add_argument(
+        "--trust-remote-code",
+        action="store_true",
+        help="allow the explicitly selected checkpoint/tokenizer remote implementation",
+    )
     parser.add_argument("--gpu", default=None)
     parser.add_argument("--gpu-generation", default=None)
     parser.add_argument("--model-family", default=None)
@@ -308,8 +313,9 @@ def main() -> None:
                 "install qcc-transformer[hf]"
             ) from exc
         tokenizer_id = args.tokenizer or args.model
-        tokenizer = AutoTokenizer.from_pretrained(tokenizer_id)
-        config = AutoConfig.from_pretrained(args.model)
+        common = {"trust_remote_code": args.trust_remote_code}
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_id, **common)
+        config = AutoConfig.from_pretrained(args.model, **common)
         native_context_tokens = native_context_from_config(config)
         if native_context_tokens is None or native_context_tokens < args.context_length:
             raise ValueError(
