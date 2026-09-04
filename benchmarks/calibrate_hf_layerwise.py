@@ -367,9 +367,13 @@ def _initialize_codebooks_from_teacher(
                     assignment = (points @ center.transpose(0, 1)).argmax(dim=1)
                     updated = torch.zeros_like(center)
                     updated.index_add_(0, assignment, points)
-                    counts = torch.bincount(
-                        assignment, minlength=center.shape[0]
-                    ).to(updated.dtype).unsqueeze(-1)
+                    counts = torch.zeros(
+                        center.shape[0], device=assignment.device, dtype=updated.dtype
+                    )
+                    counts.index_add_(
+                        0, assignment, torch.ones_like(assignment, dtype=updated.dtype)
+                    )
+                    counts = counts.unsqueeze(-1)
                     center = F.normalize(
                         torch.where(counts > 0, updated / counts.clamp_min(1.0), center),
                         dim=-1,
