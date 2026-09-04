@@ -1,6 +1,6 @@
 # QCC Transformer 本地交接文件
 
-更新时间：2026-09-04（Asia/Shanghai）
+更新时间：2026-09-05（Asia/Shanghai）
 交接对象：下一位继续实现、评测或部署 QCC Transformer 的工程师/模型
 状态：代码已推送；99 gate 尚未通过；不要把当前结果包装成已达标结果。
 
@@ -132,6 +132,7 @@ teacher 特征现在通过未 patch attention 模块的 forward-pre-hook 直接�
 - Phi-4-mini 64K matched streaming（chunk 512、window 128、codes 16）：Full-KV `661.83 tok/s`、peak allocated `17.43GB`、reserved `24.94GB`；QCC `2190.75 tok/s`、peak allocated `8.59GB`、reserved `8.85GB`；速度 `3.31x`，allocated reduction `50.7%`，reserved reduction `64.5%`。两侧均完成 65536 tokens。
 - Phi-4-mini 128K 同 runner：QCC 完成 `131072` tokens，`2200.34 tok/s`、peak allocated `8.59GB`；Full-KV 在第 166/256 chunk（约 `84.99K` tokens）OOM，peak allocated `20.33GB`；因此不能从该结果计算 matched speedup/80% reduction，只能记录为 QCC 可完成而 Full-KV 未完成。
 - Phi-4-mini 多 chunk 校准（4 个 train chunks、100 steps、window 128、codes 16）：训练 cosine `0.996909`，held-out cosine `0.972924`，参数比例 `0.1037%`；相较单片段过拟合有所改善，但仍未达到 `0.99`。
+- 2026-09-05 在 SSH A10G（`93ff774ffe724492bc75389676c4d5d2.region1.waas.aigate.cc:47671`）完成真实 Phi-3.5-mini 并发诊断：8K tokens/request、chunk 128、decode 4、固定 SLA 120 s、batch `1,2,4`，adapter `phi_cal_20_fix.adapter.pt`。Full-KV batch 1/2 均完成，吞吐 `1289.88/1522.60 tok/s`，TPOT `70.01/114.43 ms`，peak allocated `14.40/21.15 GB`；batch 4 在约 40/64 chunks OOM（peak `24.76 GB`）。QCC batch 1/2/4 均完成，吞吐 `1579.17/1704.02/1919.58 tok/s`，TPOT `52.43/233.14/54.99 ms`，peak allocated `7.97/8.27/8.88 GB`。按完成 batch 计 `max_full_kv_batch=2`、`max_qcc_batch=4`、并发比 `2.0x`；batch 4 因 Full-KV OOM 没有 matched speedup，不能外推为 4x 或 vLLM 结果。原始汇总已保留在 `artifacts/remote_gpu/ssh_runs/phi_concurrency_8k/summary.json`。
 
 ## 4. 已验证结果（严格区分证据等级）
 
