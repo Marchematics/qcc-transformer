@@ -4,6 +4,15 @@
 交接对象：下一位继续实现、评测或部署 QCC Transformer 的工程师/模型
 状态：代码已推送；99 gate 尚未通过；不要把当前结果包装成已达标结果。
 
+## 当前 DSW 会话（2026-09-04）
+
+- 网页入口：`https://dsw-gateway-cn-hangzhou.data.aliyun.com/dsw-2154359/lab`
+- 内置 Terminal 主机：`dsw-2154359-8fcb79487-bnct7`，工作目录 `/mnt/workspace`。
+- 规格：单卡 NVIDIA A10，显存 `23028 MiB`；检查时空闲，无 QCC/vLLM/训练进程。
+- 已尝试从 GitHub 浅克隆 `main`；DSW 出站连接 GitHub 失败（先为 HTTP/2 framing error，改 HTTP/1.1 后为无法连接 443），因此当前 `/mnt/workspace/qcc-transformer` 尚未形成可用 checkout。
+- 本地已生成源码包 `/tmp/qcc-transformer-src.tgz`（仅源码、约 825 KB，不含 `.git`、模型和 artifacts），必要时可通过 DSW 文件浏览器上传后在 Terminal 解包。
+- 新增并推送 `scripts/dsw_prepare.sh`（提交 `e7e083b`），源码可用后执行 `bash scripts/dsw_prepare.sh /mnt/workspace/qcc-transformer` 完成 GPU、依赖和 checkpoint 探测。
+
 ## 1. 项目目标与验收口径
 
 目标是让同一个真实 pretrained 1B–7B checkpoint，同时满足以下五项要求：
