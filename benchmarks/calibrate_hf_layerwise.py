@@ -936,6 +936,7 @@ def main() -> None:
     finally:
         for hook in student_hooks:
             hook.remove()
+        student_attention_outputs.clear()
 
     # Evaluate
     patched.eval()
