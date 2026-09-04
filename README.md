@@ -10,7 +10,11 @@ The archive does not store one K/V pair per historical token. For each KV head, 
 
 The intended comparison is against full KV attention and sliding-window/GQA baselines. Related work includes linear attention, recurrent memory, KV eviction, KV quantization, MLA, and Infini-attention. Local attention plus bounded recurrent state, softmax numerator/normalizer recurrences, multi-scale decay, and gated local/remote mixing are established ingredients (for example Infini-attention, ABC/GSA, RetNet/KDA, and recent compressed-KV hybrids). The defensible QCC delta is the fixed per-head landmark codebook and its response-statistics parameterization; novelty must be demonstrated by a matched state-byte/quality/latency Pareto comparison rather than by the bounded-state structure alone.
 
-QCC does not compute an exact global softmax over all historical tokens. Each code/scale response is normalized independently before routing and scale mixing, so long-range retrieval is an approximation whose quality must be measured on trained checkpoints. The repository intentionally keeps this boundary explicit and reports missing RULER/retrieval/GPU gates as missing.
+QCC does not compute an exact global softmax over all historical tokens. It uses
+a learned separable archive whose code/scale numerator and denominator masses are
+globally normalized at read time, so long-range retrieval remains an approximation
+whose quality must be measured on trained checkpoints. The repository intentionally
+keeps this boundary explicit and reports missing RULER/retrieval/GPU gates as missing.
 
 ## Install
 
