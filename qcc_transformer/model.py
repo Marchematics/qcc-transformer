@@ -105,6 +105,7 @@ class QCCArchive(nn.Module):
         prefix_landmark: bool = False,
         prefix_pair_landmark: bool = False,
         landmark_temperature: float = 1.0,
+        kernel_features: bool = False,
     ) -> None:
         super().__init__()
         if num_heads <= 0 or head_dim <= 0 or num_codes <= 0:
@@ -148,6 +149,7 @@ class QCCArchive(nn.Module):
         self.prefix_landmark = prefix_landmark
         self.prefix_pair_landmark = prefix_pair_landmark
         self.landmark_temperature = landmark_temperature
+        self.kernel_features = bool(kernel_features)
         if prefix_landmark and not persistent_landmark:
             raise ValueError("prefix_landmark requires persistent_landmark")
         if prefix_pair_landmark and not prefix_landmark:
@@ -157,7 +159,8 @@ class QCCArchive(nn.Module):
         if persistent_landmark:
             self.landmark_mix_logits = nn.Parameter(torch.zeros(num_heads))
         self.register_buffer("decay_rates", rates, persistent=True)
-        self.codes = nn.Parameter(torch.randn(num_heads, num_codes, head_dim) / math.sqrt(head_dim))
+        code_scale = 1.0 if self.kernel_features else 1.0 / math.sqrt(head_dim)
+        self.codes = nn.Parameter(torch.randn(num_heads, num_codes, head_dim) * code_scale)
         self.mix_logits = nn.Parameter(torch.zeros(num_heads, num_codes, self.num_scales))
         self.reset_state(batch_size=1, device=rates.device, dtype=torch.float32)
         self._triton_mix_cache: Tensor | None = None
@@ -175,6 +178,31 @@ class QCCArchive(nn.Module):
         self._triton_mix_cache = prepared
         self._triton_mix_cache_key = key
         return prepared
+
+    def _kernel_feature_weights(self, x: Tensor) -> Tensor:
+        """Positive random-feature map for the softmax attention kernel.
+
+        ``exp(q.k)`` is approximated by a shared feature map whose query and
+        key factors retain the historical numerator and denominator.  Norm
+        terms keep the estimator unbiased in direction while the clamp avoids
+        overflowing on bf16 activations.
+        """
+        state_dtype = self._numerator.dtype
+        codes = self.codes.to(device=x.device, dtype=state_dtype)
+        logits = torch.einsum("bhd,hmd->bhm", x.to(state_dtype), codes)
+        logits = logits / math.sqrt(self.head_dim)
+        norm_sq = x.to(state_dtype).square().sum(dim=-1, keepdim=True)
+        scale = math.sqrt(self.head_dim)
+        return torch.exp((logits - 0.5 * norm_sq / scale).clamp(min=-20.0, max=10.0))
+
+    def _kernel_feature_weights_chunk(self, x: Tensor) -> Tensor:
+        state_dtype = self._numerator.dtype
+        codes = self.codes.to(device=x.device, dtype=state_dtype)
+        logits = torch.einsum("bhed,hmd->bhem", x.to(state_dtype), codes)
+        logits = logits / math.sqrt(self.head_dim)
+        norm_sq = x.to(state_dtype).square().sum(dim=-1, keepdim=True)
+        scale = math.sqrt(self.head_dim)
+        return torch.exp((logits - 0.5 * norm_sq / scale).clamp(min=-20.0, max=10.0))
 
     def reset_state(
         self,
@@ -482,7 +510,15 @@ class QCCArchive(nn.Module):
         score = score / math.sqrt(self.head_dim)
         # Clipping bounds the reference implementation. A fused kernel should
         # use per-code log rescaling instead of clipping for higher fidelity.
-        content_weight = torch.exp(score.clamp(min=-20.0, max=10.0))
+        if self.kernel_features:
+            norm_sq = key.to(self._numerator.dtype).square().sum(dim=-1, keepdim=True)
+            content_weight = torch.exp(
+                (score - 0.5 * norm_sq / math.sqrt(self.head_dim)).clamp(
+                    min=-20.0, max=10.0
+                )
+            )
+        else:
+            content_weight = torch.exp(score.clamp(min=-20.0, max=10.0))
         if self.content_threshold is not None:
             content_weight = torch.where(
                 score >= self.content_threshold,
@@ -700,7 +736,7 @@ class QCCArchive(nn.Module):
         if _include_landmarks:
             self._update_landmark_chunk(key, value)
 
-        if self.lazy_decay and self.use_triton and key.is_cuda:
+        if self.lazy_decay and self.use_triton and key.is_cuda and not self.kernel_features:
             if self.active_codes is None:
                 raise RuntimeError("lazy_decay requires active_codes")
             if self.active_codes & (self.active_codes - 1) == 0:
@@ -762,7 +798,7 @@ class QCCArchive(nn.Module):
         # event, which made chunked serving launch-bound even when the archive
         # state itself was tiny.  Sparse/lazy archives retain their dedicated
         # top-k path for now; CPU and unsupported devices use the block scan.
-        if self.use_triton and key.is_cuda and self.active_codes is None:
+        if self.use_triton and key.is_cuda and self.active_codes is None and not self.kernel_features:
             from .triton_kernels import TRITON_AVAILABLE, triton_update_read_archive_chunk
 
             if TRITON_AVAILABLE:
@@ -833,9 +869,17 @@ class QCCArchive(nn.Module):
             block_key = key[:, :, start:end]
             block_value = value[:, :, start:end]
             score = torch.einsum("bhed,hmd->bhem", block_key.to(state_dtype), codes)
-            content_weight = torch.exp(
-                (score / math.sqrt(dim)).clamp(min=-20.0, max=10.0)
-            )
+            if self.kernel_features:
+                key_norm_sq = block_key.to(state_dtype).square().sum(dim=-1, keepdim=True)
+                content_weight = torch.exp(
+                    (score / math.sqrt(dim) - 0.5 * key_norm_sq / math.sqrt(dim)).clamp(
+                        min=-20.0, max=10.0
+                    )
+                )
+            else:
+                content_weight = torch.exp(
+                    (score / math.sqrt(dim)).clamp(min=-20.0, max=10.0)
+                )
             if self.content_threshold is not None:
                 content_weight = torch.where(
                     score / math.sqrt(dim) >= self.content_threshold,
@@ -880,6 +924,24 @@ class QCCArchive(nn.Module):
         routing_logits = torch.einsum(
             "bhd,hmd->bhm", query.to(codes.dtype), codes
         ) / math.sqrt(self.head_dim)
+        if self.kernel_features:
+            feature = torch.exp(
+                (
+                    routing_logits
+                    - 0.5
+                    * query.to(codes.dtype).square().sum(dim=-1, keepdim=True)
+                    / math.sqrt(self.head_dim)
+                ).clamp(min=-20.0, max=10.0)
+            )
+            mix = F.softmax(
+                self.mix_logits.to(device=query.device, dtype=numerator.dtype), dim=-1
+            )
+            weighted_num = torch.einsum("hmj,bhmjd->bhmd", mix, numerator)
+            weighted_den = torch.einsum("hmj,bhmj->bhm", mix, denominator)
+            total_num = (feature.unsqueeze(-1) * weighted_num).sum(dim=2)
+            total_den = (feature * weighted_den).sum(dim=2).clamp_min(1e-8)
+            response = (total_num / total_den.unsqueeze(-1)).to(query.dtype)
+            return self._combine_landmark(query, response) if include_landmarks else response
         active = self.active_codes
         if active is None or active >= self.num_codes or torch.is_grad_enabled():
             denom = denominator.clamp_min(1e-8)
@@ -986,6 +1048,22 @@ class QCCArchive(nn.Module):
         routing_logits = torch.einsum(
             "bhed,hmd->bhem", query.to(codes.dtype), codes
         ) / math.sqrt(self.head_dim)
+        if self.kernel_features:
+            query_norm_sq = query.to(codes.dtype).square().sum(dim=-1, keepdim=True)
+            feature = torch.exp(
+                (
+                    routing_logits - 0.5 * query_norm_sq / math.sqrt(self.head_dim)
+                ).clamp(min=-20.0, max=10.0)
+            )
+            mix = F.softmax(
+                self.mix_logits.to(device=query.device, dtype=numerator.dtype), dim=-1
+            )
+            weighted_num = torch.einsum("hmj,bhemjd->bhemd", mix, numerator)
+            weighted_den = torch.einsum("hmj,bhemj->bhem", mix, denominator)
+            total_num = (feature.unsqueeze(-1) * weighted_num).sum(dim=3)
+            total_den = (feature * weighted_den).sum(dim=3).clamp_min(1e-8)
+            response = (total_num / total_den.unsqueeze(-1)).to(query.dtype)
+            return self._combine_landmark(query, response) if include_landmarks else response
         active = self.active_codes
         if active is None or active >= self.num_codes:
             denom = denominator.clamp_min(1e-8)
@@ -1033,6 +1111,7 @@ class QCCArchive(nn.Module):
             and self.use_triton
             and not torch.is_grad_enabled()
             and query.is_cuda
+            and not self.kernel_features
         ):
             from .triton_kernels import TRITON_AVAILABLE, triton_read_archive
 
@@ -1074,6 +1153,7 @@ class QCCSelfAttention(nn.Module):
         archive_prefix_landmark: bool = False,
         archive_prefix_pair_landmark: bool = False,
         archive_landmark_temperature: float = 1.0,
+        archive_kernel_features: bool = False,
         archive_lexical_landmark: bool = False,
         archive_position_invariant: bool = False,
         rope_theta: Optional[float] = None,
@@ -1174,6 +1254,7 @@ class QCCSelfAttention(nn.Module):
             prefix_landmark=archive_prefix_landmark,
             prefix_pair_landmark=archive_prefix_pair_landmark,
             landmark_temperature=archive_landmark_temperature,
+            kernel_features=archive_kernel_features,
         )
         self.archive_read_stride = archive_read_stride
         self.archive_lexical_landmark = archive_lexical_landmark

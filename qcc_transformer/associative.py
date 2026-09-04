@@ -48,6 +48,7 @@ class SetAssociativeLandmarkBank(nn.Module):
         diversity_weight: float = 0.25,
         recency_weight: float = 0.0,
         temperature: float = 8.0,
+        replacement_policy: str = "score",
     ) -> None:
         super().__init__()
         if min(num_heads, head_dim, num_sets, ways, probe_sets) <= 0:
@@ -56,6 +57,8 @@ class SetAssociativeLandmarkBank(nn.Module):
             raise ValueError("probe_sets cannot exceed num_sets")
         if not math.isfinite(temperature) or temperature <= 0:
             raise ValueError("temperature must be positive and finite")
+        if replacement_policy not in ("score", "fifo"):
+            raise ValueError("replacement_policy must be 'score' or 'fifo'")
         self.num_heads = num_heads
         self.head_dim = head_dim
         self.num_sets = num_sets
@@ -65,6 +68,7 @@ class SetAssociativeLandmarkBank(nn.Module):
         self.diversity_weight = diversity_weight
         self.recency_weight = recency_weight
         self.temperature = temperature
+        self.replacement_policy = replacement_policy
 
         scale = 1.0 / math.sqrt(head_dim)
         self.set_codes = nn.Parameter(torch.randn(num_heads, num_sets, head_dim) * scale)
@@ -87,6 +91,9 @@ class SetAssociativeLandmarkBank(nn.Module):
         self._values = torch.zeros_like(self._keys)
         self._scores = torch.full(shape, -torch.inf, device=device, dtype=dtype)
         self._ages = torch.zeros(shape, device=device, dtype=torch.long)
+        self._fifo_cursor = torch.zeros(
+            batch_size, self.num_heads, device=device, dtype=torch.long
+        )
         self._step = 0
 
     @property
@@ -148,6 +155,44 @@ class SetAssociativeLandmarkBank(nn.Module):
             raise ValueError("key shape does not match bank configuration")
         self._ensure_state(key)
         self._step += 1
+
+        # FIFO is a deliberately simple bounded-quality mode.  It avoids
+        # making replacement depend on an uncalibrated salience score while
+        # retaining exactly the same fixed state footprint.  The caller still
+        # controls admission with ``write_mask``.
+        if self.replacement_policy == "fifo":
+            slots = self.num_sets * self.ways
+            batch_index = torch.arange(key.shape[0], device=key.device)[:, None]
+            head_index = torch.arange(self.num_heads, device=key.device)[None, :]
+            should_write = torch.ones(
+                key.shape[0], self.num_heads, device=key.device, dtype=torch.bool
+            )
+            if write_mask is not None:
+                if write_mask.shape == (key.shape[0],):
+                    write_mask = write_mask[:, None].expand(-1, self.num_heads)
+                if write_mask.shape != should_write.shape:
+                    raise ValueError("write_mask must have shape [batch] or [batch, heads]")
+                should_write &= write_mask.to(device=key.device, dtype=torch.bool)
+            cursor = self._fifo_cursor.to(device=key.device)
+            write_set = torch.div(cursor, self.ways, rounding_mode="floor")
+            write_way = cursor % self.ways
+            selected_batch = batch_index.expand_as(cursor)[should_write]
+            selected_head = head_index.expand_as(cursor)[should_write]
+            selected_set = write_set[should_write]
+            selected_way = write_way[should_write]
+            self._keys[selected_batch, selected_head, selected_set, selected_way] = key.to(
+                self._keys.dtype
+            )[should_write]
+            self._values[selected_batch, selected_head, selected_set, selected_way] = value.to(
+                self._values.dtype
+            )[should_write]
+            self._scores[selected_batch, selected_head, selected_set, selected_way] = (
+                0.0 if admission_bias is None else admission_bias.to(self._scores.dtype)[should_write]
+            )
+            self._ages[selected_batch, selected_head, selected_set, selected_way] = self._step
+            next_cursor = (cursor + should_write.to(cursor.dtype)) % slots
+            self._fifo_cursor = next_cursor
+            return
 
         batch_index = torch.arange(key.shape[0], device=key.device)[:, None]
         head_index = torch.arange(self.num_heads, device=key.device)[None, :]

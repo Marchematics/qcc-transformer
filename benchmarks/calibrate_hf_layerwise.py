@@ -19,7 +19,7 @@ from pathlib import Path
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from qcc_transformer import patch_hf_model, save_retrofit_adapter
+from qcc_transformer import patch_hf_model, reset_hf_qcc_cache, save_retrofit_adapter
 from qcc_transformer.hf_loading import load_hf_causal_lm, model_input_device
 
 
@@ -95,6 +95,18 @@ def _chunked_kl_divergence(
     return total * (temperature * temperature) / tokens
 
 
+def _teacher_argmax_cross_entropy(
+    student: torch.Tensor, teacher_cpu: torch.Tensor
+) -> torch.Tensor:
+    """Match the teacher's selected token without copying its vocabulary logits."""
+    if student.shape != teacher_cpu.shape:
+        raise ValueError(f"student/teacher shape mismatch: {student.shape} vs {teacher_cpu.shape}")
+    targets = teacher_cpu.argmax(dim=-1).to(device=student.device)
+    return torch.nn.functional.cross_entropy(
+        student.reshape(-1, student.shape[-1]), targets.reshape(-1)
+    )
+
+
 def _distillation_loss(
     student: torch.Tensor,
     teacher_cpu: torch.Tensor,
@@ -102,6 +114,7 @@ def _distillation_loss(
     chunk_size: int = 8192,
     cosine_weight: float = 0.0,
     kl_weight: float = 0.0,
+    ce_weight: float = 0.0,
     kl_temperature: float = 2.0,
 ) -> torch.Tensor:
     """Numerically stable logit distillation objective.
@@ -112,12 +125,16 @@ def _distillation_loss(
     agreement while retaining the MSE scale.  ``cosine_weight=0`` is exactly
     the historical objective for reproducibility.
     """
-    if not 0.0 <= cosine_weight <= 1.0 or not 0.0 <= kl_weight <= 1.0:
-        raise ValueError("cosine_weight and kl_weight must lie in [0, 1]")
-    if cosine_weight + kl_weight > 1.0:
-        raise ValueError("cosine_weight + kl_weight must not exceed 1")
+    if (
+        not 0.0 <= cosine_weight <= 1.0
+        or not 0.0 <= kl_weight <= 1.0
+        or not 0.0 <= ce_weight <= 1.0
+    ):
+        raise ValueError("cosine_weight, kl_weight, and ce_weight must lie in [0, 1]")
+    if cosine_weight + kl_weight + ce_weight > 1.0:
+        raise ValueError("cosine_weight + kl_weight + ce_weight must not exceed 1")
     mse = _chunked_mse(student, teacher_cpu, chunk_size=chunk_size)
-    if cosine_weight == 0.0 and kl_weight == 0.0:
+    if cosine_weight == 0.0 and kl_weight == 0.0 and ce_weight == 0.0:
         return mse
     cosine = (
         _mean_cosine_from_cpu(student, teacher_cpu, chunk_size=chunk_size)
@@ -134,7 +151,17 @@ def _distillation_loss(
         if kl_weight
         else student.new_zeros((), dtype=torch.float32)
     )
-    return (1.0 - cosine_weight - kl_weight) * mse + cosine_weight * (1.0 - cosine) + kl_weight * kl
+    ce = (
+        _teacher_argmax_cross_entropy(student, teacher_cpu)
+        if ce_weight
+        else student.new_zeros((), dtype=torch.float32)
+    )
+    return (
+        (1.0 - cosine_weight - kl_weight - ce_weight) * mse
+        + cosine_weight * (1.0 - cosine)
+        + kl_weight * kl
+        + ce_weight * ce
+    )
 
 
 def parse_layer_spec(spec: str, num_layers: int) -> list[int]:
@@ -214,6 +241,10 @@ def main() -> None:
         "--archive-norm-gating", action="store_true",
         help="parameter-free norm agreement gate for archive contribution",
     )
+    parser.add_argument(
+        "--archive-kernel-features", action="store_true",
+        help="use positive random-feature softmax kernel archive",
+    )
     parser.add_argument("--max-tokens", type=int, default=2048)
     parser.add_argument(
         "--num-train-chunks", type=int, default=1,
@@ -243,15 +274,25 @@ def main() -> None:
              "0 preserves historical MSE-only behavior",
     )
     parser.add_argument("--kl-weight", type=float, default=0.5)
+    parser.add_argument(
+        "--ce-weight",
+        type=float,
+        default=0.0,
+        help="weight of teacher-argmax cross entropy; 0 preserves the historical objective",
+    )
     parser.add_argument("--kl-temperature", type=float, default=2.0)
     args = parser.parse_args()
 
     if args.steps <= 0 or args.lr <= 0 or args.max_tokens <= 0 or args.num_train_chunks <= 0:
         raise ValueError("steps, lr, max-tokens, and num-train-chunks must be positive")
-    if not 0.0 <= args.cosine_weight <= 1.0 or not 0.0 <= args.kl_weight <= 1.0:
-        raise ValueError("cosine-weight and kl-weight must lie in [0, 1]")
-    if args.cosine_weight + args.kl_weight > 1.0:
-        raise ValueError("cosine-weight + kl-weight must not exceed 1")
+    if (
+        not 0.0 <= args.cosine_weight <= 1.0
+        or not 0.0 <= args.kl_weight <= 1.0
+        or not 0.0 <= args.ce_weight <= 1.0
+    ):
+        raise ValueError("cosine-weight, kl-weight, and ce-weight must lie in [0, 1]")
+    if args.cosine_weight + args.kl_weight + args.ce_weight > 1.0:
+        raise ValueError("cosine-weight + kl-weight + ce-weight must not exceed 1")
     if args.kl_temperature <= 0:
         raise ValueError("kl-temperature must be positive")
     if args.archive_prefix_landmark and not args.archive_persistent_landmark:
@@ -362,6 +403,7 @@ def main() -> None:
         archive_prefix_pair_landmark=args.archive_prefix_pair_landmark,
         archive_landmark_temperature=args.archive_landmark_temperature,
         archive_norm_gating=args.archive_norm_gating,
+        archive_kernel_features=args.archive_kernel_features,
         kv_head_policy=args.kv_head_policy,
         gate_bias_init=args.gate_bias_init,
     )
@@ -430,12 +472,20 @@ def main() -> None:
     for step in range(args.steps):
         optimizer.zero_grad(set_to_none=True)
         batch_index = step % len(train_batches)
+        # Every calibration batch is an independent request.  QCC keeps its
+        # history inside each adapted attention layer, so explicitly reset it
+        # between optimizer steps instead of letting ``_seen_tokens`` turn
+        # unrelated examples into one ever-growing stream.
+        reset_hf_qcc_cache(
+            patched, batch_size=int(train_batches[batch_index]["input_ids"].shape[0])
+        )
         student = patched(**train_batches[batch_index], use_cache=False).logits
         loss = _distillation_loss(
             student,
             train_teachers[batch_index],
             cosine_weight=args.cosine_weight,
             kl_weight=args.kl_weight,
+            ce_weight=args.ce_weight,
             kl_temperature=args.kl_temperature,
         )
         if not torch.isfinite(loss):
@@ -455,6 +505,9 @@ def main() -> None:
         train_cosines = []
         train_agreements = []
         for batch, teacher in zip(train_batches, train_teachers):
+            reset_hf_qcc_cache(
+                patched, batch_size=int(batch["input_ids"].shape[0])
+            )
             train_student = patched(**batch, use_cache=False).logits
             train_cosines.append(_mean_cosine_from_cpu(train_student, teacher))
             train_agreements.append((train_student.argmax(-1).cpu() == teacher.argmax(-1)).float().mean())
@@ -466,6 +519,9 @@ def main() -> None:
         held_out_gate_passed = None
 
         if held_out_teacher is not None:
+            reset_hf_qcc_cache(
+                patched, batch_size=int(held_out_encoded["input_ids"].shape[0])
+            )
             held_out_student = patched(**held_out_encoded, use_cache=False).logits
             held_out_cosine = _mean_cosine_from_cpu(held_out_student, held_out_teacher)
             held_out_agreement = (held_out_student.argmax(-1).cpu() == held_out_teacher.argmax(-1)).float().mean()
@@ -486,6 +542,7 @@ def main() -> None:
         retrofit={
             "window_size": args.window_size,
             "num_codes": args.num_codes,
+            "archive_kernel_features": args.archive_kernel_features,
             "archive_position_invariant": args.archive_position_invariant,
             "patched_layers": replaced,
             "calibrated_layers": calibrate_layers,
@@ -513,7 +570,9 @@ def main() -> None:
         "steps": args.steps,
         "cosine_weight": args.cosine_weight,
         "kl_weight": args.kl_weight,
+        "ce_weight": args.ce_weight,
         "kl_temperature": args.kl_temperature,
+        "archive_kernel_features": args.archive_kernel_features,
         "train_mean_logit_cosine": float(train_cosine.item()),
         "train_top1_agreement": float(train_agreement.item()),
     }

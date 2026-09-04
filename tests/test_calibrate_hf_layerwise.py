@@ -73,6 +73,17 @@ def test_distillation_loss_cosine_term_is_finite():
     assert loss.item() < 1e-6
 
 
+def test_distillation_loss_ce_term_is_not_short_circuited():
+    import torch
+
+    student = torch.tensor([[[8.0, 0.0, 0.0]]])
+    teacher = torch.tensor([[[0.0, 8.0, 0.0]]])
+    mse = _chunked_mse(student, teacher, chunk_size=2)
+    loss = _distillation_loss(student, teacher, chunk_size=2, ce_weight=0.5)
+    assert torch.isfinite(loss)
+    assert not torch.allclose(loss, mse)
+
+
 def test_chunked_kl_is_zero_for_identical_logits():
     import torch
 

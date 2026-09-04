@@ -102,6 +102,7 @@ class HybridQCCArchive(QCCArchive):
         exact_num_sets: int = 128,
         exact_ways: int = 4,
         exact_probe_sets: int | None = None,
+        exact_replacement_policy: str = "score",
         admission_threshold: float = 0.0,
         admission_bias_init: float = -4.0,
         max_inserts_per_chunk: int = 8,
@@ -152,6 +153,7 @@ class HybridQCCArchive(QCCArchive):
             ways=exact_ways,
             probe_sets=probes,
             diversity_weight=0.10,
+            replacement_policy=exact_replacement_policy,
         )
         # Hybrid admission is supplied by the teacher-trained predictor below.
         # Keep the bank's legacy internal score neutral and frozen.
@@ -499,10 +501,22 @@ def load_hybrid_retrofit_adapter(
     if not isinstance(state, dict):
         raise ValueError("retrofit checkpoint must contain a state_dict mapping")
     missing, unexpected = model.load_state_dict(state, strict=False)
+    # A regular QCC adapter intentionally contains only the shared recurrent
+    # archive/gate weights.  The exact tier is an optional runtime upgrade, so
+    # its parameters must be allowed to remain at their configured defaults
+    # when loading that adapter into a hybrid structure.  Base decay rates are
+    # reconstructed from the patched model configuration for the same reason.
     relevant_missing = [
         key
         for key in missing
-        if ".qcc.archive." in key or ".qcc.gate." in key
+        if (".qcc.archive." in key
+            and not key.endswith("archive.decay_rates")
+            and not (
+                ".qcc.archive.exact_" in key
+                or ".qcc.archive.exact_bank." in key
+                or ".qcc.archive.admission." in key
+            ))
+        or ".qcc.gate." in key
     ]
     relevant_unexpected = [
         key

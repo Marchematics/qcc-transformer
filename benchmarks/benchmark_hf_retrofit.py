@@ -24,6 +24,7 @@ from qcc_transformer import (
     reset_hf_qcc_cache,
 )
 from qcc_transformer.hf_loading import load_hf_causal_lm, model_input_device
+from qcc_transformer.hybrid_archive import load_hybrid_retrofit_adapter
 
 
 def main() -> None:
@@ -37,6 +38,11 @@ def main() -> None:
     )
     parser.add_argument("--window-size", type=int, default=128)
     parser.add_argument("--num-codes", type=int, default=64)
+    parser.add_argument(
+        "--archive-kernel-features",
+        action="store_true",
+        help="use positive random-feature softmax kernel archive (reference path)",
+    )
     parser.add_argument(
         "--archive-position-invariant",
         action=argparse.BooleanOptionalAction,
@@ -56,11 +62,38 @@ def main() -> None:
         default=None,
         help="optional QCC-only adapter checkpoint produced by calibrate_hf_retrofit.py",
     )
+    parser.add_argument(
+        "--hybrid",
+        action="store_true",
+        help="load --adapter with the fixed-capacity exact-tier hybrid archive",
+    )
+    parser.add_argument("--exact-num-sets", type=int, default=128)
+    parser.add_argument("--exact-ways", type=int, default=4)
+    parser.add_argument("--exact-probe-sets", type=int, default=None)
+    parser.add_argument(
+        "--hybrid-replacement-policy",
+        choices=("score", "fifo"),
+        default="score",
+        help="bounded exact-tier replacement policy",
+    )
+    parser.add_argument("--hybrid-admission-threshold", type=float, default=0.0)
+    parser.add_argument("--hybrid-admission-bias-init", type=float, default=-4.0)
+    parser.add_argument("--hybrid-max-inserts-per-chunk", type=int, default=8)
+    parser.add_argument("--hybrid-exact-mix-bias-init", type=float, default=-4.0)
+    parser.add_argument("--hybrid-exact-confidence-threshold", type=float, default=0.60)
+    parser.add_argument(
+        "--gate-bias-init",
+        type=float,
+        default=2.0,
+        help="initial local-path gate bias used when constructing the retrofit",
+    )
     parser.add_argument("--run-id", default=None, help="provenance id copied into the JSON report")
     parser.add_argument("--output", type=Path, default=None, help="also write the JSON report to this path")
     args = parser.parse_args()
     if args.prompt_file is not None and args.jsonl is not None:
         raise SystemExit("use only one of --prompt-file and --jsonl")
+    if args.hybrid and args.adapter is None:
+        raise SystemExit("--hybrid requires --adapter")
     prompts = [args.prompt]
     if args.prompt_file is not None:
         args.prompt = args.prompt_file.read_text(encoding="utf-8")
@@ -119,12 +152,31 @@ def main() -> None:
     patch_kwargs = {
         "window_size": args.window_size,
         "num_codes": args.num_codes,
+        "archive_kernel_features": args.archive_kernel_features,
         "archive_position_invariant": args.archive_position_invariant,
         "max_position_embeddings": args.max_position_embeddings,
         "kv_head_policy": args.kv_head_policy,
+        "gate_bias_init": args.gate_bias_init,
     }
     if args.adapter is None:
         replaced = patch_hf_model(patched, **patch_kwargs)
+    elif args.hybrid:
+        replaced = load_hybrid_retrofit_adapter(
+            patched,
+            args.adapter,
+            hybrid_kwargs={
+                "exact_num_sets": args.exact_num_sets,
+                "exact_ways": args.exact_ways,
+                "exact_probe_sets": args.exact_probe_sets,
+                "exact_replacement_policy": args.hybrid_replacement_policy,
+                "admission_threshold": args.hybrid_admission_threshold,
+                "admission_bias_init": args.hybrid_admission_bias_init,
+                "max_inserts_per_chunk": args.hybrid_max_inserts_per_chunk,
+                "exact_mix_bias_init": args.hybrid_exact_mix_bias_init,
+                "exact_confidence_threshold": args.hybrid_exact_confidence_threshold,
+            },
+            **patch_kwargs,
+        )
     else:
         replaced = load_retrofit_adapter(patched, args.adapter, **patch_kwargs)
     patched_device = model_input_device(patched, device)
@@ -153,6 +205,11 @@ def main() -> None:
         "tokens": int(sum(item[0]["input_ids"].shape[-1] for item in references)),
         "records": len(reports),
         "patched_layers": replaced,
+        "window_size": args.window_size,
+        "num_codes": args.num_codes,
+        "archive_kernel_features": args.archive_kernel_features,
+        "gate_bias_init": args.gate_bias_init,
+        "archive_position_invariant": args.archive_position_invariant,
         "mean_logit_cosine": float(cosine),
         "top1_agreement": float(top1),
         "quality_gate": args.quality_gate,
@@ -163,6 +220,28 @@ def main() -> None:
         "synthetic": False,
         "qcc_only": False,
         "adapter": str(args.adapter) if args.adapter is not None else None,
+        "hybrid": args.hybrid,
+        "exact_num_sets": args.exact_num_sets if args.hybrid else None,
+        "exact_ways": args.exact_ways if args.hybrid else None,
+        "exact_probe_sets": args.exact_probe_sets if args.hybrid else None,
+        "hybrid_admission_threshold": (
+            args.hybrid_admission_threshold if args.hybrid else None
+        ),
+        "hybrid_admission_bias_init": (
+            args.hybrid_admission_bias_init if args.hybrid else None
+        ),
+        "hybrid_max_inserts_per_chunk": (
+            args.hybrid_max_inserts_per_chunk if args.hybrid else None
+        ),
+        "hybrid_replacement_policy": (
+            args.hybrid_replacement_policy if args.hybrid else None
+        ),
+        "hybrid_exact_mix_bias_init": (
+            args.hybrid_exact_mix_bias_init if args.hybrid else None
+        ),
+        "hybrid_exact_confidence_threshold": (
+            args.hybrid_exact_confidence_threshold if args.hybrid else None
+        ),
         "per_record": [r.as_dict() for r in reports],
         "note": "Matched Full-KV logit gate; task quality still requires held-out RULER/LongBench evaluation.",
     }
