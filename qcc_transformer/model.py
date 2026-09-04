@@ -1264,7 +1264,12 @@ class QCCSelfAttention(nn.Module):
                 v = v.view(*v.shape[:-1], kv_heads, head_dim).repeat_interleave(
                     self.num_heads // kv_heads, dim=-2
                 ).reshape(*v.shape[:-1], self.d_model)
-            return q, k, v, self.gate(hidden)
+            gate_weight = getattr(self.gate, "weight", None)
+            if isinstance(gate_weight, Tensor) and gate_weight.dtype != hidden.dtype:
+                gate = self.gate(hidden.to(dtype=gate_weight.dtype)).to(hidden.dtype)
+            else:
+                gate = self.gate(hidden)
+            return q, k, v, gate
 
         # Retrofit adapters may expose an explicit GQA/MQA expansion module
         # for K/V.  Fuse the *raw* Q/K/V projections before the explicit
@@ -2665,7 +2670,11 @@ class QCCSelfAttention(nn.Module):
             local_out = torch.einsum("bhl,bhld->bhd", local_prob, lv)
             if self.use_archive and t >= self.window_size:
                 archive_out = self.archive.read(archive_q_source[:, :, t])
-                gate = torch.sigmoid(self.gate(hidden[:, t])).unsqueeze(-1)
+                gate_input = hidden[:, t]
+                gate_weight = getattr(self.gate, "weight", None)
+                if isinstance(gate_weight, Tensor) and gate_weight.dtype != gate_input.dtype:
+                    gate_input = gate_input.to(dtype=gate_weight.dtype)
+                gate = torch.sigmoid(self.gate(gate_input)).to(hidden.dtype).unsqueeze(-1)
                 head_out = self._mix_local_archive(local_out, archive_out, gate)
             else:
                 head_out = local_out
