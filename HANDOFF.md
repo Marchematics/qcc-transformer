@@ -13,6 +13,14 @@
 - 本地已生成源码包 `/tmp/qcc-transformer-src.tgz`（仅源码、约 825 KB，不含 `.git`、模型和 artifacts），必要时可通过 DSW 文件浏览器上传后在 Terminal 解包。
 - 新增并推送 `scripts/dsw_prepare.sh`（提交 `e7e083b`），源码可用后执行 `bash scripts/dsw_prepare.sh /mnt/workspace/qcc-transformer` 完成 GPU、依赖和 checkpoint 探测。
 
+### SSH A10G 实验（2026-09-04）
+
+- 新主机：`root@93ff774ffe724492bc75389676c4d5d2.region1.waas.aigate.cc:47671`，单卡 NVIDIA A10G 24564 MiB；代码位于 `/home/waas/qcc-transformer`，使用 `/root/miniconda3/bin/python`（torch `2.7.0+cu128`、transformers `5.16.0.dev0`）。
+- 可复用真实 checkpoint：`/datasets/ComfyUI/models/LLM/Phi-3.5-mini-instruct`，3.8B、原生 `131072` context。
+- `ssh_phi_cal_20_fix`：512 tokens、20 steps、window 128、16 codes、bf16；adapter `artifacts/remote_gpu/ssh_runs/phi_cal_20_fix.adapter.pt`，参数 `3,825,864,704`，可训练 `4,785,152`（`0.1251%`），训练片段 cosine `0.999110`。
+- 四段独立短 held-out（每段约 450 tokens）平均 cosine `0.960659`、平均 top-1 `0.617042`，`fidelity_passed=false`；这是 matched HF 诊断，不是 RULER/LongBench/PG-19 结果。
+- 该次实验暴露并修复了 bf16 hidden 与 fp32 gate 的 dtype mismatch，修复提交为 `86c839e`。
+
 ## 1. 项目目标与验收口径
 
 目标是让同一个真实 pretrained 1B–7B checkpoint，同时满足以下五项要求：
