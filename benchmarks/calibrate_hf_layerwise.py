@@ -314,11 +314,11 @@ def _initialize_codebooks_from_teacher(
 ) -> None:
     """Initialize archive codes from real teacher key projections.
 
-    The archive codebook is in key space.  Starting it from evenly spaced
-    teacher keys gives the first optimizer step useful addresses and leaves the
-    code vectors fully trainable afterwards.  The teacher snapshots are
-    bounded CPU samples, so this does not change the bounded activation memory
-    budget.  ``random`` remains available as an explicit ablation.
+    The archive codebook is in key space.  Starting it from teacher key geometry
+    gives the first optimizer step useful addresses and leaves the code vectors
+    fully trainable afterwards.  The teacher snapshots are bounded CPU samples,
+    so this does not change the bounded activation memory budget.  ``random``
+    remains available as an explicit ablation.
     """
 
     if strategy not in {"key-sample", "kmeans", "random"}:
