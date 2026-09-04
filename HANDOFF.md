@@ -152,6 +152,8 @@ teacher 特征现在通过未 patch attention 模块的 forward-pre-hook 直接�
 - 分层校准默认层选择已从 `last-half` 调整为 `all`：已有真实诊断中全层校准的 held-out fidelity 明显高于只训练后半层；后半层仍可显式指定作为参数预算消融。全层仍只开放 QCC archive/gate（约 0.1% 参数），不改变部署接口。
 - 分层校准训练路径现在优先调用 HF backbone 的 `last_hidden_state`，按词表 tile 计算与原实现等价的 MSE/KL/CE/margin loss，避免 GPU 保留完整 student logits；不具备标准 `model`/output-embedding 接口的模型仍走原 full-logit fallback。该改动已在真实 HF tiny Llama 流程验证，需在真实长上下文模型上重新校准。
 - 2026-09-05 后续质量校准：`--code-init kmeans` 已成为默认，采用 teacher key 的确定性 cosine k-means 初始化；`--distill-long-range-only` 默认只反向优化窗口之外的 archive 位置。两项改动尚未在真实长上下文 checkpoint 上产生新的 gate 结果。
+- 2026-09-05 T4 复核暴露两项工程问题并已修复：分层校准释放 teacher 时仍保留 attention 子模块引用，加载 student 会被系统 `SIGKILL`；现保存层数整数后显式删除模块列表并执行 `gc.collect()`。Phi-3.5 attention-output 辅助损失改为 fp32 计算，避免 fp16 平方溢出；新增单元测试覆盖该数值边界。
+- 同轮真实 Phi-3.5-mini T4 诊断：全层 512-token 反向仍因 activation peak OOM；last-quarter（8/32 层，0.0313% 参数）50 步可完成，但 held-out cosine `0.9148`、top-1 `0.4463`，未通过 `0.99`。固定容量 quality-first exact shadow 在 512-token matched HF 上最高记录 cosine `0.9687`、top-1 `0.5781`，仍不能替代 RULER/LongBench/PG-19。
 - 2026-09-05 质量优先校准：默认 `--distill-long-range-only` 只对超出 exact local window 的位置计算蒸馏损失，避免已精确匹配的前缀 token 稀释 archive 梯度；`--no-distill-long-range-only` 保留旧的全序列消融。`--code-init` 默认改为确定性 cosine k-means，`key-sample` 与 `random` 仍可复现旧初始化。
 
 ### 本地回归
