@@ -2,8 +2,10 @@
 
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from torch import nn
 
 
 _PATH = Path(__file__).parents[1] / "benchmarks" / "calibrate_hf_layerwise.py"
@@ -19,6 +21,29 @@ _chunked_kl_divergence = _MODULE._chunked_kl_divergence
 _distillation_loss = _MODULE._distillation_loss
 _teacher_top2_margin_loss = _MODULE._teacher_top2_margin_loss
 quality_gate_passed = _MODULE.quality_gate_passed
+
+
+class _Attention(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.q_proj = nn.Linear(16, 16, bias=False)
+        self.k_proj = nn.Linear(16, 16, bias=False)
+        self.v_proj = nn.Linear(16, 16, bias=False)
+        self.o_proj = nn.Linear(16, 16, bias=False)
+        self.num_heads = 4
+        self.num_key_value_heads = 4
+
+
+class _Model(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.config = SimpleNamespace(
+            max_position_embeddings=64,
+            rope_theta=None,
+            num_attention_heads=4,
+            num_key_value_heads=4,
+        )
+        self.attn = _Attention()
 
 
 @pytest.mark.parametrize(
@@ -57,6 +82,22 @@ def test_positioned_chunks_preserve_absolute_offsets():
     assert [int(chunk["position_ids"][0, 0]) for chunk in chunks] == [0, 11, 22]
     assert [int(chunk["position_ids"][0, -1]) for chunk in chunks] == [7, 18, 29]
     assert all(chunk["input_ids"].shape == (1, 8) for chunk in chunks)
+
+
+def test_key_sample_code_init_uses_teacher_key_geometry():
+    import torch
+
+    model = _Model()
+    from qcc_transformer import patch_hf_model
+
+    patch_hf_model(model, window_size=4, num_codes=4, use_triton=False)
+    hidden = torch.randn(1, 8, 16)
+    original = model.attn.qcc.archive.codes.detach().clone()
+    _MODULE._initialize_codebooks_from_teacher(
+        model, {0: hidden}, strategy="key-sample"
+    )
+    assert not torch.equal(model.attn.qcc.archive.codes, original)
+    assert torch.isfinite(model.attn.qcc.archive.codes).all()
 
 
 def test_chunked_distillation_helpers_match_reference():

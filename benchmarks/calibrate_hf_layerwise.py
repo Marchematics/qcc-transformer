@@ -304,6 +304,122 @@ def _encode_positioned_chunks(
     return batches
 
 
+@torch.no_grad()
+def _initialize_codebooks_from_teacher(
+    model,
+    teacher_hidden: dict[int, torch.Tensor],
+    *,
+    strategy: str,
+) -> None:
+    """Initialize archive codes from real teacher key projections.
+
+    The archive codebook is in key space.  Starting it from evenly spaced
+    teacher keys gives the first optimizer step useful addresses and leaves the
+    code vectors fully trainable afterwards.  The teacher snapshots are
+    bounded CPU samples, so this does not change the bounded activation memory
+    budget.  ``random`` remains available as an explicit ablation.
+    """
+
+    if strategy not in {"key-sample", "random"}:
+        raise ValueError("strategy must be 'key-sample' or 'random'")
+    if strategy == "random":
+        return
+    wrappers = [
+        module
+        for module in model.modules()
+        if getattr(module, "qcc", None) is not None
+    ]
+    for wrapper in wrappers:
+        qcc = wrapper.qcc
+        layer_index = getattr(qcc, "_qcc_layer_index", None)
+        if layer_index not in teacher_hidden:
+            continue
+        hidden = teacher_hidden[layer_index].to(
+            device=qcc.archive.codes.device,
+            dtype=qcc.q_proj.weight.dtype,
+        )
+        _, key, _, _ = qcc._project_qkv_gate(hidden)
+        keys = qcc._split_heads(key)
+        tokens = keys.shape[2]
+        if tokens <= 0:
+            continue
+        code_count = qcc.archive.num_codes
+        indices = torch.arange(code_count, device=keys.device) % tokens
+        if tokens > 1:
+            indices = torch.linspace(
+                0, tokens - 1, code_count, device=keys.device
+            ).round().to(torch.long)
+        sampled = keys[0, :, indices, :]
+        # Match the existing random initialization scale per head.  This keeps
+        # routing logits in a comparable range while preserving key geometry.
+        target_norm = qcc.archive.codes.detach().float().norm(dim=-1).mean(dim=-1)
+        source_norm = sampled.float().norm(dim=-1).mean(dim=-1).clamp_min(1e-6)
+        sampled = sampled * (target_norm / source_norm).view(-1, 1, 1).to(sampled.dtype)
+        qcc.archive.codes.copy_(sampled.to(dtype=qcc.archive.codes.dtype))
+
+
+@torch.no_grad()
+def _teacher_logits_and_inputs(
+    model,
+    batches: list[dict[str, torch.Tensor]],
+    *,
+    max_capture_tokens: int = 256,
+) -> tuple[list[torch.Tensor], dict[int, torch.Tensor]]:
+    """Run teacher batches and retain bounded K-init snapshots.
+
+    The logits are kept for every batch because they are the distillation
+    target.  Hidden states are only used to seed the codebook, so retaining a
+    small, evenly spaced sample from every batch gives better coverage of a
+    long calibration stream without turning the CPU staging area into another
+    copy of the model activations.
+    """
+
+    if max_capture_tokens <= 0:
+        raise ValueError("max_capture_tokens must be positive")
+
+    attention_modules = [
+        module
+        for module in model.modules()
+        if (
+            all(hasattr(module, field) for field in ("q_proj", "k_proj", "v_proj", "o_proj"))
+            or (hasattr(module, "qkv_proj") and hasattr(module, "o_proj"))
+        )
+    ]
+    captured: dict[int, list[torch.Tensor]] = {
+        index: [] for index in range(len(attention_modules))
+    }
+    batch_captured: dict[int, torch.Tensor] = {}
+    hooks = []
+    for index, module in enumerate(attention_modules):
+        def capture(_module, inputs, kwargs, *, layer_index=index):
+            hidden = inputs[0] if inputs else kwargs.get("hidden_states")
+            if hidden is not None and layer_index not in batch_captured:
+                batch_captured[layer_index] = hidden.detach()
+
+        hooks.append(module.register_forward_pre_hook(capture, with_kwargs=True))
+    try:
+        teachers = []
+        for batch in batches:
+            batch_captured = {}
+            teachers.append(model(**batch, use_cache=False).logits.float().cpu())
+            for layer_index, hidden in batch_captured.items():
+                flat = hidden.reshape(-1, hidden.shape[-1]).cpu()
+                take = min(max_capture_tokens, flat.shape[0])
+                indices = torch.linspace(
+                    0, flat.shape[0] - 1, take, dtype=torch.long
+                )
+                captured[layer_index].append(flat[indices])
+    finally:
+        for hook in hooks:
+            hook.remove()
+    snapshots = {
+        layer_index: torch.cat(chunks, dim=0).unsqueeze(0)
+        for layer_index, chunks in captured.items()
+        if chunks
+    }
+    return teachers, snapshots
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", required=True)
@@ -372,6 +488,18 @@ def main() -> None:
         "--num-held-out-chunks", type=int, default=1,
         help="number of evenly spaced held-out chunks used for validation",
     )
+    parser.add_argument(
+        "--code-init",
+        choices=("key-sample", "random"),
+        default="key-sample",
+        help="initialize archive codes from teacher K projections or keep random initialization",
+    )
+    parser.add_argument(
+        "--code-init-tokens",
+        type=int,
+        default=256,
+        help="teacher tokens sampled per training chunk for codebook initialization",
+    )
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--dtype", choices=("auto", "float16", "bfloat16", "float32"), default="auto")
     parser.add_argument("--load-in-4bit", action="store_true", help="load the real checkpoint through bitsandbytes NF4")
@@ -427,6 +555,7 @@ def main() -> None:
         or args.max_tokens <= 0
         or args.num_train_chunks <= 0
         or args.num_held_out_chunks <= 0
+        or args.code_init_tokens <= 0
     ):
         raise ValueError(
             "steps, lr, max-tokens, num-train-chunks, and num-held-out-chunks must be positive"
@@ -521,7 +650,11 @@ def main() -> None:
     ]
 
     with torch.no_grad():
-        train_teachers = [baseline(**batch, use_cache=False).logits.float().cpu() for batch in train_batches]
+        train_teachers, teacher_hidden = _teacher_logits_and_inputs(
+            baseline,
+            train_batches,
+            max_capture_tokens=args.code_init_tokens,
+        )
         held_out_teachers = [
             baseline(**batch, use_cache=False).logits.float().cpu()
             for batch in held_out_batches
@@ -563,6 +696,9 @@ def main() -> None:
         archive_global_normalization=args.archive_global_normalization,
         kv_head_policy=args.kv_head_policy,
         gate_bias_init=args.gate_bias_init,
+    )
+    _initialize_codebooks_from_teacher(
+        patched, teacher_hidden, strategy=args.code_init
     )
     # Keep trainable adapter gates in fp32 when the frozen backbone is loaded
     # in fp16/bf16.  The attention projection path casts the gate back to the
@@ -724,6 +860,8 @@ def main() -> None:
             "gate_bias_init": args.gate_bias_init,
             "num_train_chunks": len(train_batches),
             "num_held_out_chunks": len(held_out_batches),
+            "code_init": args.code_init,
+            "code_init_tokens": args.code_init_tokens,
         },
     )
 
@@ -742,7 +880,10 @@ def main() -> None:
         "output": str(args.output),
         "train_tokens": int(sum(batch["input_ids"].shape[-1] for batch in train_batches)),
         "train_chunks": len(train_batches),
+        "held_out_chunks": len(held_out_batches),
         "steps": args.steps,
+        "code_init": args.code_init,
+        "code_init_tokens": args.code_init_tokens,
         "cosine_weight": args.cosine_weight,
         "kl_weight": args.kl_weight,
         "ce_weight": args.ce_weight,

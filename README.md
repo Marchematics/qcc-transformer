@@ -146,6 +146,12 @@ passes their absolute `position_ids`; this is important for RoPE models because
 resetting every window to position zero trains a different distribution from
 128K/1M serving.  `--num-held-out-chunks N` applies the same protocol to
 validation and aggregates all windows before deciding the gate.  Adding
+`--code-init key-sample` (the default) initializes each archive codebook from
+uniformly sampled teacher K projections across every training chunk; use
+`--code-init random` only for the initialization ablation.  The number of
+teacher K tokens staged per chunk is bounded by `--code-init-tokens` (default
+256), so longer calibration streams do not retain full hidden-state traces.
+Adding
 `--cosine-weight 0.2` mixes a directional logit loss into the historical MSE
 objective, while `--margin-weight 0.2 --margin 0.0` directly penalizes a
 teacher top-1/top-2 logit swap.  The quality gate now requires both mean logit
