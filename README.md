@@ -140,7 +140,9 @@ to bound backward temporary memory and `--ce-weight` to include teacher top-1
 cross entropy in the distillation objective.
 
 For layer-wise calibration on long-context checkpoints, use
-`benchmarks/calibrate_hf_layerwise.py`.  With `--num-train-chunks N`, the
+`benchmarks/calibrate_hf_layerwise.py`.  The default now calibrates `all`
+patched layers; use `--calibrate-layers last-half` or an explicit list only for
+a measured layer-budget ablation.  With `--num-train-chunks N`, the
 calibrator samples evenly spaced windows from the whole training text and
 passes their absolute `position_ids`; this is important for RoPE models because
 resetting every window to position zero trains a different distribution from

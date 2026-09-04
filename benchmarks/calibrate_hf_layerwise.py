@@ -492,7 +492,7 @@ def main() -> None:
     parser.add_argument("--num-codes", type=int, default=32)
     parser.add_argument(
         "--calibrate-layers",
-        default="last-half",
+        default="all",
         help="layers to calibrate: 'all', 'last-half', 'first-half', 'last-quarter', '8-15', or '0,2,4'",
     )
     parser.add_argument(
