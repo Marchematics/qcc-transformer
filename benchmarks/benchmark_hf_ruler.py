@@ -122,6 +122,12 @@ def main() -> None:
         help="require the checkpoint to natively declare at least this many tokens",
     )
     parser.add_argument("--dtype", choices=("auto", "float16", "bfloat16", "float32"), default="auto")
+    parser.add_argument(
+        "--attn-implementation",
+        choices=("eager", "sdpa", "flash_attention_2"),
+        default="sdpa",
+        help="attention backend for both matched Full-KV and QCC models",
+    )
     parser.add_argument("--load-in-4bit", action="store_true", help="load the real checkpoint through bitsandbytes NF4")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--window-size", type=int, default=128)
@@ -163,6 +169,7 @@ def main() -> None:
         device=device,
         trust_remote_code=args.trust_remote_code,
         load_in_4bit=args.load_in_4bit,
+        attn_implementation=args.attn_implementation,
     )
     model_device = model_input_device(baseline, device)
     native_context_tokens = native_context(baseline.config)
@@ -188,6 +195,7 @@ def main() -> None:
         device=device,
         trust_remote_code=args.trust_remote_code,
         load_in_4bit=args.load_in_4bit,
+        attn_implementation=args.attn_implementation,
     )
     patched_device = model_input_device(patched, device)
     if args.adapter is None:
@@ -264,6 +272,7 @@ def main() -> None:
         "real_model": True,
         "synthetic": False,
         "official": True,
+        "attn_implementation": args.attn_implementation,
         "full_suite": args.max_examples is None,
         "qcc_only": False,
         "qcc_score": qcc_correct / len(records),
