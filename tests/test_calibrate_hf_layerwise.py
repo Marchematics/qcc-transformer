@@ -24,6 +24,8 @@ _teacher_top2_margin_loss = _MODULE._teacher_top2_margin_loss
 quality_gate_passed = _MODULE.quality_gate_passed
 _teacher_logits_and_inputs = _MODULE._teacher_logits_and_inputs
 _hidden_distillation_loss = _MODULE._hidden_distillation_loss
+_distillation_loss = _MODULE._distillation_loss
+_distillation_loss_from_hidden = _MODULE._distillation_loss_from_hidden
 
 
 class _Attention(nn.Module):
@@ -136,6 +138,27 @@ def test_teacher_capture_samples_every_batch_and_selected_attention():
     assert len(attention[0]) == 2
     assert attention[0][0].shape == (4, 16)
     assert torch.isfinite(_hidden_distillation_loss(attention[0][0], attention[0][0]))
+
+
+def test_hidden_logit_loss_matches_full_logit_loss():
+    torch.manual_seed(7)
+    hidden = torch.randn(1, 5, 6, requires_grad=True)
+    head = nn.Linear(6, 11, bias=False)
+    teacher = torch.randn(1, 5, 11)
+    kwargs = dict(
+        chunk_size=4,
+        cosine_weight=0.2,
+        kl_weight=0.3,
+        ce_weight=0.1,
+        margin_weight=0.1,
+        margin=0.05,
+        kl_temperature=1.7,
+    )
+    tiled = _distillation_loss_from_hidden(hidden, head, teacher, **kwargs)
+    full = _distillation_loss(head(hidden), teacher, **kwargs)
+    torch.testing.assert_close(tiled, full, rtol=1e-5, atol=1e-5)
+    tiled.backward()
+    assert head.weight.grad is not None
 
 
 def test_chunked_distillation_helpers_match_reference():

@@ -478,6 +478,185 @@ def _hidden_distillation_loss(
     return (1.0 - cosine_weight) * mse + cosine_weight * (1.0 - cosine)
 
 
+def _forward_hidden_and_head(
+    model,
+    batch: dict[str, torch.Tensor],
+) -> tuple[torch.Tensor, torch.nn.Module] | None:
+    """Run an HF backbone without materializing its full vocabulary logits."""
+
+    backbone = getattr(model, "model", None)
+    get_head = getattr(model, "get_output_embeddings", None)
+    if backbone is None or not callable(get_head):
+        return None
+    head = get_head()
+    if head is None:
+        return None
+    try:
+        outputs = backbone(**batch, use_cache=False, return_dict=True)
+    except TypeError:
+        outputs = backbone(**batch, use_cache=False)
+    hidden = getattr(outputs, "last_hidden_state", None)
+    if hidden is None and isinstance(outputs, (tuple, list)) and outputs:
+        hidden = outputs[0]
+    if not isinstance(hidden, torch.Tensor):
+        return None
+    return hidden, head
+
+
+def _lm_head_slice(
+    hidden: torch.Tensor,
+    head: torch.nn.Module,
+    start: int,
+    end: int,
+) -> torch.Tensor:
+    """Project one vocabulary slice, retaining a bounded student temporary."""
+
+    weight = getattr(head, "weight", None)
+    if isinstance(weight, torch.Tensor):
+        bias = getattr(head, "bias", None)
+        bias_slice = bias[start:end] if isinstance(bias, torch.Tensor) else None
+        return torch.nn.functional.linear(hidden, weight[start:end], bias_slice)
+    # Quantized/custom output heads may not expose a sliceable weight. This
+    # fallback preserves correctness; normal HF Linear heads use the bounded
+    # path above.
+    return head(hidden)[..., start:end]
+
+
+def _distillation_loss_from_hidden(
+    hidden: torch.Tensor,
+    head: torch.nn.Module,
+    teacher_cpu: torch.Tensor,
+    *,
+    chunk_size: int = 8192,
+    cosine_weight: float = 0.0,
+    kl_weight: float = 0.0,
+    ce_weight: float = 0.0,
+    margin_weight: float = 0.0,
+    margin: float = 0.0,
+    kl_temperature: float = 2.0,
+) -> torch.Tensor:
+    """Compute the logit objective from hidden states in vocab-sized tiles."""
+
+    if hidden.shape[:-1] != teacher_cpu.shape[:-1]:
+        raise ValueError(
+            f"student/teacher hidden shape mismatch: {hidden.shape} vs {teacher_cpu.shape}"
+        )
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be positive")
+    if (
+        not 0.0 <= cosine_weight <= 1.0
+        or not 0.0 <= kl_weight <= 1.0
+        or not 0.0 <= ce_weight <= 1.0
+        or not 0.0 <= margin_weight <= 1.0
+    ):
+        raise ValueError("distillation weights must lie in [0, 1]")
+    if cosine_weight + kl_weight + ce_weight + margin_weight > 1.0:
+        raise ValueError("distillation weights must not sum above 1")
+    if margin < 0 or kl_temperature <= 0:
+        raise ValueError("margin must be non-negative and temperature must be positive")
+
+    shape = hidden.shape[:-1]
+    vocab = teacher_cpu.shape[-1]
+    teacher = teacher_cpu.float()
+    mse_sum = hidden.new_zeros((), dtype=torch.float32)
+    dot = hidden.new_zeros(shape, dtype=torch.float32)
+    student_sq = hidden.new_zeros(shape, dtype=torch.float32)
+    teacher_sq = hidden.new_zeros(shape, dtype=torch.float32)
+    student_log_norm = torch.full(
+        shape, -torch.inf, device=hidden.device, dtype=torch.float32
+    )
+    student_ce_log_norm = torch.full(
+        shape, -torch.inf, device=hidden.device, dtype=torch.float32
+    )
+    teacher_log_norm = (
+        torch.logsumexp(teacher / kl_temperature, dim=-1).to(device=hidden.device)
+        if kl_weight
+        else None
+    )
+    targets = teacher.argmax(dim=-1).to(device=hidden.device)
+    target_logits = hidden.new_zeros(shape, dtype=torch.float32)
+    top2 = teacher.topk(2, dim=-1).indices if margin_weight and vocab >= 2 else None
+    top2_logits = (
+        hidden.new_zeros((*shape, 2), dtype=torch.float32)
+        if top2 is not None
+        else None
+    )
+
+    for start in range(0, vocab, chunk_size):
+        end = min(start + chunk_size, vocab)
+        student_slice = _lm_head_slice(hidden, head, start, end).float()
+        teacher_slice = teacher[..., start:end].to(device=hidden.device)
+        mse_sum = mse_sum + torch.nn.functional.mse_loss(
+            student_slice, teacher_slice, reduction="sum"
+        )
+        if cosine_weight:
+            dot = dot + (student_slice * teacher_slice).sum(dim=-1)
+            student_sq = student_sq + student_slice.square().sum(dim=-1)
+            teacher_sq = teacher_sq + teacher_slice.square().sum(dim=-1)
+        if kl_weight or ce_weight:
+            student_log_norm = torch.logaddexp(
+                student_log_norm,
+                torch.logsumexp(student_slice / kl_temperature, dim=-1),
+            )
+        if ce_weight:
+            student_ce_log_norm = torch.logaddexp(
+                student_ce_log_norm,
+                torch.logsumexp(student_slice, dim=-1),
+            )
+            selected = (targets - start).clamp(0, end - start - 1)
+            selected_logits = student_slice.gather(-1, selected.unsqueeze(-1)).squeeze(-1)
+            target_logits = torch.where(
+                (targets >= start) & (targets < end), selected_logits, target_logits
+            )
+        if top2_logits is not None and top2 is not None:
+            for rank in range(2):
+                indices = (top2[..., rank] - start).clamp(0, end - start - 1)
+                selected_logits = student_slice.gather(-1, indices.unsqueeze(-1)).squeeze(-1)
+                top2_logits[..., rank] = torch.where(
+                    (top2[..., rank] >= start) & (top2[..., rank] < end),
+                    selected_logits,
+                    top2_logits[..., rank],
+                )
+
+    mse = mse_sum / teacher_cpu.numel()
+    cosine = hidden.new_zeros((), dtype=torch.float32)
+    if cosine_weight:
+        cosine = (
+            dot / (student_sq.sqrt() * teacher_sq.sqrt()).clamp_min(1e-12)
+        ).mean()
+    kl = hidden.new_zeros((), dtype=torch.float32)
+    if kl_weight:
+        for start in range(0, vocab, chunk_size):
+            end = min(start + chunk_size, vocab)
+            student_slice = _lm_head_slice(hidden, head, start, end).float()
+            teacher_slice = teacher[..., start:end].to(device=hidden.device)
+            assert teacher_log_norm is not None
+            teacher_log_prob = teacher_slice / kl_temperature - teacher_log_norm.unsqueeze(-1)
+            student_log_prob = student_slice / kl_temperature - student_log_norm.unsqueeze(-1)
+            kl = kl + (
+                teacher_log_prob.exp() * (teacher_log_prob - student_log_prob)
+            ).sum()
+        tokens = max(1, teacher_cpu.numel() // vocab)
+        kl = kl * (kl_temperature * kl_temperature) / tokens
+    ce = hidden.new_zeros((), dtype=torch.float32)
+    if ce_weight:
+        ce = (student_ce_log_norm - target_logits).mean()
+    ranking = hidden.new_zeros((), dtype=torch.float32)
+    if top2_logits is not None:
+        ranking = torch.relu(
+            hidden.new_tensor(float(margin))
+            - top2_logits[..., 0]
+            + top2_logits[..., 1]
+        ).mean()
+    return (
+        (1.0 - cosine_weight - kl_weight - ce_weight - margin_weight) * mse
+        + cosine_weight * (1.0 - cosine)
+        + kl_weight * kl
+        + ce_weight * ce
+        + margin_weight * ranking
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", required=True)
@@ -875,17 +1054,34 @@ def main() -> None:
                 patched, batch_size=int(train_batches[batch_index]["input_ids"].shape[0])
             )
             student_attention_outputs.clear()
-            student = patched(**train_batches[batch_index], use_cache=False).logits
-            logit_loss = _distillation_loss(
-                student,
-                train_teachers[batch_index],
-                cosine_weight=args.cosine_weight,
-                kl_weight=args.kl_weight,
-                ce_weight=args.ce_weight,
-                margin_weight=args.margin_weight,
-                margin=args.margin,
-                kl_temperature=args.kl_temperature,
+            hidden_and_head = _forward_hidden_and_head(
+                patched, train_batches[batch_index]
             )
+            if hidden_and_head is None:
+                student = patched(**train_batches[batch_index], use_cache=False).logits
+                logit_loss = _distillation_loss(
+                    student,
+                    train_teachers[batch_index],
+                    cosine_weight=args.cosine_weight,
+                    kl_weight=args.kl_weight,
+                    ce_weight=args.ce_weight,
+                    margin_weight=args.margin_weight,
+                    margin=args.margin,
+                    kl_temperature=args.kl_temperature,
+                )
+            else:
+                student_hidden, student_head = hidden_and_head
+                logit_loss = _distillation_loss_from_hidden(
+                    student_hidden,
+                    student_head,
+                    train_teachers[batch_index],
+                    cosine_weight=args.cosine_weight,
+                    kl_weight=args.kl_weight,
+                    ce_weight=args.ce_weight,
+                    margin_weight=args.margin_weight,
+                    margin=args.margin,
+                    kl_temperature=args.kl_temperature,
+                )
             attention_losses = []
             if args.attention_loss_weight:
                 for layer_index in calibrate_layers:

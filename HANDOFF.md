@@ -145,6 +145,7 @@ teacher 特征现在通过未 patch attention 模块的 forward-pre-hook 直接�
 - 2026-09-05 质量校准继续修复：分层校准的 `--code-init key-sample`（默认）现在从每个训练 chunk 均匀抽取有界数量的 teacher K 投影来初始化 codebook，而不是只使用第一个 chunk；`--code-init-tokens`（默认 256）限制 CPU staging，`--code-init random` 保留随机初始化消融。该改动不增加部署参数，仍需在真实长上下文 checkpoint 上重新校准并以 held-out/task benchmark 验证。
 - 同一分层校准器新增默认 `--attention-loss-weight 0.35`：对选中层的 teacher/student attention 输出使用同一有界 token 采样监督，避免只靠最终 logits 让不同层互相补偿；设为 `0` 可复现 logit-only 消融。该局部损失不改变 adapter 参数量或最终 held-out gate 口径。
 - 分层校准默认层选择已从 `last-half` 调整为 `all`：已有真实诊断中全层校准的 held-out fidelity 明显高于只训练后半层；后半层仍可显式指定作为参数预算消融。全层仍只开放 QCC archive/gate（约 0.1% 参数），不改变部署接口。
+- 分层校准训练路径现在优先调用 HF backbone 的 `last_hidden_state`，按词表 tile 计算与原实现等价的 MSE/KL/CE/margin loss，避免 GPU 保留完整 student logits；不具备标准 `model`/output-embedding 接口的模型仍走原 full-logit fallback。该改动已在真实 HF tiny Llama 流程验证，需在真实长上下文模型上重新校准。
 
 ### 本地回归
 

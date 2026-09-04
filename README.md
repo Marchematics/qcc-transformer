@@ -157,6 +157,10 @@ The default `--attention-loss-weight 0.35` also matches the selected layers'
 attention outputs on the same bounded token samples; set it to `0` for the
 logit-only ablation.  This local signal reduces cross-layer compensation while
 leaving the final held-out logit/top-1 gate unchanged.
+When the checkpoint exposes the standard HF backbone and output embedding,
+the training pass reads `last_hidden_state` and projects the output head in
+vocabulary tiles, avoiding a full student-logit allocation on the GPU; custom
+models retain the compatible full-logit fallback.
 Adding
 `--cosine-weight 0.2` mixes a directional logit loss into the historical MSE
 objective, while `--margin-weight 0.2 --margin 0.0` directly penalizes a
