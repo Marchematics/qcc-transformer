@@ -159,7 +159,7 @@ def test_chunk_admission_reopens_budget_for_each_bounded_tile() -> None:
     assert int(torch.isfinite(hybrid.exact_bank.state.scores).sum()) == 6
 
 
-def test_quality_first_uses_bounded_score_soft_exact_shadow():
+def test_quality_first_uses_bounded_score_hard_exact_shadow():
     base = QCCArchive(
         num_heads=1,
         head_dim=4,
@@ -176,7 +176,7 @@ def test_quality_first_uses_bounded_score_soft_exact_shadow():
         quality_first=True,
     )
     assert hybrid.exact_bank.replacement_policy == "score"
-    assert hybrid.exact_hard_read is False
+    assert hybrid.exact_hard_read is True
     assert hybrid.max_inserts_per_chunk == 4
     assert hybrid.scan_block_size == 4
     key = torch.randn(1, 1, 9, 4)
@@ -217,6 +217,41 @@ def test_quality_first_retains_future_salient_token_across_tiles():
     stored_keys = hybrid.exact_bank.state.keys.reshape(1, 1, -1, 2)
     similarity = torch.nn.functional.cosine_similarity(
         stored_keys, needle.expand_as(stored_keys), dim=-1
+    )
+    assert bool((similarity > 0.99).any())
+
+
+def test_hybrid_exact_shadow_uses_rotary_side_channel():
+    base = QCCArchive(
+        num_heads=1,
+        head_dim=2,
+        num_codes=1,
+        decay_rates=(0.9,),
+        window_size=2,
+        use_triton=False,
+    )
+    hybrid = HybridQCCArchive.from_archive(
+        base,
+        exact_num_sets=1,
+        exact_ways=2,
+        quality_first=True,
+        exact_mix_bias_init=20.0,
+    )
+    raw_key = torch.tensor([[[[-1.0, 0.0]]]]).expand(1, 1, 3, 2).clone()
+    rotary_key = torch.tensor([[[[1.0, 0.0]]]]).expand(1, 1, 3, 2).clone()
+    value = torch.randn_like(raw_key)
+    query = rotary_key.clone()
+    with torch.no_grad():
+        hybrid.update_read_chunk(
+            raw_key,
+            value,
+            raw_key,
+            exact_key=rotary_key,
+            exact_query=query,
+        )
+    stored_keys = hybrid.exact_bank.state.keys.reshape(1, 1, -1, 2)
+    similarity = torch.nn.functional.cosine_similarity(
+        stored_keys, rotary_key[:, :, :1].expand_as(stored_keys), dim=-1
     )
     assert bool((similarity > 0.99).any())
 

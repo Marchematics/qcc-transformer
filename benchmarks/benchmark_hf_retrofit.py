@@ -55,6 +55,12 @@ def main() -> None:
         default=True,
         help="use raw (unrotated) Q/K for archive addressing while retaining rotary local attention",
     )
+    parser.add_argument(
+        "--archive-query-correction-rank",
+        type=int,
+        default=8,
+        help="rank of the calibrated query-conditioned archive residual",
+    )
     parser.add_argument("--max-position-embeddings", type=int, default=None)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--dtype", choices=("float16", "bfloat16", "float32"), default="bfloat16")
@@ -123,6 +129,8 @@ def main() -> None:
         raise ValueError("prompt must be non-empty")
     if not 0.0 <= args.quality_gate <= 1.0:
         raise ValueError("quality-gate must lie in [0, 1]")
+    if args.archive_query_correction_rank < 0:
+        raise ValueError("archive-query-correction-rank must be non-negative")
     try:
         from transformers import AutoModelForCausalLM, AutoTokenizer
     except ImportError as exc:  # pragma: no cover - optional dependency
@@ -166,6 +174,7 @@ def main() -> None:
         "archive_kernel_features": args.archive_kernel_features,
         "archive_global_normalization": args.archive_global_normalization,
         "archive_position_invariant": args.archive_position_invariant,
+        "archive_query_correction_rank": args.archive_query_correction_rank,
         "max_position_embeddings": args.max_position_embeddings,
         "kv_head_policy": args.kv_head_policy,
         "gate_bias_init": args.gate_bias_init,
@@ -222,6 +231,7 @@ def main() -> None:
         "num_codes": args.num_codes,
         "archive_kernel_features": args.archive_kernel_features,
         "archive_global_normalization": args.archive_global_normalization,
+        "archive_query_correction_rank": args.archive_query_correction_rank,
         "gate_bias_init": args.gate_bias_init,
         "archive_position_invariant": args.archive_position_invariant,
         "mean_logit_cosine": float(cosine),

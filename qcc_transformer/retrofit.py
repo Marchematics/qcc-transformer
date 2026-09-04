@@ -238,6 +238,7 @@ class HFQCCAttention(nn.Module):
         archive_landmark_temperature: float = 1.0,
         archive_kernel_features: bool = False,
         archive_global_normalization: bool = True,
+        archive_query_correction_rank: int = 8,
         archive_lexical_landmark: bool = False,
         archive_position_invariant: bool = True,
         kv_head_policy: str = "reject",
@@ -313,6 +314,7 @@ class HFQCCAttention(nn.Module):
             archive_landmark_temperature=archive_landmark_temperature,
             archive_kernel_features=archive_kernel_features,
             archive_global_normalization=archive_global_normalization,
+            archive_query_correction_rank=archive_query_correction_rank,
             archive_lexical_landmark=archive_lexical_landmark,
             archive_position_invariant=archive_position_invariant,
             gate_bias_init=gate_bias_init,
@@ -597,6 +599,7 @@ def patch_hf_model(
     archive_landmark_temperature: float = 1.0,
     archive_kernel_features: bool = False,
     archive_global_normalization: bool = True,
+    archive_query_correction_rank: int = 8,
     archive_lexical_landmark: bool = False,
     archive_position_invariant: bool = True,
     kv_head_policy: str = "reject",
@@ -692,6 +695,7 @@ def patch_hf_model(
             archive_landmark_temperature=archive_landmark_temperature,
             archive_kernel_features=archive_kernel_features,
             archive_global_normalization=archive_global_normalization,
+            archive_query_correction_rank=archive_query_correction_rank,
             archive_lexical_landmark=archive_lexical_landmark,
             archive_position_invariant=archive_position_invariant,
             kv_head_policy=kv_head_policy,
@@ -786,7 +790,11 @@ def load_retrofit_adapter(
     missing = [
         key
         for key in missing
-        if (".qcc.archive." in key and not key.endswith("archive.decay_rates"))
+        if (
+            ".qcc.archive." in key
+            and not key.endswith("archive.decay_rates")
+            and "query_correction_" not in key
+        )
         or ".qcc.gate." in key
     ]
     if unexpected or missing:

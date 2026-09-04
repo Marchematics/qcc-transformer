@@ -142,6 +142,15 @@ still exceeds memory, `--cpu-offload-activations` moves only autograd-saved
 activations to host memory during calibration; it does not alter the inference
 adapter or serving state.
 
+Quality calibration also enables a zero-initialized, low-rank query-conditioned
+archive residual by default (`--archive-query-correction-rank 8`). It is applied
+after the recurrent read and before local/archive mixing, so the uncalibrated
+forward is exactly unchanged while the adapter can learn a small systematic
+long-range correction. The residual adds no mutable per-request state and remains
+well below the 1% trainable-parameter budget. Set the rank to `0` for the legacy
+ablation; adapters made before this option remain loadable and retain the zero
+residual initialization.
+
 For layer-wise calibration on long-context checkpoints, use
 `benchmarks/calibrate_hf_layerwise.py`.  The default now calibrates `all`
 patched layers; use `--calibrate-layers last-half` or an explicit list only for
@@ -193,11 +202,14 @@ python benchmarks/calibrate_hf_admission.py \
 ```
 
 For a quality-first control before learned admission is available, add
-`--quality-first`.  It uses a fixed-capacity score table with soft exact reads;
-each bounded prefill tile is ranked by sampled future query-key similarity so
-high-value historical records survive later tiles.  State remains O(1) in
-context length, but exact-tier capacity and serving cost must be reported with
-the result; it is not evidence for the 80% memory or vLLM gates by itself.
+`--quality-first`.  It uses a fixed-capacity score table with confidence-gated
+nearest-neighbour exact reads; each bounded prefill tile is ranked by sampled
+future query-key similarity so high-value historical records survive later
+tiles.  When the retrofit supplies both views, the exact shadow matches on
+rotary Q/K while the recurrent archive can remain position-invariant.  State
+remains O(1) in context length, but exact-tier capacity and serving cost must be
+reported with the result; it is not evidence for the 80% memory or vLLM gates
+by itself.
 
 Use the resulting file with `--adapter` on the real-HF retrieval, latency,
 memory, concurrency, RULER, LongBench, or PG-19 runners.  `--exact-probe-sets`

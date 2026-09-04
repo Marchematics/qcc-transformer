@@ -775,6 +775,12 @@ def main() -> None:
         default=True,
         help="combine code/scale numerator and denominator before normalization",
     )
+    parser.add_argument(
+        "--archive-query-correction-rank",
+        type=int,
+        default=8,
+        help="rank of the zero-initialized query-conditioned archive residual",
+    )
     parser.add_argument("--max-tokens", type=int, default=2048)
     parser.add_argument(
         "--archive-scan-block-size",
@@ -884,6 +890,8 @@ def main() -> None:
         )
     if args.archive_scan_block_size <= 0:
         raise ValueError("archive-scan-block-size must be positive")
+    if args.archive_query_correction_rank < 0:
+        raise ValueError("archive-query-correction-rank must be non-negative")
     if (
         not 0.0 <= args.cosine_weight <= 1.0
         or not 0.0 <= args.kl_weight <= 1.0
@@ -1038,6 +1046,7 @@ def main() -> None:
         archive_kernel_features=args.archive_kernel_features,
         archive_scan_block_size=args.archive_scan_block_size,
         archive_global_normalization=args.archive_global_normalization,
+        archive_query_correction_rank=args.archive_query_correction_rank,
         kv_head_policy=args.kv_head_policy,
         gate_bias_init=args.gate_bias_init,
     )
@@ -1305,6 +1314,7 @@ def main() -> None:
             "archive_kernel_features": args.archive_kernel_features,
             "archive_scan_block_size": args.archive_scan_block_size,
             "archive_global_normalization": args.archive_global_normalization,
+            "archive_query_correction_rank": args.archive_query_correction_rank,
             "archive_position_invariant": args.archive_position_invariant,
             "patched_layers": replaced,
             "calibrated_layers": calibrate_layers,
@@ -1350,6 +1360,7 @@ def main() -> None:
         "archive_kernel_features": args.archive_kernel_features,
         "archive_scan_block_size": args.archive_scan_block_size,
         "archive_global_normalization": args.archive_global_normalization,
+        "archive_query_correction_rank": args.archive_query_correction_rank,
         "train_mean_logit_cosine": float(train_cosine.item()),
         "train_top1_agreement": float(train_agreement.item()),
     }

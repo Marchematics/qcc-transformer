@@ -100,6 +100,7 @@ class HybridQCCArchive(QCCArchive):
         prefix_pair_landmark: bool = False,
         landmark_temperature: float = 1.0,
         global_normalization: bool = True,
+        query_correction_rank: int = 0,
         exact_num_sets: int = 128,
         exact_ways: int = 4,
         exact_probe_sets: int | None = None,
@@ -129,8 +130,14 @@ class HybridQCCArchive(QCCArchive):
             # Scores are bounded by the predictor's normalized features; a
             # large finite floor keeps constructor validation meaningful.
             admission_threshold = -1.0e9
-            exact_mix_bias_init = max(float(exact_mix_bias_init), 4.0)
-            exact_hard_read = False
+            # The exact tier is a shadow for quality recovery, not a license to
+            # replace the recurrent response on every moderately similar key.
+            # Soft reads average unrelated values in a dense fixed table and the
+            # old forced-positive mix bias made that contamination pervasive.
+            # Keep nearest-neighbour reads and honor the caller's mix bias so the
+            # confidence gate remains a conservative, tunable fallback.
+            exact_mix_bias_init = float(exact_mix_bias_init)
+            exact_hard_read = True
             max_inserts_per_chunk = exact_num_sets * exact_ways
         else:
             exact_hard_read = True
@@ -150,6 +157,7 @@ class HybridQCCArchive(QCCArchive):
             prefix_pair_landmark=prefix_pair_landmark,
             landmark_temperature=landmark_temperature,
             global_normalization=global_normalization,
+            query_correction_rank=query_correction_rank,
         )
         if max_inserts_per_chunk <= 0:
             raise ValueError("max_inserts_per_chunk must be positive")
@@ -225,6 +233,7 @@ class HybridQCCArchive(QCCArchive):
             prefix_pair_landmark=archive.prefix_pair_landmark,
             landmark_temperature=archive.landmark_temperature,
             global_normalization=archive.global_normalization,
+            query_correction_rank=archive.query_correction_rank,
             **hybrid_kwargs,
         ).to(device=archive.codes.device)
         base_state = archive.state_dict()
@@ -519,15 +528,39 @@ class HybridQCCArchive(QCCArchive):
         *,
         output: Tensor | None = None,
         admission_score: Tensor | None = None,
+        exact_key: Tensor | None = None,
+        exact_query: Tensor | None = None,
     ) -> Tensor:
         if admission_score is not None and (
             admission_score.shape != key.shape[:3]
             or admission_score.device != key.device
         ):
             raise ValueError("admission_score must have shape [batch, heads, events] on key.device")
+        if exact_key is None:
+            exact_key = key
+        if exact_query is None:
+            exact_query = query
+        if (
+            exact_key.shape != key.shape
+            or exact_query.shape != query.shape
+            or exact_key.device != key.device
+            or exact_query.device != query.device
+        ):
+            raise ValueError(
+                "exact_key/exact_query must match key/query shapes and devices"
+            )
         recurrent = super().update_read_chunk(key, value, query, output=None)
         score = self.admission(key, value) if admission_score is None else admission_score
-        exact, confidence = self._exact_chunk(key, value, query, score)
+        # The recurrent path can use position-invariant raw Q/K, while the
+        # bounded exact shadow should score the same rotary Q/K used by the
+        # model's true local attention.  This side channel removes the phase
+        # mismatch without adding any persistent position state.
+        exact, confidence = self._exact_chunk(
+            exact_key,
+            value,
+            exact_query,
+            score,
+        )
         result = self._blend_exact(recurrent, exact, confidence)
         if output is not None:
             if output.shape != result.shape or output.device != result.device:
@@ -611,6 +644,7 @@ def load_hybrid_retrofit_adapter(
         for key in missing
         if (".qcc.archive." in key
             and not key.endswith("archive.decay_rates")
+            and "query_correction_" not in key
             and not (
                 ".qcc.archive.exact_" in key
                 or ".qcc.archive.exact_bank." in key

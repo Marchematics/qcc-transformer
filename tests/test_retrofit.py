@@ -262,6 +262,23 @@ def test_retrofit_adapter_round_trip(tmp_path):
         assert torch.equal(value, dict(target.named_parameters())[name].cpu())
 
 
+def test_legacy_adapter_without_query_residual_remains_loadable(tmp_path):
+    source = _Model()
+    patch_hf_model(source, window_size=4, num_codes=4, use_triton=False)
+    state = retrofit_adapter_state(source)
+    legacy = {
+        name: value
+        for name, value in state.items()
+        if "query_correction_" not in name
+    }
+    path = tmp_path / "legacy_adapter.pt"
+    torch.save({"state_dict": legacy}, path)
+    target = _Model()
+    load_retrofit_adapter(target, path, window_size=4, num_codes=4, use_triton=False)
+    for name, value in legacy.items():
+        assert torch.equal(value, dict(target.named_parameters())[name].cpu())
+
+
 def test_regular_adapter_can_seed_hybrid_admission_calibration(tmp_path):
     source = _Model()
     patch_hf_model(source, window_size=4, num_codes=4, use_triton=False)

@@ -107,6 +107,7 @@ class QCCArchive(nn.Module):
         landmark_temperature: float = 1.0,
         kernel_features: bool = False,
         global_normalization: bool = True,
+        query_correction_rank: int = 0,
     ) -> None:
         super().__init__()
         if num_heads <= 0 or head_dim <= 0 or num_codes <= 0:
@@ -124,6 +125,8 @@ class QCCArchive(nn.Module):
             raise ValueError("scan_block_size must be positive")
         if content_threshold is not None and not math.isfinite(content_threshold):
             raise ValueError("content_threshold must be finite when provided")
+        if query_correction_rank < 0:
+            raise ValueError("query_correction_rank must be non-negative")
 
         self.num_heads = num_heads
         self.head_dim = head_dim
@@ -151,6 +154,23 @@ class QCCArchive(nn.Module):
         self.prefix_pair_landmark = prefix_pair_landmark
         self.landmark_temperature = landmark_temperature
         self.kernel_features = bool(kernel_features)
+        # A zero-initialized low-rank query-conditioned residual gives the
+        # calibrator a small, context-independent way to correct systematic
+        # archive read bias.  It does not change the recurrent state footprint
+        # and preserves the historical uncalibrated output exactly.
+        self.query_correction_rank = int(query_correction_rank)
+        if self.query_correction_rank:
+            self.query_correction_u = nn.Parameter(
+                torch.empty(num_heads, self.query_correction_rank, head_dim)
+            )
+            self.query_correction_v = nn.Parameter(
+                torch.zeros(num_heads, head_dim, self.query_correction_rank)
+            )
+            nn.init.normal_(
+                self.query_correction_u,
+                mean=0.0,
+                std=1.0 / math.sqrt(head_dim),
+            )
         # Correct separable-softmax reads combine all code/scale numerator and
         # denominator contributions before the final normalization.  Keep an
         # explicit switch for reproducing the legacy per-code ablation.
@@ -208,6 +228,34 @@ class QCCArchive(nn.Module):
         norm_sq = x.to(state_dtype).square().sum(dim=-1, keepdim=True)
         scale = math.sqrt(self.head_dim)
         return torch.exp((logits - 0.5 * norm_sq / scale).clamp(min=-20.0, max=10.0))
+
+    def _finish_read(
+        self,
+        query: Tensor,
+        response: Tensor,
+        *,
+        include_landmarks: bool = True,
+    ) -> Tensor:
+        """Apply the optional learned residual before landmark blending."""
+
+        if self.query_correction_rank:
+            query_f = query.float()
+            value_v = self.query_correction_v.to(device=query.device)
+            value_u = self.query_correction_u.to(device=query.device)
+            if query.ndim == 3:
+                latent = torch.einsum("bhd,hdr->bhr", query_f, value_v)
+                correction = torch.einsum("bhr,hrd->bhd", latent, value_u)
+            elif query.ndim == 4:
+                latent = torch.einsum("bhtd,hdr->bhtr", query_f, value_v)
+                correction = torch.einsum("bhtr,hrd->bhtd", latent, value_u)
+            else:
+                raise ValueError("query must have rank 3 or 4")
+            response = response + correction.to(response.dtype)
+        return (
+            self._combine_landmark(query, response)
+            if include_landmarks
+            else response
+        )
 
     def reset_state(
         self,
@@ -685,6 +733,8 @@ class QCCArchive(nn.Module):
         *,
         output: Optional[Tensor] = None,
         _include_landmarks: bool = True,
+        exact_key: Optional[Tensor] = None,
+        exact_query: Optional[Tensor] = None,
     ) -> Tensor:
         """Update and read a sequence of evicted tokens with a block scan.
 
@@ -696,6 +746,11 @@ class QCCArchive(nn.Module):
 
         if key.ndim != 4 or value.shape != key.shape or query.shape != key.shape:
             raise ValueError("key, value, and query must have shape [batch, heads, events, head_dim]")
+        # ``exact_key``/``exact_query`` are an optional side channel used by
+        # HybridQCCArchive.  The dense recurrent archive deliberately ignores
+        # it, preserving the historical raw-Q/K equation for position-invariant
+        # addressing.
+        del exact_key, exact_query
         if output is not None and (output.shape != query.shape or output.device != query.device):
             raise ValueError("output must match query shape and device")
         batch, heads, events, dim = key.shape
@@ -809,6 +864,7 @@ class QCCArchive(nn.Module):
             and self.active_codes is None
             and not self.kernel_features
             and not self.global_normalization
+            and self.query_correction_rank == 0
         ):
             from .triton_kernels import TRITON_AVAILABLE, triton_update_read_archive_chunk
 
@@ -953,7 +1009,9 @@ class QCCArchive(nn.Module):
             total_num = (feature.unsqueeze(-1) * weighted_num).sum(dim=2)
             total_den = (feature * weighted_den).sum(dim=2).clamp_min(1e-8)
             response = (total_num / total_den.unsqueeze(-1)).to(query.dtype)
-            return self._combine_landmark(query, response) if include_landmarks else response
+            return self._finish_read(
+                query, response, include_landmarks=include_landmarks
+            )
         if self.global_normalization and (
             active is None or active >= self.num_codes or torch.is_grad_enabled()
         ):
@@ -966,7 +1024,9 @@ class QCCArchive(nn.Module):
             total_num = (routing.unsqueeze(-1) * weighted_num).sum(dim=2)
             total_den = (routing * weighted_den).sum(dim=2).clamp_min(1e-8)
             response = (total_num / total_den.unsqueeze(-1)).to(query.dtype)
-            return self._combine_landmark(query, response) if include_landmarks else response
+            return self._finish_read(
+                query, response, include_landmarks=include_landmarks
+            )
         if active is None or active >= self.num_codes or torch.is_grad_enabled():
             denom = denominator.clamp_min(1e-8)
             response = numerator / denom.unsqueeze(-1)
@@ -976,7 +1036,9 @@ class QCCArchive(nn.Module):
             response = torch.einsum("hmj,bhmjd->bhmd", mix, response)
             routing = F.softmax(routing_logits, dim=-1).to(response.dtype)
             response = torch.einsum("bhm,bhmd->bhd", routing, response).to(query.dtype)
-            return self._combine_landmark(query, response) if include_landmarks else response
+            return self._finish_read(
+                query, response, include_landmarks=include_landmarks
+            )
 
         values, indices = torch.topk(routing_logits, active, dim=-1)
         index_scales = indices.unsqueeze(-1).expand(-1, -1, -1, self.num_scales)
@@ -992,7 +1054,9 @@ class QCCArchive(nn.Module):
         selected = (mix.unsqueeze(-1) * selected).sum(dim=3)
         routing = F.softmax(values, dim=-1).to(selected.dtype)
         response = (routing.unsqueeze(-1) * selected).sum(dim=2).to(query.dtype)
-        return self._combine_landmark(query, response) if include_landmarks else response
+        return self._finish_read(
+            query, response, include_landmarks=include_landmarks
+        )
 
     @torch.no_grad()
     def _lazy_read(
@@ -1011,6 +1075,7 @@ class QCCArchive(nn.Module):
             self.use_triton
             and query.is_cuda
             and self.active_codes & (self.active_codes - 1) == 0
+            and self.query_correction_rank == 0
         ):
             from .triton_kernels import TRITON_AVAILABLE, triton_sparse_read_archive
 
@@ -1030,13 +1095,15 @@ class QCCArchive(nn.Module):
                 landmark, valid = self._landmark_read(query)
                 mix = torch.sigmoid(self.landmark_mix_logits).to(result.dtype)
                 if include_landmarks:
-                    return torch.where(
+                    result = torch.where(
                         valid.unsqueeze(-1),
                         (1.0 - mix.view(1, -1, 1)) * result
                         + mix.view(1, -1, 1) * landmark,
                         result,
                     )
-                return result
+                return self._finish_read(
+                    query, result, include_landmarks=False
+                )
         index_scales = indices.unsqueeze(-1).expand(-1, -1, -1, self.num_scales)
         numerator = self._numerator.gather(
             2, index_scales.unsqueeze(-1).expand(-1, -1, -1, -1, self.head_dim)
@@ -1060,11 +1127,15 @@ class QCCArchive(nn.Module):
             total_num = (routing.unsqueeze(-1) * weighted_num).sum(dim=2)
             total_den = (routing * weighted_den).sum(dim=2).clamp_min(1e-8)
             response = (total_num / total_den.unsqueeze(-1)).to(query.dtype)
-            return self._combine_landmark(query, response) if include_landmarks else response
+            return self._finish_read(
+                query, response, include_landmarks=include_landmarks
+            )
         response = (mix.unsqueeze(-1) * response).sum(dim=3)
         routing = F.softmax(values, dim=-1).to(response.dtype)
         response = (routing.unsqueeze(-1) * response).sum(dim=2).to(query.dtype)
-        return self._combine_landmark(query, response) if include_landmarks else response
+        return self._finish_read(
+            query, response, include_landmarks=include_landmarks
+        )
 
     def _read_states_chunk(
         self,
@@ -1096,7 +1167,9 @@ class QCCArchive(nn.Module):
             total_num = (feature.unsqueeze(-1) * weighted_num).sum(dim=3)
             total_den = (feature * weighted_den).sum(dim=3).clamp_min(1e-8)
             response = (total_num / total_den.unsqueeze(-1)).to(query.dtype)
-            return self._combine_landmark(query, response) if include_landmarks else response
+            return self._finish_read(
+                query, response, include_landmarks=include_landmarks
+            )
         if self.global_normalization and (
             active is None or active >= self.num_codes or torch.is_grad_enabled()
         ):
@@ -1109,7 +1182,9 @@ class QCCArchive(nn.Module):
             total_num = (routing.unsqueeze(-1) * weighted_num).sum(dim=3)
             total_den = (routing * weighted_den).sum(dim=3).clamp_min(1e-8)
             response = (total_num / total_den.unsqueeze(-1)).to(query.dtype)
-            return self._combine_landmark(query, response) if include_landmarks else response
+            return self._finish_read(
+                query, response, include_landmarks=include_landmarks
+            )
         if active is None or active >= self.num_codes:
             denom = denominator.clamp_min(1e-8)
             response = numerator / denom.unsqueeze(-1)
@@ -1119,7 +1194,9 @@ class QCCArchive(nn.Module):
             response = torch.einsum("hmj,bhemjd->bhemd", mix, response)
             routing = F.softmax(routing_logits, dim=-1).to(response.dtype)
             response = torch.einsum("bhem,bhemd->bhed", routing, response).to(query.dtype)
-            return self._combine_landmark(query, response) if include_landmarks else response
+            return self._finish_read(
+                query, response, include_landmarks=include_landmarks
+            )
 
         values, indices = torch.topk(routing_logits, active, dim=-1)
         index_scales = indices.unsqueeze(-1).expand(-1, -1, -1, -1, self.num_scales)
@@ -1135,7 +1212,9 @@ class QCCArchive(nn.Module):
         selected = (mix.unsqueeze(-1) * selected).sum(dim=4)
         routing = F.softmax(values, dim=-1).to(selected.dtype)
         response = (routing.unsqueeze(-1) * selected).sum(dim=3).to(query.dtype)
-        return self._combine_landmark(query, response) if include_landmarks else response
+        return self._finish_read(
+            query, response, include_landmarks=include_landmarks
+        )
 
     def read(self, query: Tensor) -> Tensor:
         """Read archive response for queries of shape ``[batch, heads, head_dim]``."""
@@ -1158,6 +1237,7 @@ class QCCArchive(nn.Module):
             and query.is_cuda
             and not self.kernel_features
             and not self.global_normalization
+            and self.query_correction_rank == 0
         ):
             from .triton_kernels import TRITON_AVAILABLE, triton_read_archive
 
@@ -1201,6 +1281,7 @@ class QCCSelfAttention(nn.Module):
         archive_landmark_temperature: float = 1.0,
         archive_kernel_features: bool = False,
         archive_global_normalization: bool = True,
+        archive_query_correction_rank: int = 8,
         archive_lexical_landmark: bool = False,
         archive_position_invariant: bool = False,
         rope_theta: Optional[float] = None,
@@ -1303,6 +1384,7 @@ class QCCSelfAttention(nn.Module):
             landmark_temperature=archive_landmark_temperature,
             kernel_features=archive_kernel_features,
             global_normalization=archive_global_normalization,
+            query_correction_rank=archive_query_correction_rank,
         )
         self.archive_read_stride = archive_read_stride
         self.archive_lexical_landmark = archive_lexical_landmark
@@ -2247,16 +2329,22 @@ class QCCSelfAttention(nn.Module):
             if event_count > 0:
                 evicted_k = combined_k[:, :, :event_count]
                 evicted_v = combined_v[:, :, :event_count]
+                # Keep the rotary local keys for the optional exact shadow;
+                # the recurrent archive may intentionally receive raw keys.
+                exact_evicted_k = evicted_k
                 if combined_archive_k is not None:
                     evicted_k = combined_archive_k[:, :, :event_count]
                 if combined_lexical_k is not None:
                     evicted_k = combined_lexical_k[:, :, :event_count]
                     evicted_v = combined_lexical_v[:, :, :event_count]
+                    exact_evicted_k = evicted_k
                 self.archive.update_read_chunk(
                     evicted_k,
                     evicted_v,
                     archive_q[:, :, event_start:] if lexical_q is None else lexical_q[:, :, event_start:],
                     output=archive_out[:, :, event_start:],
+                    exact_key=exact_evicted_k,
+                    exact_query=q[:, :, event_start:],
                 )
                 # A chunk update changes the archive state for every active
                 # position.  Do not let a prior token-path remote read leak
@@ -2703,6 +2791,8 @@ class QCCSelfAttention(nn.Module):
                     archive_v[:, :, :event_count],
                     archive_q[:, :, self.window_size :],
                     output=archive_out[:, :, self.window_size :],
+                    exact_key=k[:, :, :event_count],
+                    exact_query=q[:, :, self.window_size :],
                 )
             gate = torch.sigmoid(gate_proj).transpose(1, 2).unsqueeze(-1)
             mixed_out = self._mix_local_archive(local_out, archive_out, gate)
@@ -2899,6 +2989,7 @@ class QCCForCausalLM(nn.Module):
         archive_prefix_pair_landmark: bool = False,
         archive_landmark_temperature: float = 1.0,
         archive_global_normalization: bool = True,
+        archive_query_correction_rank: int = 8,
         archive_lexical_landmark: bool = False,
         archive_position_invariant: bool = False,
         archive_decay_rates: Optional[tuple[float, ...]] = None,
@@ -2943,6 +3034,7 @@ class QCCForCausalLM(nn.Module):
                 archive_prefix_pair_landmark=archive_prefix_pair_landmark,
                 archive_landmark_temperature=archive_landmark_temperature,
                 archive_global_normalization=archive_global_normalization,
+                archive_query_correction_rank=archive_query_correction_rank,
                 archive_lexical_landmark=archive_lexical_landmark,
                 archive_position_invariant=archive_position_invariant,
                 rope_theta=rope_theta if position_encoding == "rope" else None,

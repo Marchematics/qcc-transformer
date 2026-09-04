@@ -130,6 +130,12 @@ def main() -> None:
         help="combine code/scale numerator and denominator before normalization",
     )
     parser.add_argument(
+        "--archive-query-correction-rank",
+        type=int,
+        default=8,
+        help="rank of the zero-initialized query-conditioned archive residual",
+    )
+    parser.add_argument(
         "--archive-scan-block-size",
         type=int,
         default=256,
@@ -171,6 +177,8 @@ def main() -> None:
         raise ValueError("steps, lr, and max-tokens must be positive")
     if args.archive_scan_block_size <= 0:
         raise ValueError("archive-scan-block-size must be positive")
+    if args.archive_query_correction_rank < 0:
+        raise ValueError("archive-query-correction-rank must be non-negative")
     if args.max_tokens <= args.window_size:
         raise ValueError(
             "max-tokens must exceed window-size so calibration exercises the QCC archive; "
@@ -243,6 +251,7 @@ def main() -> None:
         archive_position_invariant=args.archive_position_invariant,
         archive_scan_block_size=args.archive_scan_block_size,
         archive_global_normalization=args.archive_global_normalization,
+        archive_query_correction_rank=args.archive_query_correction_rank,
         kv_head_policy=args.kv_head_policy,
         gate_bias_init=args.gate_bias_init,
     )
@@ -349,6 +358,7 @@ def main() -> None:
             "archive_position_invariant": args.archive_position_invariant,
             "archive_scan_block_size": args.archive_scan_block_size,
             "archive_global_normalization": args.archive_global_normalization,
+            "archive_query_correction_rank": args.archive_query_correction_rank,
             "patched_layers": replaced,
             "kv_head_policy": args.kv_head_policy,
             "gate_bias_init": args.gate_bias_init,

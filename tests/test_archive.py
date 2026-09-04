@@ -100,6 +100,42 @@ def test_archive_matches_exponential_response_for_single_code() -> None:
     torch.testing.assert_close(out, expected, rtol=1e-5, atol=1e-5)
 
 
+def test_query_conditioned_archive_residual_is_identity_until_calibrated() -> None:
+    torch.manual_seed(17)
+    base = QCCArchive(
+        num_heads=2,
+        head_dim=4,
+        num_codes=4,
+        decay_rates=(0.8, 0.95),
+        window_size=2,
+        use_triton=False,
+        query_correction_rank=0,
+    )
+    corrected = QCCArchive(
+        num_heads=2,
+        head_dim=4,
+        num_codes=4,
+        decay_rates=(0.8, 0.95),
+        window_size=2,
+        use_triton=False,
+        query_correction_rank=3,
+    )
+    corrected.load_state_dict(base.state_dict(), strict=False)
+    with torch.no_grad():
+        corrected.query_correction_u.normal_()
+        corrected.query_correction_v.zero_()
+    keys = torch.randn(1, 2, 5, 4)
+    values = torch.randn_like(keys)
+    query = torch.randn(1, 2, 4)
+    for index in range(keys.shape[2]):
+        base.update(keys[:, :, index], values[:, :, index])
+        corrected.update(keys[:, :, index], values[:, :, index])
+    torch.testing.assert_close(base.read(query), corrected.read(query))
+    with torch.no_grad():
+        corrected.query_correction_v.normal_(std=0.1)
+    assert not torch.equal(base.read(query), corrected.read(query))
+
+
 def test_archive_global_normalization_matches_separable_softmax_equation():
     """Code routing must weight raw numerator/denominator mass jointly."""
 

@@ -118,7 +118,8 @@ teacher 特征现在通过未 patch attention 模块的 forward-pre-hook 直接�
 
 ### 3.7 Quality-first exact shadow（已实现，待远程验证）
 
-- `HybridQCCArchive(..., quality_first=True)` 提供显式质量优先控制：固定容量 score-ranked exact tier、soft exact read、按 bounded tile 的未来 query-key 相似度选择候选和较高 exact blend；容量仍与上下文长度无关。
+- `HybridQCCArchive(..., quality_first=True)` 提供显式质量优先控制：固定容量 score-ranked exact tier、置信度门控的 nearest-neighbour exact read、按 bounded tile 的未来 query-key 相似度选择候选；容量仍与上下文长度无关。quality-first 默认不再强制放大 exact 分支，避免未校准近邻值污染 recurrent 输出。
+- Hybrid exact tier 现在可接收独立的 rotary K/Q side-channel：recurrent archive 继续使用 raw position-invariant K/Q，exact shadow 用真实 local attention 的 rotary K/Q 做匹配；普通 QCCArchive 忽略该可选 side-channel，保持接口兼容。
 - `calibrate_hf_admission.py`、`benchmark_hf_retrofit.py` 与 `benchmark_hf_retrieval_1m.py` 均支持 `--quality-first`。该模式用于先验证真实模型质量，不得直接当作 80% memory、vLLM 或最终 99 gate 证据；报告必须包含 exact tier 容量和实际峰值显存。
 
 ### 3.8 Phi 远程代码兼容
@@ -155,6 +156,9 @@ teacher 特征现在通过未 patch attention 模块的 forward-pre-hook 直接�
 - 2026-09-05 T4 复核暴露两项工程问题并已修复：分层校准释放 teacher 时仍保留 attention 子模块引用，加载 student 会被系统 `SIGKILL`；现保存层数整数后显式删除模块列表并执行 `gc.collect()`。Phi-3.5 attention-output 辅助损失改为 fp32 计算，避免 fp16 平方溢出；新增单元测试覆盖该数值边界。
 - 同轮真实 Phi-3.5-mini T4 诊断：全层 512-token 反向仍因 activation peak OOM；last-quarter（8/32 层，0.0313% 参数）50 步可完成，但 held-out cosine `0.9148`、top-1 `0.4463`，未通过 `0.99`。固定容量 quality-first exact shadow 在 512-token matched HF 上最高记录 cosine `0.9687`、top-1 `0.5781`，仍不能替代 RULER/LongBench/PG-19。
 - 2026-09-05 质量修复：quality-first exact tier 不再按 tile FIFO 覆盖，而是使用全局 score-ranked 固定表；每个 bounded prefill tile 用采样的未来 query-key cosine 选取候选，避免长流中早期 salient token 被后续 tile 无条件淘汰。普通 admission 模式保持原有 score/FIFO 配置不变；新增跨 tile salient-token 回归测试。该修复尚未产生新的真实模型 benchmark 数字，旧质量结果不自动迁移。
+- 2026-09-05 质量对照（真实 Phi-3.5-mini-instruct，A10G，4 条独立 held-out，共 2436 tokens）：未校准 `window=1024, codes=16` 的平均 logit cosine `0.998933`、top-1 `0.978468`（2/4 记录同时达到 `0.99`）；`gate_bias_init=4` 对照为 cosine `0.998717`、top-1 `0.977664`。同一首条记录的 regular `window=128` adapter 为 cosine `0.920406`、top-1 `0.378617`，quality-first fixed exact shadow 为 cosine `0.976046`、top-1 `0.448553`；扩大 exact capacity 到 1024 slots 仍为 cosine `0.975927`、top-1 `0.449357`，说明容量不是主要瓶颈。上述均为 matched HF fidelity diagnostics，不是 RULER/LongBench/PG-19，也未通过双指标 `0.99` gate。
+- 2026-09-05 质量实现修复：quality-first 改为 hard nearest read 并尊重调用方 mix bias；Hybrid exact tier 接入 rotary K/Q side-channel，避免 raw archive addressing 与 Full-KV historical matching 的相位错位。新增 `test_hybrid_exact_shadow_uses_rotary_side_channel`，本地和远端 hybrid 单测通过；该修复尚未改变官方任务缺口。
+- 2026-09-05 质量校准补偿：`QCCArchive` 新增默认 rank `8` 的零初始化 query-conditioned low-rank residual，作用于 archive read、位于 local/archive mixing 之前；未校准输出严格保持不变，校准时可用约 `0.03%` 级别额外参数学习系统性长程偏差。`calibrate_hf_retrofit.py`、`calibrate_hf_layerwise.py` 和 `benchmark_hf_retrofit.py` 均支持 `--archive-query-correction-rank`；旧 adapter 缺少该键时自动保留零初始化。新增 archive identity/legacy adapter 回归测试，尚未产生真实长上下文或官方 benchmark 数字。
 - 分层校准新增显式 `--cpu-offload-activations`：用 PyTorch `save_on_cpu` 将 autograd 保存张量移到主存，目标是在小显存卡上重新尝试全层校准；默认关闭，尚未形成新的真实质量结果。
 - 2026-09-05 质量优先校准：默认 `--distill-long-range-only` 只对超出 exact local window 的位置计算蒸馏损失，避免已精确匹配的前缀 token 稀释 archive 梯度；`--no-distill-long-range-only` 保留旧的全序列消融。`--code-init` 默认改为确定性 cosine k-means，`key-sample` 与 `random` 仍可复现旧初始化。
 
