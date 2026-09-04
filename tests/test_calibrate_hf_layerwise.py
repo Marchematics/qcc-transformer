@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import torch
 from torch import nn
 
 
@@ -21,6 +22,8 @@ _chunked_kl_divergence = _MODULE._chunked_kl_divergence
 _distillation_loss = _MODULE._distillation_loss
 _teacher_top2_margin_loss = _MODULE._teacher_top2_margin_loss
 quality_gate_passed = _MODULE.quality_gate_passed
+_teacher_logits_and_inputs = _MODULE._teacher_logits_and_inputs
+_hidden_distillation_loss = _MODULE._hidden_distillation_loss
 
 
 class _Attention(nn.Module):
@@ -44,6 +47,23 @@ class _Model(nn.Module):
             num_key_value_heads=4,
         )
         self.attn = _Attention()
+
+
+class _TeacherAttention(_Attention):
+    def forward(self, hidden_states):
+        return self.o_proj(self.v_proj(hidden_states))
+
+
+class _TeacherModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.attn = _TeacherAttention()
+        self.lm_head = nn.Linear(16, 32, bias=False)
+
+    def forward(self, input_ids, **_kwargs):
+        hidden = torch.nn.functional.one_hot(input_ids % 16, num_classes=16).float()
+        hidden = self.attn(hidden)
+        return SimpleNamespace(logits=self.lm_head(hidden))
 
 
 @pytest.mark.parametrize(
@@ -98,6 +118,24 @@ def test_key_sample_code_init_uses_teacher_key_geometry():
     )
     assert not torch.equal(model.attn.qcc.archive.codes, original)
     assert torch.isfinite(model.attn.qcc.archive.codes).all()
+
+
+def test_teacher_capture_samples_every_batch_and_selected_attention():
+    import torch
+
+    model = _TeacherModel()
+    batches = [
+        {"input_ids": torch.arange(12).view(1, -1)},
+        {"input_ids": torch.arange(12, 24).view(1, -1)},
+    ]
+    teachers, snapshots, attention = _teacher_logits_and_inputs(
+        model, batches, max_capture_tokens=4, selected_layers={0}
+    )
+    assert len(teachers) == 2
+    assert snapshots[0].shape == (1, 8, 16)
+    assert len(attention[0]) == 2
+    assert attention[0][0].shape == (4, 16)
+    assert torch.isfinite(_hidden_distillation_loss(attention[0][0], attention[0][0]))
 
 
 def test_chunked_distillation_helpers_match_reference():

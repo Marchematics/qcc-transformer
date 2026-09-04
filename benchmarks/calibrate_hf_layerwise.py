@@ -364,7 +364,12 @@ def _teacher_logits_and_inputs(
     batches: list[dict[str, torch.Tensor]],
     *,
     max_capture_tokens: int = 256,
-) -> tuple[list[torch.Tensor], dict[int, torch.Tensor]]:
+    selected_layers: set[int] | None = None,
+) -> tuple[
+    list[torch.Tensor],
+    dict[int, torch.Tensor],
+    dict[int, list[torch.Tensor]],
+]:
     """Run teacher batches and retain bounded K-init snapshots.
 
     The logits are kept for every batch because they are the distillation
@@ -388,7 +393,13 @@ def _teacher_logits_and_inputs(
     captured: dict[int, list[torch.Tensor]] = {
         index: [] for index in range(len(attention_modules))
     }
+    attention_targets: dict[int, list[torch.Tensor]] = {
+        index: []
+        for index in range(len(attention_modules))
+        if selected_layers is None or index in selected_layers
+    }
     batch_captured: dict[int, torch.Tensor] = {}
+    batch_attention: dict[int, torch.Tensor] = {}
     hooks = []
     for index, module in enumerate(attention_modules):
         def capture(_module, inputs, kwargs, *, layer_index=index):
@@ -397,10 +408,20 @@ def _teacher_logits_and_inputs(
                 batch_captured[layer_index] = hidden.detach()
 
         hooks.append(module.register_forward_pre_hook(capture, with_kwargs=True))
+        if index in attention_targets:
+            def capture_output(_module, _inputs, output, *, layer_index=index):
+                if layer_index in batch_attention:
+                    return
+                value = output[0] if isinstance(output, (tuple, list)) else output
+                if isinstance(value, torch.Tensor):
+                    batch_attention[layer_index] = value.detach()
+
+            hooks.append(module.register_forward_hook(capture_output))
     try:
         teachers = []
         for batch in batches:
             batch_captured = {}
+            batch_attention = {}
             teachers.append(model(**batch, use_cache=False).logits.float().cpu())
             for layer_index, hidden in batch_captured.items():
                 flat = hidden.reshape(-1, hidden.shape[-1]).cpu()
@@ -409,15 +430,52 @@ def _teacher_logits_and_inputs(
                     0, flat.shape[0] - 1, take, dtype=torch.long
                 )
                 captured[layer_index].append(flat[indices])
+            for layer_index, output in batch_attention.items():
+                flat = output.reshape(-1, output.shape[-1]).cpu()
+                take = min(max_capture_tokens, flat.shape[0])
+                indices = torch.linspace(
+                    0, flat.shape[0] - 1, take, dtype=torch.long
+                )
+                attention_targets[layer_index].append(flat[indices])
     finally:
         for hook in hooks:
             hook.remove()
+    missing_attention = [
+        layer_index
+        for layer_index, targets in attention_targets.items()
+        if len(targets) != len(batches)
+    ]
+    if missing_attention:
+        raise RuntimeError(
+            "teacher did not expose attention outputs for every batch in layers "
+            f"{missing_attention}"
+        )
     snapshots = {
         layer_index: torch.cat(chunks, dim=0).unsqueeze(0)
         for layer_index, chunks in captured.items()
         if chunks
     }
-    return teachers, snapshots
+    return teachers, snapshots, attention_targets
+
+
+def _hidden_distillation_loss(
+    student: torch.Tensor,
+    teacher_cpu: torch.Tensor,
+    *,
+    cosine_weight: float = 0.5,
+) -> torch.Tensor:
+    """Match selected attention outputs without a vocabulary-sized target."""
+
+    if student.shape != teacher_cpu.shape:
+        raise ValueError(
+            f"student/teacher hidden shape mismatch: {student.shape} vs {teacher_cpu.shape}"
+        )
+    if not 0.0 <= cosine_weight <= 1.0:
+        raise ValueError("cosine_weight must lie in [0, 1]")
+    teacher = teacher_cpu.to(device=student.device, dtype=student.dtype)
+    mse = torch.nn.functional.mse_loss(student, teacher)
+    cosine = torch.nn.functional.cosine_similarity(student, teacher, dim=-1).mean()
+    return (1.0 - cosine_weight) * mse + cosine_weight * (1.0 - cosine)
 
 
 def main() -> None:
@@ -500,6 +558,12 @@ def main() -> None:
         default=256,
         help="teacher tokens sampled per training chunk for codebook initialization",
     )
+    parser.add_argument(
+        "--attention-loss-weight",
+        type=float,
+        default=0.35,
+        help="blend weight for selected-layer attention-output distillation",
+    )
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--dtype", choices=("auto", "float16", "bfloat16", "float32"), default="auto")
     parser.add_argument("--load-in-4bit", action="store_true", help="load the real checkpoint through bitsandbytes NF4")
@@ -556,9 +620,11 @@ def main() -> None:
         or args.num_train_chunks <= 0
         or args.num_held_out_chunks <= 0
         or args.code_init_tokens <= 0
+        or not 0.0 <= args.attention_loss_weight <= 1.0
     ):
         raise ValueError(
-            "steps, lr, max-tokens, num-train-chunks, and num-held-out-chunks must be positive"
+            "steps, lr, max-tokens, chunk counts, and code-init-tokens must be positive; "
+            "attention-loss-weight must lie in [0, 1]"
         )
     if args.archive_scan_block_size <= 0:
         raise ValueError("archive-scan-block-size must be positive")
@@ -649,11 +715,26 @@ def main() -> None:
         for batch in held_out_batches
     ]
 
+    teacher_attention_modules = [
+        module
+        for module in baseline.modules()
+        if (
+            all(hasattr(module, field) for field in ("q_proj", "k_proj", "v_proj", "o_proj"))
+            or (hasattr(module, "qkv_proj") and hasattr(module, "o_proj"))
+        )
+    ]
+    if not teacher_attention_modules:
+        raise RuntimeError("could not locate compatible teacher attention modules")
+    calibrate_layers = parse_layer_spec(
+        args.calibrate_layers, len(teacher_attention_modules)
+    )
+
     with torch.no_grad():
-        train_teachers, teacher_hidden = _teacher_logits_and_inputs(
+        train_teachers, teacher_hidden, train_attention_targets = _teacher_logits_and_inputs(
             baseline,
             train_batches,
             max_capture_tokens=args.code_init_tokens,
+            selected_layers=set(calibrate_layers),
         )
         held_out_teachers = [
             baseline(**batch, use_cache=False).logits.float().cpu()
@@ -715,9 +796,14 @@ def main() -> None:
         if hasattr(patched, "enable_input_require_grads"):
             patched.enable_input_require_grads()
 
-    # Determine which layers to calibrate
+    # Determine which layers to calibrate. The teacher and patched model must
+    # expose the same attention-module ordering for hidden-output supervision.
     num_layers = len(replaced)
-    calibrate_layers = parse_layer_spec(args.calibrate_layers, num_layers)
+    if num_layers != len(teacher_attention_modules):
+        raise RuntimeError(
+            "teacher/student attention layer counts differ: "
+            f"{len(teacher_attention_modules)} vs {num_layers}"
+        )
     print(f"Calibrating layers: {calibrate_layers} out of {num_layers}", file=sys.stderr)
 
     # Freeze all, then selectively unfreeze
@@ -762,37 +848,94 @@ def main() -> None:
     optimizer = torch.optim.AdamW(trainable, lr=args.lr)
     patched.train()
 
-    for step in range(args.steps):
-        optimizer.zero_grad(set_to_none=True)
-        batch_index = step % len(train_batches)
-        # Every calibration batch is an independent request.  QCC keeps its
-        # history inside each adapted attention layer, so explicitly reset it
-        # between optimizer steps instead of letting ``_seen_tokens`` turn
-        # unrelated examples into one ever-growing stream.
-        reset_hf_qcc_cache(
-            patched, batch_size=int(train_batches[batch_index]["input_ids"].shape[0])
-        )
-        student = patched(**train_batches[batch_index], use_cache=False).logits
-        loss = _distillation_loss(
-            student,
-            train_teachers[batch_index],
-            cosine_weight=args.cosine_weight,
-            kl_weight=args.kl_weight,
-            ce_weight=args.ce_weight,
-            margin_weight=args.margin_weight,
-            margin=args.margin,
-            kl_temperature=args.kl_temperature,
-        )
-        if not torch.isfinite(loss):
-            raise FloatingPointError(
-                "calibration diverged; lower --lr or reduce --max-tokens"
-            )
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(trainable, 1.0)
-        optimizer.step()
+    student_attention_outputs: dict[int, torch.Tensor] = {}
+    student_hooks = []
+    for module in patched.modules():
+        qcc = getattr(module, "qcc", None)
+        layer_index = getattr(qcc, "_qcc_layer_index", None)
+        if qcc is None or layer_index not in calibrate_layers:
+            continue
 
-        if (step + 1) % 10 == 0 or step == 0:
-            print(f"Step {step+1}/{args.steps}: loss={loss.item():.6f}", file=sys.stderr)
+        def capture_student(_module, _inputs, output, *, layer_index=layer_index):
+            value = output[0] if isinstance(output, (tuple, list)) else output
+            if isinstance(value, torch.Tensor):
+                student_attention_outputs[layer_index] = value
+
+        student_hooks.append(module.register_forward_hook(capture_student))
+
+    try:
+        for step in range(args.steps):
+            optimizer.zero_grad(set_to_none=True)
+            batch_index = step % len(train_batches)
+            # Every calibration batch is an independent request.  QCC keeps its
+            # history inside each adapted attention layer, so explicitly reset it
+            # between optimizer steps instead of letting ``_seen_tokens`` turn
+            # unrelated examples into one ever-growing stream.
+            reset_hf_qcc_cache(
+                patched, batch_size=int(train_batches[batch_index]["input_ids"].shape[0])
+            )
+            student_attention_outputs.clear()
+            student = patched(**train_batches[batch_index], use_cache=False).logits
+            logit_loss = _distillation_loss(
+                student,
+                train_teachers[batch_index],
+                cosine_weight=args.cosine_weight,
+                kl_weight=args.kl_weight,
+                ce_weight=args.ce_weight,
+                margin_weight=args.margin_weight,
+                margin=args.margin,
+                kl_temperature=args.kl_temperature,
+            )
+            attention_losses = []
+            if args.attention_loss_weight:
+                for layer_index in calibrate_layers:
+                    targets = train_attention_targets.get(layer_index, [])
+                    if not targets:
+                        continue
+                    output = student_attention_outputs.get(layer_index)
+                    if output is None:
+                        raise RuntimeError(
+                            f"student did not expose attention output for layer {layer_index}"
+                        )
+                    flat = output.reshape(-1, output.shape[-1])
+                    target = targets[batch_index]
+                    take = min(target.shape[0], flat.shape[0])
+                    indices = torch.linspace(
+                        0, flat.shape[0] - 1, take, device=flat.device, dtype=torch.long
+                    )
+                    attention_losses.append(
+                        _hidden_distillation_loss(flat[indices], target[:take])
+                    )
+                if not attention_losses:
+                    raise RuntimeError(
+                        "attention-output supervision requested but no targets were captured"
+                    )
+            attention_loss = (
+                torch.stack(attention_losses).mean()
+                if attention_losses
+                else logit_loss.new_zeros(())
+            )
+            loss = (
+                (1.0 - args.attention_loss_weight) * logit_loss
+                + args.attention_loss_weight * attention_loss
+            )
+            if not torch.isfinite(loss):
+                raise FloatingPointError(
+                    "calibration diverged; lower --lr or reduce --max-tokens"
+                )
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(trainable, 1.0)
+            optimizer.step()
+
+            if (step + 1) % 10 == 0 or step == 0:
+                print(
+                    f"Step {step+1}/{args.steps}: loss={loss.item():.6f} "
+                    f"logit={logit_loss.item():.6f} attention={attention_loss.item():.6f}",
+                    file=sys.stderr,
+                )
+    finally:
+        for hook in student_hooks:
+            hook.remove()
 
     # Evaluate
     patched.eval()
@@ -862,6 +1005,7 @@ def main() -> None:
             "num_held_out_chunks": len(held_out_batches),
             "code_init": args.code_init,
             "code_init_tokens": args.code_init_tokens,
+            "attention_loss_weight": args.attention_loss_weight,
         },
     )
 
@@ -884,6 +1028,7 @@ def main() -> None:
         "steps": args.steps,
         "code_init": args.code_init,
         "code_init_tokens": args.code_init_tokens,
+        "attention_loss_weight": args.attention_loss_weight,
         "cosine_weight": args.cosine_weight,
         "kl_weight": args.kl_weight,
         "ce_weight": args.ce_weight,

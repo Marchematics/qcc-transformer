@@ -151,6 +151,10 @@ uniformly sampled teacher K projections across every training chunk; use
 `--code-init random` only for the initialization ablation.  The number of
 teacher K tokens staged per chunk is bounded by `--code-init-tokens` (default
 256), so longer calibration streams do not retain full hidden-state traces.
+The default `--attention-loss-weight 0.35` also matches the selected layers'
+attention outputs on the same bounded token samples; set it to `0` for the
+logit-only ablation.  This local signal reduces cross-layer compensation while
+leaving the final held-out logit/top-1 gate unchanged.
 Adding
 `--cosine-weight 0.2` mixes a directional logit loss into the historical MSE
 objective, while `--margin-weight 0.2 --margin 0.0` directly penalizes a

@@ -143,6 +143,7 @@ teacher 特征现在通过未 patch attention 模块的 forward-pre-hook 直接�
 
 - 长程质量校准修正（2026-09-05 后续）：`benchmarks/calibrate_hf_layerwise.py` 的多 chunk 校准现在从整段文本均匀取窗口，并为每个窗口显式传递原始绝对 `position_ids`；新增 `--num-held-out-chunks` 聚合多个验证窗口，避免所有 RoPE 样本从位置 0 开始。新增可选 `--margin-weight/--margin` top-2 排序损失，直接抑制 teacher argmax 交换；`held_out_gate_passed` 现在同时要求 cosine 与 top-1 达到阈值。旧 adapter 无需迁移，但要按新采样协议重校准后再比较质量。
 - 2026-09-05 质量校准继续修复：分层校准的 `--code-init key-sample`（默认）现在从每个训练 chunk 均匀抽取有界数量的 teacher K 投影来初始化 codebook，而不是只使用第一个 chunk；`--code-init-tokens`（默认 256）限制 CPU staging，`--code-init random` 保留随机初始化消融。该改动不增加部署参数，仍需在真实长上下文 checkpoint 上重新校准并以 held-out/task benchmark 验证。
+- 同一分层校准器新增默认 `--attention-loss-weight 0.35`：对选中层的 teacher/student attention 输出使用同一有界 token 采样监督，避免只靠最终 logits 让不同层互相补偿；设为 `0` 可复现 logit-only 消融。该局部损失不改变 adapter 参数量或最终 held-out gate 口径。
 
 ### 本地回归
 
