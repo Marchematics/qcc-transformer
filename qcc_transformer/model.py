@@ -935,6 +935,7 @@ class QCCArchive(nn.Module):
         routing_logits = torch.einsum(
             "bhd,hmd->bhm", query.to(codes.dtype), codes
         ) / math.sqrt(self.head_dim)
+        active = self.active_codes
         if self.kernel_features:
             feature = torch.exp(
                 (
@@ -953,7 +954,9 @@ class QCCArchive(nn.Module):
             total_den = (feature * weighted_den).sum(dim=2).clamp_min(1e-8)
             response = (total_num / total_den.unsqueeze(-1)).to(query.dtype)
             return self._combine_landmark(query, response) if include_landmarks else response
-        if self.global_normalization:
+        if self.global_normalization and (
+            active is None or active >= self.num_codes or torch.is_grad_enabled()
+        ):
             mix = F.softmax(
                 self.mix_logits.to(device=query.device, dtype=numerator.dtype), dim=-1
             )
@@ -964,7 +967,6 @@ class QCCArchive(nn.Module):
             total_den = (routing * weighted_den).sum(dim=2).clamp_min(1e-8)
             response = (total_num / total_den.unsqueeze(-1)).to(query.dtype)
             return self._combine_landmark(query, response) if include_landmarks else response
-        active = self.active_codes
         if active is None or active >= self.num_codes or torch.is_grad_enabled():
             denom = denominator.clamp_min(1e-8)
             response = numerator / denom.unsqueeze(-1)
@@ -1078,6 +1080,7 @@ class QCCArchive(nn.Module):
         routing_logits = torch.einsum(
             "bhed,hmd->bhem", query.to(codes.dtype), codes
         ) / math.sqrt(self.head_dim)
+        active = self.active_codes
         if self.kernel_features:
             query_norm_sq = query.to(codes.dtype).square().sum(dim=-1, keepdim=True)
             feature = torch.exp(
@@ -1094,7 +1097,9 @@ class QCCArchive(nn.Module):
             total_den = (feature * weighted_den).sum(dim=3).clamp_min(1e-8)
             response = (total_num / total_den.unsqueeze(-1)).to(query.dtype)
             return self._combine_landmark(query, response) if include_landmarks else response
-        if self.global_normalization:
+        if self.global_normalization and (
+            active is None or active >= self.num_codes or torch.is_grad_enabled()
+        ):
             mix = F.softmax(
                 self.mix_logits.to(device=query.device, dtype=numerator.dtype), dim=-1
             )
@@ -1105,7 +1110,6 @@ class QCCArchive(nn.Module):
             total_den = (routing * weighted_den).sum(dim=3).clamp_min(1e-8)
             response = (total_num / total_den.unsqueeze(-1)).to(query.dtype)
             return self._combine_landmark(query, response) if include_landmarks else response
-        active = self.active_codes
         if active is None or active >= self.num_codes:
             denom = denominator.clamp_min(1e-8)
             response = numerator / denom.unsqueeze(-1)
