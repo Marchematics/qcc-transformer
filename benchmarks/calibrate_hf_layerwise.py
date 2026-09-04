@@ -593,7 +593,7 @@ def _distillation_loss_from_hidden(
             dot = dot + (student_slice * teacher_slice).sum(dim=-1)
             student_sq = student_sq + student_slice.square().sum(dim=-1)
             teacher_sq = teacher_sq + teacher_slice.square().sum(dim=-1)
-        if kl_weight or ce_weight:
+        if kl_weight:
             student_log_norm = torch.logaddexp(
                 student_log_norm,
                 torch.logsumexp(student_slice / kl_temperature, dim=-1),
