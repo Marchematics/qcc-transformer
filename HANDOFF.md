@@ -137,6 +137,7 @@ teacher 特征现在通过未 patch attention 模块的 forward-pre-hook 直接�
 - 同一真实 Phi-3.5-mini 4K prompt 的未校准质量曲线：window `128` / 16 codes 为 cosine `0.95244`、top-1 `0.42480`；window `512` 为 `0.99736` / `0.67163`；window `1024` 为 `0.99939` / `0.79663`；window `2048` 为 `0.99980` / `0.90894`。这证明误差主要来自历史注意力近似；这些都是 matched HF fidelity diagnostics，不是 RULER/LongBench/PG-19，也没有达到 0.99 top-1 gate。
 - 实验性 `archive_kernel_features`（正随机特征 softmax archive）已贯通 reference/chunk/HF API，但在真实 Phi-3.5 4K、window `128`、16 codes 上修正尺度后仅得到 cosine `0.96385`、top-1 `0.43579`，默认保持关闭，不能作为质量方案。
 - 质量校准修复（2026-09-05 后续）：普通 `calibrate_hf_retrofit.py` 现在像分层校准一样，在每个 optimizer step 和最终评估前显式 reset HF QCC state，避免独立文本 batch 被 `_seen_tokens` 串成一条流；同时支持可选 teacher-argmax `--ce-weight`，并正确参与 KL/MSE 权重归一化。HF retrofit 新增 `archive_scan_block_size`，校准 CLI 默认 `256`，可在不改变递推方程的情况下把长序列反向临时张量降到默认 `1024` 的四分之一，便于验证更大 codebook。该改动尚未产生新的真实 RULER/LongBench/PG-19 结果，不能视为质量门槛已通过。
+- archive 读取质量修正（2026-09-05 后续）：新增默认开启的 `archive_global_normalization`，按可分离 softmax 的全局方程先合并 code/scale 的 numerator 与 denominator，再做一次归一化；旧的逐 code 独立归一化保留为 `--no-archive-global-normalization` 消融。为避免新旧 Triton kernel 混用不同方程，开启该模式时暂走 reference read/update path，需后续补等价 Triton kernel 后再恢复融合性能。该修正需要重新校准 adapter，不能直接把旧 adapter 的结果当作新方程的质量证据。
 
 ## 4. 已验证结果（严格区分证据等级）
 

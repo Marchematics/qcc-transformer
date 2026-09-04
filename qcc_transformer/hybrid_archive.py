@@ -99,6 +99,7 @@ class HybridQCCArchive(QCCArchive):
         prefix_landmark: bool = False,
         prefix_pair_landmark: bool = False,
         landmark_temperature: float = 1.0,
+        global_normalization: bool = True,
         exact_num_sets: int = 128,
         exact_ways: int = 4,
         exact_probe_sets: int | None = None,
@@ -130,6 +131,7 @@ class HybridQCCArchive(QCCArchive):
             prefix_landmark=prefix_landmark,
             prefix_pair_landmark=prefix_pair_landmark,
             landmark_temperature=landmark_temperature,
+            global_normalization=global_normalization,
         )
         if max_inserts_per_chunk <= 0:
             raise ValueError("max_inserts_per_chunk must be positive")
@@ -196,6 +198,7 @@ class HybridQCCArchive(QCCArchive):
             prefix_landmark=archive.prefix_landmark,
             prefix_pair_landmark=archive.prefix_pair_landmark,
             landmark_temperature=archive.landmark_temperature,
+            global_normalization=archive.global_normalization,
             **hybrid_kwargs,
         ).to(device=archive.codes.device)
         base_state = archive.state_dict()

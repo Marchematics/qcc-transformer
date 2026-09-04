@@ -44,6 +44,12 @@ def main() -> None:
         help="use positive random-feature softmax kernel archive (reference path)",
     )
     parser.add_argument(
+        "--archive-global-normalization",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="combine code/scale numerator and denominator before normalization",
+    )
+    parser.add_argument(
         "--archive-position-invariant",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -153,6 +159,7 @@ def main() -> None:
         "window_size": args.window_size,
         "num_codes": args.num_codes,
         "archive_kernel_features": args.archive_kernel_features,
+        "archive_global_normalization": args.archive_global_normalization,
         "archive_position_invariant": args.archive_position_invariant,
         "max_position_embeddings": args.max_position_embeddings,
         "kv_head_policy": args.kv_head_policy,
@@ -208,6 +215,7 @@ def main() -> None:
         "window_size": args.window_size,
         "num_codes": args.num_codes,
         "archive_kernel_features": args.archive_kernel_features,
+        "archive_global_normalization": args.archive_global_normalization,
         "gate_bias_init": args.gate_bias_init,
         "archive_position_invariant": args.archive_position_invariant,
         "mean_logit_cosine": float(cosine),

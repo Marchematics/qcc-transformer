@@ -100,6 +100,39 @@ def test_archive_matches_exponential_response_for_single_code() -> None:
     torch.testing.assert_close(out, expected, rtol=1e-5, atol=1e-5)
 
 
+def test_archive_global_normalization_matches_separable_softmax_equation():
+    """Code routing must weight raw numerator/denominator mass jointly."""
+
+    archive = QCCArchive(
+        num_heads=1,
+        head_dim=2,
+        num_codes=2,
+        decay_rates=(0.9,),
+        window_size=1,
+        use_triton=False,
+        global_normalization=True,
+    )
+    with torch.no_grad():
+        archive.codes.copy_(torch.tensor([[[1.0, 0.0], [0.0, 1.0]]]))
+        archive.mix_logits.zero_()
+    keys = torch.tensor([[[1.0, 0.0]], [[0.0, 1.0]]])
+    values = torch.tensor([[[2.0, 0.0]], [[0.0, 4.0]]])
+    query = torch.tensor([[[1.0, 1.0]]])
+    with torch.no_grad():
+        archive.reset_state(1)
+        archive.update(keys[0:1], values[0:1])
+        archive.update(keys[1:2], values[1:2])
+        actual = archive.read(query)[0, 0]
+        code_scores = torch.tensor([1.0, 1.0]) / (2.0**0.5)
+        routing = code_scores.exp()
+        # Each code sees the two events through its own exponential response;
+        # the global form combines those masses before one final division.
+        numerator = archive._numerator[0, 0, :, 0, :]
+        denominator = archive._denominator[0, 0, :, 0]
+        expected = (routing[:, None] * numerator).sum(0) / (routing * denominator).sum()
+    torch.testing.assert_close(actual, expected, rtol=1e-5, atol=1e-5)
+
+
 def test_persistent_landmark_survives_long_filler_updates() -> None:
     archive = QCCArchive(
         num_heads=1,

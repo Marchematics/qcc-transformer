@@ -245,6 +245,12 @@ def main() -> None:
         "--archive-kernel-features", action="store_true",
         help="use positive random-feature softmax kernel archive",
     )
+    parser.add_argument(
+        "--archive-global-normalization",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="combine code/scale numerator and denominator before normalization",
+    )
     parser.add_argument("--max-tokens", type=int, default=2048)
     parser.add_argument(
         "--archive-scan-block-size",
@@ -413,6 +419,7 @@ def main() -> None:
         archive_norm_gating=args.archive_norm_gating,
         archive_kernel_features=args.archive_kernel_features,
         archive_scan_block_size=args.archive_scan_block_size,
+        archive_global_normalization=args.archive_global_normalization,
         kv_head_policy=args.kv_head_policy,
         gate_bias_init=args.gate_bias_init,
     )
@@ -553,6 +560,7 @@ def main() -> None:
             "num_codes": args.num_codes,
             "archive_kernel_features": args.archive_kernel_features,
             "archive_scan_block_size": args.archive_scan_block_size,
+            "archive_global_normalization": args.archive_global_normalization,
             "archive_position_invariant": args.archive_position_invariant,
             "patched_layers": replaced,
             "calibrated_layers": calibrate_layers,
@@ -584,6 +592,7 @@ def main() -> None:
         "kl_temperature": args.kl_temperature,
         "archive_kernel_features": args.archive_kernel_features,
         "archive_scan_block_size": args.archive_scan_block_size,
+        "archive_global_normalization": args.archive_global_normalization,
         "train_mean_logit_cosine": float(train_cosine.item()),
         "train_top1_agreement": float(train_agreement.item()),
     }

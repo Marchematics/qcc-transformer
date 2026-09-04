@@ -106,6 +106,7 @@ class QCCArchive(nn.Module):
         prefix_pair_landmark: bool = False,
         landmark_temperature: float = 1.0,
         kernel_features: bool = False,
+        global_normalization: bool = True,
     ) -> None:
         super().__init__()
         if num_heads <= 0 or head_dim <= 0 or num_codes <= 0:
@@ -150,6 +151,10 @@ class QCCArchive(nn.Module):
         self.prefix_pair_landmark = prefix_pair_landmark
         self.landmark_temperature = landmark_temperature
         self.kernel_features = bool(kernel_features)
+        # Correct separable-softmax reads combine all code/scale numerator and
+        # denominator contributions before the final normalization.  Keep an
+        # explicit switch for reproducing the legacy per-code ablation.
+        self.global_normalization = bool(global_normalization)
         if prefix_landmark and not persistent_landmark:
             raise ValueError("prefix_landmark requires persistent_landmark")
         if prefix_pair_landmark and not prefix_landmark:
@@ -798,7 +803,13 @@ class QCCArchive(nn.Module):
         # event, which made chunked serving launch-bound even when the archive
         # state itself was tiny.  Sparse/lazy archives retain their dedicated
         # top-k path for now; CPU and unsupported devices use the block scan.
-        if self.use_triton and key.is_cuda and self.active_codes is None and not self.kernel_features:
+        if (
+            self.use_triton
+            and key.is_cuda
+            and self.active_codes is None
+            and not self.kernel_features
+            and not self.global_normalization
+        ):
             from .triton_kernels import TRITON_AVAILABLE, triton_update_read_archive_chunk
 
             if TRITON_AVAILABLE:
@@ -942,6 +953,17 @@ class QCCArchive(nn.Module):
             total_den = (feature * weighted_den).sum(dim=2).clamp_min(1e-8)
             response = (total_num / total_den.unsqueeze(-1)).to(query.dtype)
             return self._combine_landmark(query, response) if include_landmarks else response
+        if self.global_normalization:
+            mix = F.softmax(
+                self.mix_logits.to(device=query.device, dtype=numerator.dtype), dim=-1
+            )
+            weighted_num = torch.einsum("hmj,bhmjd->bhmd", mix, numerator)
+            weighted_den = torch.einsum("hmj,bhmj->bhm", mix, denominator)
+            routing = torch.exp(routing_logits.clamp(min=-20.0, max=10.0))
+            total_num = (routing.unsqueeze(-1) * weighted_num).sum(dim=2)
+            total_den = (routing * weighted_den).sum(dim=2).clamp_min(1e-8)
+            response = (total_num / total_den.unsqueeze(-1)).to(query.dtype)
+            return self._combine_landmark(query, response) if include_landmarks else response
         active = self.active_codes
         if active is None or active >= self.num_codes or torch.is_grad_enabled():
             denom = denominator.clamp_min(1e-8)
@@ -1029,6 +1051,14 @@ class QCCArchive(nn.Module):
             2, index_scales
         )
         mix = F.softmax(mix_logits, dim=-1).to(response.dtype)
+        if self.global_normalization:
+            weighted_num = (mix.unsqueeze(-1) * numerator).sum(dim=3)
+            weighted_den = (mix * denominator).sum(dim=3)
+            routing = torch.exp(values.clamp(min=-20.0, max=10.0))
+            total_num = (routing.unsqueeze(-1) * weighted_num).sum(dim=2)
+            total_den = (routing * weighted_den).sum(dim=2).clamp_min(1e-8)
+            response = (total_num / total_den.unsqueeze(-1)).to(query.dtype)
+            return self._combine_landmark(query, response) if include_landmarks else response
         response = (mix.unsqueeze(-1) * response).sum(dim=3)
         routing = F.softmax(values, dim=-1).to(response.dtype)
         response = (routing.unsqueeze(-1) * response).sum(dim=2).to(query.dtype)
@@ -1062,6 +1092,17 @@ class QCCArchive(nn.Module):
             weighted_den = torch.einsum("hmj,bhemj->bhem", mix, denominator)
             total_num = (feature.unsqueeze(-1) * weighted_num).sum(dim=3)
             total_den = (feature * weighted_den).sum(dim=3).clamp_min(1e-8)
+            response = (total_num / total_den.unsqueeze(-1)).to(query.dtype)
+            return self._combine_landmark(query, response) if include_landmarks else response
+        if self.global_normalization:
+            mix = F.softmax(
+                self.mix_logits.to(device=query.device, dtype=numerator.dtype), dim=-1
+            )
+            weighted_num = torch.einsum("hmj,bhemjd->bhemd", mix, numerator)
+            weighted_den = torch.einsum("hmj,bhemj->bhem", mix, denominator)
+            routing = torch.exp(routing_logits.clamp(min=-20.0, max=10.0))
+            total_num = (routing.unsqueeze(-1) * weighted_num).sum(dim=3)
+            total_den = (routing * weighted_den).sum(dim=3).clamp_min(1e-8)
             response = (total_num / total_den.unsqueeze(-1)).to(query.dtype)
             return self._combine_landmark(query, response) if include_landmarks else response
         active = self.active_codes
@@ -1112,6 +1153,7 @@ class QCCArchive(nn.Module):
             and not torch.is_grad_enabled()
             and query.is_cuda
             and not self.kernel_features
+            and not self.global_normalization
         ):
             from .triton_kernels import TRITON_AVAILABLE, triton_read_archive
 
@@ -1154,6 +1196,7 @@ class QCCSelfAttention(nn.Module):
         archive_prefix_pair_landmark: bool = False,
         archive_landmark_temperature: float = 1.0,
         archive_kernel_features: bool = False,
+        archive_global_normalization: bool = True,
         archive_lexical_landmark: bool = False,
         archive_position_invariant: bool = False,
         rope_theta: Optional[float] = None,
@@ -1255,6 +1298,7 @@ class QCCSelfAttention(nn.Module):
             prefix_pair_landmark=archive_prefix_pair_landmark,
             landmark_temperature=archive_landmark_temperature,
             kernel_features=archive_kernel_features,
+            global_normalization=archive_global_normalization,
         )
         self.archive_read_stride = archive_read_stride
         self.archive_lexical_landmark = archive_lexical_landmark
@@ -2850,6 +2894,7 @@ class QCCForCausalLM(nn.Module):
         archive_prefix_landmark: bool = False,
         archive_prefix_pair_landmark: bool = False,
         archive_landmark_temperature: float = 1.0,
+        archive_global_normalization: bool = True,
         archive_lexical_landmark: bool = False,
         archive_position_invariant: bool = False,
         archive_decay_rates: Optional[tuple[float, ...]] = None,
@@ -2893,6 +2938,7 @@ class QCCForCausalLM(nn.Module):
                 archive_prefix_landmark=archive_prefix_landmark,
                 archive_prefix_pair_landmark=archive_prefix_pair_landmark,
                 archive_landmark_temperature=archive_landmark_temperature,
+                archive_global_normalization=archive_global_normalization,
                 archive_lexical_landmark=archive_lexical_landmark,
                 archive_position_invariant=archive_position_invariant,
                 rope_theta=rope_theta if position_encoding == "rope" else None,
