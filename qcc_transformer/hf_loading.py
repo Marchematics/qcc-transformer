@@ -57,6 +57,12 @@ def _ensure_remote_code_compat() -> None:
             return tuple((entry[0], entry[1]) for entry in self)
 
         DynamicCache.to_legacy_cache = to_legacy_cache
+    if not hasattr(DynamicCache, "get_usable_length"):
+        def get_usable_length(self, new_seq_length: int, layer_idx: int = 0) -> int:
+            del new_seq_length
+            return self.get_seq_length(layer_idx)
+
+        DynamicCache.get_usable_length = get_usable_length
 
 
 def load_hf_causal_lm(
