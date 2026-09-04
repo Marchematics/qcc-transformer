@@ -107,6 +107,38 @@ def _teacher_argmax_cross_entropy(
     )
 
 
+def _teacher_top2_margin_loss(
+    student: torch.Tensor,
+    teacher_cpu: torch.Tensor,
+    *,
+    margin: float = 0.0,
+) -> torch.Tensor:
+    """Penalize a student argmax that loses to the teacher's top token.
+
+    MSE and cosine can be excellent while a small logit swap still changes the
+    generated token.  A bounded top-2 hinge term targets that failure directly
+    without moving the full teacher vocabulary back to the accelerator.
+    """
+
+    if student.shape != teacher_cpu.shape:
+        raise ValueError(f"student/teacher shape mismatch: {student.shape} vs {teacher_cpu.shape}")
+    if margin < 0:
+        raise ValueError("margin must be non-negative")
+    if student.shape[-1] < 2:
+        return student.new_zeros((), dtype=torch.float32)
+    top2 = teacher_cpu.topk(2, dim=-1).indices.to(device=student.device)
+    selected = student.gather(-1, top2)
+    return torch.relu(
+        student.new_tensor(float(margin)) - selected[..., 0] + selected[..., 1]
+    ).mean()
+
+
+def quality_gate_passed(cosine: float, top1: float, threshold: float) -> bool:
+    """Apply the Full-KV fidelity threshold to both cosine and top-1 metrics."""
+
+    return cosine >= threshold and top1 >= threshold
+
+
 def _distillation_loss(
     student: torch.Tensor,
     teacher_cpu: torch.Tensor,
@@ -115,6 +147,8 @@ def _distillation_loss(
     cosine_weight: float = 0.0,
     kl_weight: float = 0.0,
     ce_weight: float = 0.0,
+    margin_weight: float = 0.0,
+    margin: float = 0.0,
     kl_temperature: float = 2.0,
 ) -> torch.Tensor:
     """Numerically stable logit distillation objective.
@@ -129,12 +163,24 @@ def _distillation_loss(
         not 0.0 <= cosine_weight <= 1.0
         or not 0.0 <= kl_weight <= 1.0
         or not 0.0 <= ce_weight <= 1.0
+        or not 0.0 <= margin_weight <= 1.0
     ):
-        raise ValueError("cosine_weight, kl_weight, and ce_weight must lie in [0, 1]")
-    if cosine_weight + kl_weight + ce_weight > 1.0:
-        raise ValueError("cosine_weight + kl_weight + ce_weight must not exceed 1")
+        raise ValueError(
+            "cosine_weight, kl_weight, ce_weight, and margin_weight must lie in [0, 1]"
+        )
+    if cosine_weight + kl_weight + ce_weight + margin_weight > 1.0:
+        raise ValueError(
+            "cosine_weight + kl_weight + ce_weight + margin_weight must not exceed 1"
+        )
+    if margin < 0:
+        raise ValueError("margin must be non-negative")
     mse = _chunked_mse(student, teacher_cpu, chunk_size=chunk_size)
-    if cosine_weight == 0.0 and kl_weight == 0.0 and ce_weight == 0.0:
+    if (
+        cosine_weight == 0.0
+        and kl_weight == 0.0
+        and ce_weight == 0.0
+        and margin_weight == 0.0
+    ):
         return mse
     cosine = (
         _mean_cosine_from_cpu(student, teacher_cpu, chunk_size=chunk_size)
@@ -156,11 +202,17 @@ def _distillation_loss(
         if ce_weight
         else student.new_zeros((), dtype=torch.float32)
     )
+    margin_loss = (
+        _teacher_top2_margin_loss(student, teacher_cpu, margin=margin)
+        if margin_weight
+        else student.new_zeros((), dtype=torch.float32)
+    )
     return (
-        (1.0 - cosine_weight - kl_weight - ce_weight) * mse
+        (1.0 - cosine_weight - kl_weight - ce_weight - margin_weight) * mse
         + cosine_weight * (1.0 - cosine)
         + kl_weight * kl
         + ce_weight * ce
+        + margin_weight * margin_loss
     )
 
 
@@ -196,6 +248,60 @@ def parse_layer_spec(spec: str, num_layers: int) -> list[int]:
             f"model has layers 0 through {num_layers - 1}"
         )
     return sorted(set(layers))
+
+
+def _encode_positioned_chunks(
+    tokenizer,
+    text: str,
+    *,
+    max_tokens: int,
+    num_chunks: int,
+    window_size: int,
+) -> list[dict[str, torch.Tensor]]:
+    """Tokenize evenly spaced windows and preserve each window's offset.
+
+    Passing no ``position_ids`` made every calibration slice start at RoPE
+    position zero, even when it came from the middle of a long document.  The
+    student then saw a different positional distribution from serving.  Keep
+    the original token offset explicit for both teacher and student.
+    """
+
+    if max_tokens <= window_size or num_chunks <= 0:
+        raise ValueError(
+            "max_tokens must exceed window_size and num_chunks must be positive"
+        )
+    encoded = tokenizer(text, return_tensors="pt", add_special_tokens=True)
+    ids = encoded["input_ids"][0]
+    mask = encoded.get("attention_mask")
+    if ids.numel() == 0:
+        raise ValueError("text did not produce any tokens")
+    if ids.numel() <= max_tokens:
+        starts = [0]
+    else:
+        max_start = int(ids.numel() - max_tokens)
+        count = min(num_chunks, max_start + 1)
+        starts = torch.linspace(0, max_start, count).round().to(torch.long).tolist()
+
+    batches: list[dict[str, torch.Tensor]] = []
+    for raw_start in starts:
+        start = int(raw_start)
+        chunk_ids = ids[start : start + max_tokens]
+        if chunk_ids.numel() <= window_size:
+            continue
+        batch: dict[str, torch.Tensor] = {
+            "input_ids": chunk_ids.unsqueeze(0),
+            "position_ids": torch.arange(
+                start, start + chunk_ids.numel(), dtype=torch.long
+            ).view(1, -1),
+        }
+        if mask is not None:
+            batch["attention_mask"] = mask[
+                0, start : start + chunk_ids.numel()
+            ].unsqueeze(0)
+        batches.append(batch)
+    if not batches:
+        raise ValueError("text did not produce any chunk longer than window-size")
+    return batches
 
 
 def main() -> None:
@@ -260,7 +366,11 @@ def main() -> None:
     )
     parser.add_argument(
         "--num-train-chunks", type=int, default=1,
-        help="number of sequential training chunks to distill (cycles across chunks each step)",
+        help="number of evenly spaced training chunks to distill (cycles across chunks each step)",
+    )
+    parser.add_argument(
+        "--num-held-out-chunks", type=int, default=1,
+        help="number of evenly spaced held-out chunks used for validation",
     )
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--dtype", choices=("auto", "float16", "bfloat16", "float32"), default="auto")
@@ -278,8 +388,12 @@ def main() -> None:
         default=True,
         help="checkpoint frozen blocks to reduce memory",
     )
-    parser.add_argument("--quality-gate", type=float, default=0.99,
-                        help="minimum held-out cosine for fidelity gate")
+    parser.add_argument(
+        "--quality-gate",
+        type=float,
+        default=0.99,
+        help="minimum held-out cosine and top-1 agreement for fidelity gate",
+    )
     parser.add_argument(
         "--cosine-weight", type=float, default=0.0,
         help="weight of directional (1-cosine) term in calibration loss; "
@@ -292,21 +406,48 @@ def main() -> None:
         default=0.0,
         help="weight of teacher-argmax cross entropy; 0 preserves the historical objective",
     )
+    parser.add_argument(
+        "--margin-weight",
+        type=float,
+        default=0.0,
+        help="weight of a teacher top-2 ranking hinge term; 0 preserves the historical objective",
+    )
+    parser.add_argument(
+        "--margin",
+        type=float,
+        default=0.0,
+        help="minimum student logit margin for the teacher's top token",
+    )
     parser.add_argument("--kl-temperature", type=float, default=2.0)
     args = parser.parse_args()
 
-    if args.steps <= 0 or args.lr <= 0 or args.max_tokens <= 0 or args.num_train_chunks <= 0:
-        raise ValueError("steps, lr, max-tokens, and num-train-chunks must be positive")
+    if (
+        args.steps <= 0
+        or args.lr <= 0
+        or args.max_tokens <= 0
+        or args.num_train_chunks <= 0
+        or args.num_held_out_chunks <= 0
+    ):
+        raise ValueError(
+            "steps, lr, max-tokens, num-train-chunks, and num-held-out-chunks must be positive"
+        )
     if args.archive_scan_block_size <= 0:
         raise ValueError("archive-scan-block-size must be positive")
     if (
         not 0.0 <= args.cosine_weight <= 1.0
         or not 0.0 <= args.kl_weight <= 1.0
         or not 0.0 <= args.ce_weight <= 1.0
+        or not 0.0 <= args.margin_weight <= 1.0
     ):
-        raise ValueError("cosine-weight, kl-weight, and ce-weight must lie in [0, 1]")
-    if args.cosine_weight + args.kl_weight + args.ce_weight > 1.0:
-        raise ValueError("cosine-weight + kl-weight + ce-weight must not exceed 1")
+        raise ValueError(
+            "cosine-weight, kl-weight, ce-weight, and margin-weight must lie in [0, 1]"
+        )
+    if args.cosine_weight + args.kl_weight + args.ce_weight + args.margin_weight > 1.0:
+        raise ValueError(
+            "cosine-weight + kl-weight + ce-weight + margin-weight must not exceed 1"
+        )
+    if args.margin < 0:
+        raise ValueError("margin must be non-negative")
     if args.kl_temperature <= 0:
         raise ValueError("kl-temperature must be positive")
     if args.archive_prefix_landmark and not args.archive_persistent_landmark:
@@ -341,35 +482,24 @@ def main() -> None:
     common = {"trust_remote_code": args.trust_remote_code}
     tokenizer = AutoTokenizer.from_pretrained(args.model, **common)
 
-    def encode_text(text: str, *, max_length: int | None = None) -> dict:
-        encoded = tokenizer(
-            text,
-            return_tensors="pt",
-            add_special_tokens=True,
-            truncation=True,
-            max_length=max_length or args.max_tokens,
+    train_batches = _encode_positioned_chunks(
+        tokenizer,
+        train_text,
+        max_tokens=args.max_tokens,
+        num_chunks=args.num_train_chunks,
+        window_size=args.window_size,
+    )
+    held_out_batches = (
+        _encode_positioned_chunks(
+            tokenizer,
+            held_out_text,
+            max_tokens=args.max_tokens,
+            num_chunks=args.num_held_out_chunks,
+            window_size=args.window_size,
         )
-        return {key: value.to(device) for key, value in encoded.items()}
-
-    if args.num_train_chunks == 1:
-        train_batches = [encode_text(train_text)]
-    else:
-        full = tokenizer(train_text, return_tensors="pt", add_special_tokens=True, truncation=True,
-                         max_length=args.max_tokens * args.num_train_chunks)
-        ids = full["input_ids"][0]
-        mask = full.get("attention_mask")
-        train_batches = []
-        for start in range(0, ids.numel(), args.max_tokens):
-            chunk_ids = ids[start : start + args.max_tokens]
-            if chunk_ids.numel() <= args.window_size:
-                continue
-            batch = {"input_ids": chunk_ids.unsqueeze(0)}
-            if mask is not None:
-                batch["attention_mask"] = mask[0, start : start + chunk_ids.numel()].unsqueeze(0)
-            train_batches.append({key: value.to(device) for key, value in batch.items()})
-        if not train_batches:
-            raise ValueError("train-file did not produce any chunks longer than window-size")
-    held_out_encoded = encode_text(held_out_text) if held_out_text else None
+        if held_out_text
+        else []
+    )
 
     # Capture teacher logits and release immediately
     print("Loading teacher model...", file=sys.stderr)
@@ -381,15 +511,21 @@ def main() -> None:
         load_in_4bit=args.load_in_4bit,
     )
     device = model_input_device(baseline, requested_device)
-    train_batches = [{key: value.to(device) for key, value in batch.items()} for batch in train_batches]
-    if held_out_encoded is not None:
-        held_out_encoded = {key: value.to(device) for key, value in held_out_encoded.items()}
+    train_batches = [
+        {key: value.to(device) for key, value in batch.items()}
+        for batch in train_batches
+    ]
+    held_out_batches = [
+        {key: value.to(device) for key, value in batch.items()}
+        for batch in held_out_batches
+    ]
 
     with torch.no_grad():
         train_teachers = [baseline(**batch, use_cache=False).logits.float().cpu() for batch in train_batches]
-        held_out_teacher = None
-        if held_out_encoded:
-            held_out_teacher = baseline(**held_out_encoded, use_cache=False).logits.float().cpu()
+        held_out_teachers = [
+            baseline(**batch, use_cache=False).logits.float().cpu()
+            for batch in held_out_batches
+        ]
 
     del baseline
     if device.type == "cuda":
@@ -404,9 +540,14 @@ def main() -> None:
         load_in_4bit=args.load_in_4bit,
     )
     device = model_input_device(patched, requested_device)
-    train_batches = [{key: value.to(device) for key, value in batch.items()} for batch in train_batches]
-    if held_out_encoded is not None:
-        held_out_encoded = {key: value.to(device) for key, value in held_out_encoded.items()}
+    train_batches = [
+        {key: value.to(device) for key, value in batch.items()}
+        for batch in train_batches
+    ]
+    held_out_batches = [
+        {key: value.to(device) for key, value in batch.items()}
+        for batch in held_out_batches
+    ]
     replaced = patch_hf_model(
         patched,
         window_size=args.window_size,
@@ -502,6 +643,8 @@ def main() -> None:
             cosine_weight=args.cosine_weight,
             kl_weight=args.kl_weight,
             ce_weight=args.ce_weight,
+            margin_weight=args.margin_weight,
+            margin=args.margin,
             kl_temperature=args.kl_temperature,
         )
         if not torch.isfinite(loss):
@@ -534,14 +677,27 @@ def main() -> None:
         held_out_agreement = None
         held_out_gate_passed = None
 
-        if held_out_teacher is not None:
-            reset_hf_qcc_cache(
-                patched, batch_size=int(held_out_encoded["input_ids"].shape[0])
+        if held_out_teachers:
+            held_cosines = []
+            held_agreements = []
+            for batch, teacher in zip(held_out_batches, held_out_teachers):
+                reset_hf_qcc_cache(
+                    patched, batch_size=int(batch["input_ids"].shape[0])
+                )
+                held_out_student = patched(**batch, use_cache=False).logits
+                held_cosines.append(_mean_cosine_from_cpu(held_out_student, teacher))
+                held_agreements.append(
+                    (held_out_student.argmax(-1).cpu() == teacher.argmax(-1))
+                    .float()
+                    .mean()
+                )
+            held_out_cosine = torch.stack(held_cosines).mean()
+            held_out_agreement = torch.stack(held_agreements).mean()
+            held_out_gate_passed = quality_gate_passed(
+                float(held_out_cosine.item()),
+                float(held_out_agreement.item()),
+                args.quality_gate,
             )
-            held_out_student = patched(**held_out_encoded, use_cache=False).logits
-            held_out_cosine = _mean_cosine_from_cpu(held_out_student, held_out_teacher)
-            held_out_agreement = (held_out_student.argmax(-1).cpu() == held_out_teacher.argmax(-1)).float().mean()
-            held_out_gate_passed = float(held_out_cosine.item()) >= args.quality_gate
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     save_retrofit_adapter(
@@ -567,6 +723,7 @@ def main() -> None:
             "kv_head_policy": args.kv_head_policy,
             "gate_bias_init": args.gate_bias_init,
             "num_train_chunks": len(train_batches),
+            "num_held_out_chunks": len(held_out_batches),
         },
     )
 
@@ -589,6 +746,8 @@ def main() -> None:
         "cosine_weight": args.cosine_weight,
         "kl_weight": args.kl_weight,
         "ce_weight": args.ce_weight,
+        "margin_weight": args.margin_weight,
+        "margin": args.margin,
         "kl_temperature": args.kl_temperature,
         "archive_kernel_features": args.archive_kernel_features,
         "archive_scan_block_size": args.archive_scan_block_size,
@@ -599,7 +758,9 @@ def main() -> None:
 
     if held_out_cosine is not None:
         result.update({
-            "held_out_tokens": int(held_out_encoded["input_ids"].shape[-1]),
+            "held_out_tokens": int(
+                sum(batch["input_ids"].shape[-1] for batch in held_out_batches)
+            ),
             "held_out_mean_logit_cosine": float(held_out_cosine.item()),
             "held_out_top1_agreement": float(held_out_agreement.item()),
             "quality_gate": args.quality_gate,

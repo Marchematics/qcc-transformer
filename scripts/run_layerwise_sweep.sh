@@ -9,6 +9,8 @@ MODEL_PATH="${MODEL_PATH:-$PROJECT_DIR/models/phi-4-mini-instruct-ms}"
 OUTPUT_DIR="${OUTPUT_DIR:-$PROJECT_DIR/artifacts/hf_99/layerwise_sweep}"
 RUN_ID="${RUN_ID:-layerwise_$(date +%Y%m%d_%H%M%S)}"
 HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
+NUM_TRAIN_CHUNKS="${NUM_TRAIN_CHUNKS:-4}"
+NUM_HELD_OUT_CHUNKS="${NUM_HELD_OUT_CHUNKS:-4}"
 
 cd "$PROJECT_DIR"
 
@@ -58,6 +60,8 @@ for config in "${CONFIGS[@]}"; do
         --steps "$steps" \
         --lr "$lr" \
         --max-tokens 1024 \
+        --num-train-chunks "$NUM_TRAIN_CHUNKS" \
+        --num-held-out-chunks "$NUM_HELD_OUT_CHUNKS" \
         --kv-head-policy repeat \
         --run-id "$RUN_ID" \
         --quality-gate 0.99 \

@@ -141,6 +141,8 @@ teacher 特征现在通过未 patch attention 模块的 forward-pre-hook 直接�
 
 ## 4. 已验证结果（严格区分证据等级）
 
+- 长程质量校准修正（2026-09-05 后续）：`benchmarks/calibrate_hf_layerwise.py` 的多 chunk 校准现在从整段文本均匀取窗口，并为每个窗口显式传递原始绝对 `position_ids`；新增 `--num-held-out-chunks` 聚合多个验证窗口，避免所有 RoPE 样本从位置 0 开始。新增可选 `--margin-weight/--margin` top-2 排序损失，直接抑制 teacher argmax 交换；`held_out_gate_passed` 现在同时要求 cosine 与 top-1 达到阈值。旧 adapter 无需迁移，但要按新采样协议重校准后再比较质量。
+
 ### 本地回归
 
 - `python -m pytest -q`：51 个收集项，46 passed，5 个 CUDA/Triton 条件 skip；

@@ -140,11 +140,17 @@ to bound backward temporary memory and `--ce-weight` to include teacher top-1
 cross entropy in the distillation objective.
 
 For layer-wise calibration on long-context checkpoints, use
-`benchmarks/calibrate_hf_layerwise.py`.  It supports multi-chunk held-out
-distillation via `--num-train-chunks`; adding `--cosine-weight 0.2` mixes a
-directional logit loss into the historical MSE objective, which is useful when
-top-1/ranking fidelity lags behind the training MSE.  Set the weight to `0` to
-reproduce prior runs exactly.
+`benchmarks/calibrate_hf_layerwise.py`.  With `--num-train-chunks N`, the
+calibrator samples evenly spaced windows from the whole training text and
+passes their absolute `position_ids`; this is important for RoPE models because
+resetting every window to position zero trains a different distribution from
+128K/1M serving.  `--num-held-out-chunks N` applies the same protocol to
+validation and aggregates all windows before deciding the gate.  Adding
+`--cosine-weight 0.2` mixes a directional logit loss into the historical MSE
+objective, while `--margin-weight 0.2 --margin 0.0` directly penalizes a
+teacher top-1/top-2 logit swap.  The quality gate now requires both mean logit
+cosine and top-1 agreement to reach the threshold; a high cosine with poor
+argmax agreement is reported as a failure.
 
 For the hybrid exact tier, first calibrate the regular QCC adapter, then pass it
 as `--init-adapter` to `benchmarks/calibrate_hf_admission.py`.  That second

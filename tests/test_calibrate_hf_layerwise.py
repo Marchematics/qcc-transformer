@@ -12,10 +12,13 @@ assert _SPEC is not None and _SPEC.loader is not None
 _MODULE = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(_MODULE)
 parse_layer_spec = _MODULE.parse_layer_spec
+_encode_positioned_chunks = _MODULE._encode_positioned_chunks
 _chunked_mse = _MODULE._chunked_mse
 _mean_cosine_from_cpu = _MODULE._mean_cosine_from_cpu
 _chunked_kl_divergence = _MODULE._chunked_kl_divergence
 _distillation_loss = _MODULE._distillation_loss
+_teacher_top2_margin_loss = _MODULE._teacher_top2_margin_loss
+quality_gate_passed = _MODULE.quality_gate_passed
 
 
 @pytest.mark.parametrize(
@@ -37,6 +40,23 @@ def test_parse_layer_spec(spec, expected):
 def test_parse_layer_spec_rejects_invalid_indices(spec):
     with pytest.raises(ValueError):
         parse_layer_spec(spec, 8)
+
+
+def test_positioned_chunks_preserve_absolute_offsets():
+    import torch
+
+    class Tokenizer:
+        def __call__(self, text, *, return_tensors, add_special_tokens):
+            del text, return_tensors, add_special_tokens
+            ids = torch.arange(30, dtype=torch.long).view(1, -1)
+            return {"input_ids": ids, "attention_mask": torch.ones_like(ids)}
+
+    chunks = _encode_positioned_chunks(
+        Tokenizer(), "ignored", max_tokens=8, num_chunks=3, window_size=2
+    )
+    assert [int(chunk["position_ids"][0, 0]) for chunk in chunks] == [0, 11, 22]
+    assert [int(chunk["position_ids"][0, -1]) for chunk in chunks] == [7, 18, 29]
+    assert all(chunk["input_ids"].shape == (1, 8) for chunk in chunks)
 
 
 def test_chunked_distillation_helpers_match_reference():
@@ -82,6 +102,35 @@ def test_distillation_loss_ce_term_is_not_short_circuited():
     loss = _distillation_loss(student, teacher, chunk_size=2, ce_weight=0.5)
     assert torch.isfinite(loss)
     assert not torch.allclose(loss, mse)
+
+
+def test_top2_margin_term_penalizes_teacher_argmax_swap():
+    import torch
+
+    teacher = torch.tensor([[[4.0, 3.0, 0.0]]])
+    swapped = torch.tensor([[[3.0, 4.0, 0.0]]])
+    aligned = torch.tensor([[[4.0, 3.0, 0.0]]])
+    assert _teacher_top2_margin_loss(swapped, teacher, margin=0.5).item() == pytest.approx(1.5)
+    assert _teacher_top2_margin_loss(aligned, teacher, margin=0.5).item() == pytest.approx(0.0)
+
+
+def test_distillation_loss_margin_term_is_not_short_circuited():
+    import torch
+
+    teacher = torch.tensor([[[4.0, 3.0, 0.0]]])
+    student = torch.tensor([[[3.0, 4.0, 0.0]]])
+    mse = _chunked_mse(student, teacher, chunk_size=2)
+    loss = _distillation_loss(
+        student, teacher, chunk_size=2, margin_weight=0.5, margin=0.5
+    )
+    assert torch.isfinite(loss)
+    assert not torch.allclose(loss, mse)
+
+
+def test_quality_gate_requires_cosine_and_top1():
+    assert quality_gate_passed(0.999, 0.999, 0.99)
+    assert not quality_gate_passed(0.999, 0.84, 0.99)
+    assert not quality_gate_passed(0.84, 0.999, 0.99)
 
 
 def test_chunked_kl_is_zero_for_identical_logits():

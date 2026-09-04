@@ -10,6 +10,7 @@ OUTPUT_DIR="${OUTPUT_DIR:-$PROJECT_DIR/artifacts/hf_99/layerwise_10gpu}"
 RUN_ID="${RUN_ID:-layerwise10_$(date +%Y%m%d_%H%M%S)}"
 MAX_TOKENS="${MAX_TOKENS:-512}"
 NUM_TRAIN_CHUNKS="${NUM_TRAIN_CHUNKS:-4}"
+NUM_HELD_OUT_CHUNKS="${NUM_HELD_OUT_CHUNKS:-4}"
 
 cd "$PROJECT_DIR"
 mkdir -p "$OUTPUT_DIR"
@@ -52,6 +53,7 @@ for config in "${CONFIGS[@]}"; do
       --cosine-weight "$cosine_weight" \
       --max-tokens "$MAX_TOKENS" \
       --num-train-chunks "$NUM_TRAIN_CHUNKS" \
+      --num-held-out-chunks "$NUM_HELD_OUT_CHUNKS" \
       --kv-head-policy repeat \
       --trust-remote-code \
       --run-id "$RUN_ID" \
