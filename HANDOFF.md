@@ -136,6 +136,7 @@ teacher 特征现在通过未 patch attention 模块的 forward-pre-hook 直接�
 - 2026-09-05 质量修复：`benchmarks/calibrate_hf_layerwise.py` 现在在每个独立训练 batch、训练评估 batch 和 held-out batch 前调用 `reset_hf_qcc_cache`，避免 `_seen_tokens` 把 optimizer steps 串成一条历史流；同时修复 `ce_weight` 非零时被 MSE early-return 忽略的分支。真实 Phi-3.5-mini、window `512`、16 codes、8 个 1K train chunks、50 steps、`lr=0.002`、CE `0.4`/KL `0.3` 的校准结果：held-out cosine `1.0000`、top-1 `0.8418`；同 adapter 在独立 4K prompt 上 cosine `0.99759`、top-1 `0.69238`。训练参数 `4,785,152 / 3,825,864,704 = 0.1251%`。结果位于 `artifacts/remote_gpu/ssh_runs/quality_diag/cal_window512_ce_v4/` 和 `eval_window512_ce_v4/`。
 - 同一真实 Phi-3.5-mini 4K prompt 的未校准质量曲线：window `128` / 16 codes 为 cosine `0.95244`、top-1 `0.42480`；window `512` 为 `0.99736` / `0.67163`；window `1024` 为 `0.99939` / `0.79663`；window `2048` 为 `0.99980` / `0.90894`。这证明误差主要来自历史注意力近似；这些都是 matched HF fidelity diagnostics，不是 RULER/LongBench/PG-19，也没有达到 0.99 top-1 gate。
 - 实验性 `archive_kernel_features`（正随机特征 softmax archive）已贯通 reference/chunk/HF API，但在真实 Phi-3.5 4K、window `128`、16 codes 上修正尺度后仅得到 cosine `0.96385`、top-1 `0.43579`，默认保持关闭，不能作为质量方案。
+- 质量校准修复（2026-09-05 后续）：普通 `calibrate_hf_retrofit.py` 现在像分层校准一样，在每个 optimizer step 和最终评估前显式 reset HF QCC state，避免独立文本 batch 被 `_seen_tokens` 串成一条流；同时支持可选 teacher-argmax `--ce-weight`，并正确参与 KL/MSE 权重归一化。HF retrofit 新增 `archive_scan_block_size`，校准 CLI 默认 `256`，可在不改变递推方程的情况下把长序列反向临时张量降到默认 `1024` 的四分之一，便于验证更大 codebook。该改动尚未产生新的真实 RULER/LongBench/PG-19 结果，不能视为质量门槛已通过。
 
 ## 4. 已验证结果（严格区分证据等级）
 

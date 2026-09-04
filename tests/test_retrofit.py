@@ -119,6 +119,18 @@ def test_patch_hf_archive_norm_gating_is_explicit():
     assert model.attn.qcc.archive_norm_gating is True
 
 
+def test_patch_hf_archive_scan_block_size_is_forwarded():
+    model = _Model()
+    patch_hf_model(
+        model,
+        window_size=4,
+        num_codes=4,
+        archive_scan_block_size=7,
+        use_triton=False,
+    )
+    assert model.attn.qcc.archive.scan_block_size == 7
+
+
 def test_archive_norm_gating_suppresses_scale_mismatch():
     model = _Model()
     patch_hf_model(model, window_size=4, num_codes=4, use_triton=False, archive_norm_gating=True)

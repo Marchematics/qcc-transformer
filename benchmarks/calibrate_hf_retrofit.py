@@ -17,7 +17,7 @@ from pathlib import Path
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from qcc_transformer import patch_hf_model, save_retrofit_adapter
+from qcc_transformer import patch_hf_model, reset_hf_qcc_cache, save_retrofit_adapter
 from qcc_transformer.hf_loading import load_hf_causal_lm, model_input_device
 
 
@@ -57,6 +57,21 @@ def _mean_cosine_from_cpu(student: torch.Tensor, teacher_cpu: torch.Tensor, *, c
         student_sq = student_sq + (s * s).sum(dim=-1)
         teacher_sq = teacher_sq + (t * t).sum(dim=-1)
     return (dot / (student_sq.sqrt() * teacher_sq.sqrt()).clamp_min(1e-12)).mean()
+
+
+def _teacher_argmax_cross_entropy(
+    student: torch.Tensor, teacher_cpu: torch.Tensor
+) -> torch.Tensor:
+    """Match the teacher's selected token without copying full logits."""
+
+    if student.shape != teacher_cpu.shape:
+        raise ValueError(
+            f"student/teacher shape mismatch: {student.shape} vs {teacher_cpu.shape}"
+        )
+    targets = teacher_cpu.argmax(dim=-1).to(device=student.device)
+    return torch.nn.functional.cross_entropy(
+        student.reshape(-1, student.shape[-1]), targets.reshape(-1)
+    )
 
 
 def _chunked_kl_divergence(
@@ -109,6 +124,12 @@ def main() -> None:
     parser.add_argument("--window-size", type=int, default=128)
     parser.add_argument("--num-codes", type=int, default=64)
     parser.add_argument(
+        "--archive-scan-block-size",
+        type=int,
+        default=256,
+        help="bounded archive scan block used during calibration; smaller values reduce peak memory",
+    )
+    parser.add_argument(
         "--archive-position-invariant",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -132,10 +153,18 @@ def main() -> None:
         help="checkpoint frozen transformer blocks to keep calibration peak memory bounded",
     )
     parser.add_argument("--kl-weight", type=float, default=0.5)
+    parser.add_argument(
+        "--ce-weight",
+        type=float,
+        default=0.0,
+        help="weight of teacher-argmax cross entropy; 0 preserves the historical objective",
+    )
     parser.add_argument("--kl-temperature", type=float, default=2.0)
     args = parser.parse_args()
     if args.steps <= 0 or args.lr <= 0 or args.max_tokens <= 0:
         raise ValueError("steps, lr, and max-tokens must be positive")
+    if args.archive_scan_block_size <= 0:
+        raise ValueError("archive-scan-block-size must be positive")
     if args.max_tokens <= args.window_size:
         raise ValueError(
             "max-tokens must exceed window-size so calibration exercises the QCC archive; "
@@ -143,6 +172,10 @@ def main() -> None:
         )
     if not 0.0 <= args.kl_weight <= 1.0:
         raise ValueError("kl-weight must lie in [0, 1]")
+    if not 0.0 <= args.ce_weight <= 1.0:
+        raise ValueError("ce-weight must lie in [0, 1]")
+    if args.kl_weight + args.ce_weight > 1.0:
+        raise ValueError("kl-weight + ce-weight must not exceed 1")
     if args.kl_temperature <= 0:
         raise ValueError("kl-temperature must be positive")
     text = args.text_file.read_text(encoding="utf-8")
@@ -202,6 +235,7 @@ def main() -> None:
         window_size=args.window_size,
         num_codes=args.num_codes,
         archive_position_invariant=args.archive_position_invariant,
+        archive_scan_block_size=args.archive_scan_block_size,
         kv_head_policy=args.kv_head_policy,
         gate_bias_init=args.gate_bias_init,
     )
@@ -250,12 +284,29 @@ def main() -> None:
     last_loss = float("nan")
     for _ in range(args.steps):
         optimizer.zero_grad(set_to_none=True)
+        # Each optimizer batch is an independent calibration request.  The HF
+        # wrapper owns the logical stream length and otherwise keeps appending
+        # unrelated batches to the previous archive state, which biases the
+        # distillation target toward the order in which batches were visited.
+        reset_hf_qcc_cache(
+            patched,
+            batch_size=int(patched_encoded["input_ids"].shape[0]),
+        )
         student = patched(**patched_encoded, use_cache=False).logits
         mse = _chunked_mse(student, teacher)
         kl = _chunked_kl_divergence(
             student, teacher, temperature=args.kl_temperature
         )
-        loss = (1.0 - args.kl_weight) * mse + args.kl_weight * kl
+        ce = (
+            _teacher_argmax_cross_entropy(student, teacher)
+            if args.ce_weight
+            else student.new_zeros((), dtype=torch.float32)
+        )
+        loss = (
+            (1.0 - args.kl_weight - args.ce_weight) * mse
+            + args.kl_weight * kl
+            + args.ce_weight * ce
+        )
         if not torch.isfinite(loss):
             raise FloatingPointError(
                 "calibration diverged; lower --lr or reduce --max-tokens"
@@ -266,6 +317,10 @@ def main() -> None:
         last_loss = float(loss.detach().item())
     patched.eval()
     with torch.no_grad():
+        reset_hf_qcc_cache(
+            patched,
+            batch_size=int(patched_encoded["input_ids"].shape[0]),
+        )
         student = patched(**patched_encoded, use_cache=False).logits
         cosine = _mean_cosine_from_cpu(student, teacher)
         agreement = (student.argmax(-1).cpu() == teacher.argmax(-1)).float().mean()
@@ -285,9 +340,13 @@ def main() -> None:
             "window_size": args.window_size,
             "num_codes": args.num_codes,
             "archive_position_invariant": args.archive_position_invariant,
+            "archive_scan_block_size": args.archive_scan_block_size,
             "patched_layers": replaced,
             "kv_head_policy": args.kv_head_policy,
             "gate_bias_init": args.gate_bias_init,
+            "kl_weight": args.kl_weight,
+            "ce_weight": args.ce_weight,
+            "kl_temperature": args.kl_temperature,
         },
     )
     print(
@@ -306,6 +365,7 @@ def main() -> None:
                 "tokens": int(patched_encoded["input_ids"].shape[-1]),
                 "steps": args.steps,
                 "kl_weight": args.kl_weight,
+                "ce_weight": args.ce_weight,
                 "kl_temperature": args.kl_temperature,
                 "final_mse": last_loss,
                 "mean_logit_cosine": float(cosine.item()),

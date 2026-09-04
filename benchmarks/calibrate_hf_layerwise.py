@@ -247,6 +247,12 @@ def main() -> None:
     )
     parser.add_argument("--max-tokens", type=int, default=2048)
     parser.add_argument(
+        "--archive-scan-block-size",
+        type=int,
+        default=256,
+        help="bounded archive scan block used during calibration; smaller values reduce peak memory",
+    )
+    parser.add_argument(
         "--num-train-chunks", type=int, default=1,
         help="number of sequential training chunks to distill (cycles across chunks each step)",
     )
@@ -285,6 +291,8 @@ def main() -> None:
 
     if args.steps <= 0 or args.lr <= 0 or args.max_tokens <= 0 or args.num_train_chunks <= 0:
         raise ValueError("steps, lr, max-tokens, and num-train-chunks must be positive")
+    if args.archive_scan_block_size <= 0:
+        raise ValueError("archive-scan-block-size must be positive")
     if (
         not 0.0 <= args.cosine_weight <= 1.0
         or not 0.0 <= args.kl_weight <= 1.0
@@ -404,6 +412,7 @@ def main() -> None:
         archive_landmark_temperature=args.archive_landmark_temperature,
         archive_norm_gating=args.archive_norm_gating,
         archive_kernel_features=args.archive_kernel_features,
+        archive_scan_block_size=args.archive_scan_block_size,
         kv_head_policy=args.kv_head_policy,
         gate_bias_init=args.gate_bias_init,
     )
@@ -543,6 +552,7 @@ def main() -> None:
             "window_size": args.window_size,
             "num_codes": args.num_codes,
             "archive_kernel_features": args.archive_kernel_features,
+            "archive_scan_block_size": args.archive_scan_block_size,
             "archive_position_invariant": args.archive_position_invariant,
             "patched_layers": replaced,
             "calibrated_layers": calibrate_layers,
@@ -573,6 +583,7 @@ def main() -> None:
         "ce_weight": args.ce_weight,
         "kl_temperature": args.kl_temperature,
         "archive_kernel_features": args.archive_kernel_features,
+        "archive_scan_block_size": args.archive_scan_block_size,
         "train_mean_logit_cosine": float(train_cosine.item()),
         "train_top1_agreement": float(train_agreement.item()),
     }

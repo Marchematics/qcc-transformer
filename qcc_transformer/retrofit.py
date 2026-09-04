@@ -231,6 +231,7 @@ class HFQCCAttention(nn.Module):
         archive_read_stride: int = 1,
         archive_query_cosine_threshold: Optional[float] = None,
         archive_norm_gating: bool = False,
+        archive_scan_block_size: int = 1024,
         archive_persistent_landmark: bool = False,
         archive_prefix_landmark: bool = False,
         archive_prefix_pair_landmark: bool = False,
@@ -304,6 +305,7 @@ class HFQCCAttention(nn.Module):
             archive_read_stride=archive_read_stride,
             archive_query_cosine_threshold=archive_query_cosine_threshold,
             archive_norm_gating=archive_norm_gating,
+            archive_scan_block_size=archive_scan_block_size,
             archive_persistent_landmark=archive_persistent_landmark,
             archive_prefix_landmark=archive_prefix_landmark,
             archive_prefix_pair_landmark=archive_prefix_pair_landmark,
@@ -586,6 +588,7 @@ def patch_hf_model(
     archive_read_stride: int = 1,
     archive_query_cosine_threshold: Optional[float] = None,
     archive_norm_gating: bool = False,
+    archive_scan_block_size: int = 1024,
     archive_persistent_landmark: bool = False,
     archive_prefix_landmark: bool = False,
     archive_prefix_pair_landmark: bool = False,
@@ -623,6 +626,8 @@ def patch_hf_model(
                 rope_theta = rope_parameters.get("rope_theta")
     if prefill_chunk_size is not None and prefill_chunk_size <= 0:
         raise ValueError("prefill_chunk_size must be positive when provided")
+    if archive_scan_block_size <= 0:
+        raise ValueError("archive_scan_block_size must be positive")
     rope_kwargs = _hf_rope_kwargs(config, max_position_embeddings)
     candidates: list[tuple[str, nn.Module]] = []
     for name, module in model.named_modules():
@@ -677,6 +682,7 @@ def patch_hf_model(
             archive_read_stride=archive_read_stride,
             archive_query_cosine_threshold=archive_query_cosine_threshold,
             archive_norm_gating=archive_norm_gating,
+            archive_scan_block_size=archive_scan_block_size,
             archive_persistent_landmark=archive_persistent_landmark,
             archive_prefix_landmark=archive_prefix_landmark,
             archive_prefix_pair_landmark=archive_prefix_pair_landmark,
