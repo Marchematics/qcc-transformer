@@ -66,6 +66,34 @@ def _option_value(arguments: list[str], name: str) -> str | None:
     return None
 
 
+def _configured_attention_backend(arguments: list[str]) -> str | None:
+    """Read the backend flag across vLLM's supported CLI spellings."""
+
+    values: list[tuple[str, str]] = []
+    for name in ("--attention-backend", "--attention-config.backend"):
+        value = _option_value(arguments, name)
+        if value is not None:
+            values.append((name, value))
+    config_text = _option_value(arguments, "--attention-config")
+    if config_text is not None:
+        try:
+            config = json.loads(config_text)
+        except json.JSONDecodeError as exc:
+            raise ValueError("--attention-config must be valid JSON") from exc
+        if not isinstance(config, dict):
+            raise ValueError("--attention-config must contain a JSON object")
+        backend = config.get("backend")
+        if backend is not None:
+            if not isinstance(backend, str) or not backend:
+                raise ValueError("--attention-config.backend must be a non-empty string")
+            values.append(("--attention-config.backend", backend))
+    unique = {value.upper() for _, value in values}
+    if len(unique) > 1:
+        names = ", ".join(name for name, _ in values)
+        raise ValueError(f"conflicting attention backend options: {names}")
+    return values[0][1] if values else None
+
+
 def _trust_remote_code(arguments: list[str]) -> bool:
     """Mirror the server's opt-in remote-code flag while loading AutoConfig."""
 
@@ -152,12 +180,12 @@ def build_launch(
                 "--max-model-len must equal the QCC context-length so the server "
                 "and packed-state decay schedule describe the same target"
             )
-    configured_backend = _option_value(passthrough, "--attention-config.backend")
+    configured_backend = _configured_attention_backend(passthrough)
     if configured_backend is not None and configured_backend.upper() != "CUSTOM":
-        raise ValueError("QCC launcher requires --attention-config.backend CUSTOM")
+        raise ValueError("QCC launcher requires the CUSTOM attention backend")
     command = ["vllm", "serve", model, *passthrough]
-    if not _has_option(passthrough, "--attention-config.backend"):
-        command.extend(["--attention-config.backend", "CUSTOM"])
+    if configured_backend is None:
+        command.extend(["--attention-backend", "CUSTOM"])
     if not _has_option(passthrough, "--max-model-len"):
         command.extend(["--max-model-len", str(target_context)])
     environment = {

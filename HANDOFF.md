@@ -232,6 +232,11 @@ python benchmarks/gate_99.py --evidence artifacts/gates/<run_id>.json
   vLLM（含 0.28）的 `MambaSpec` 适配；后者通过插件自动 patch
   `Attention.get_kv_cache_spec`，仍需在真实 GPU 环境完成端到端 benchmark，不能
   把本地 API 检查当作 serving 结果。
+- 2026-09-05 修复 `benchmarks/launch_stock_vllm.py` 与 `qcc_transformer/stock_launch.py`
+  的 vLLM CLI 参数：vLLM 0.28 使用 `--attention-backend CUSTOM`，旧的
+  `--attention-config.backend` 只作为兼容输入解析，不再作为默认输出；JSON
+  `--attention-config` 中的 backend 也会做冲突校验。该修复仅改变启动参数，不改变
+  QCC 状态布局或模型接口。
 - 0.28 上游 `MambaSpec.mamba_type` 是严格枚举字段；QCC 自定义 attention 不写入
   伪造的字符串类型，保留上游默认值以兼容 worker/KV-transfer 路径。
 - `benchmarks/benchmark_hf_latency.py` 的每个 repeat 现在独立复制 decode

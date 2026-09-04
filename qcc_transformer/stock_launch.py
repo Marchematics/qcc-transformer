@@ -37,7 +37,7 @@ def stock_vllm_cli_args(
 ) -> list[str]:
     """Configure inherited env/registration and return stock vLLM CLI arguments."""
     prepare_stock_vllm(config, adapter_path=adapter_path)
-    return ["--attention-config.backend", "CUSTOM"]
+    return ["--attention-backend", "CUSTOM"]
 
 
 def stock_launch_manifest(
@@ -49,7 +49,7 @@ def stock_launch_manifest(
         "qcc_config": asdict(config),
         "adapter_path": str(Path(adapter_path)),
         "vllm_programmatic": {"attention_config": {"backend": "CUSTOM"}},
-        "vllm_cli": ["--attention-config.backend", "CUSTOM"],
+        "vllm_cli": ["--attention-backend", "CUSTOM"],
         "application_model_code_changes": 0,
     }
 

@@ -2,6 +2,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from benchmarks.launch_stock_vllm import (
+    _configured_attention_backend,
     _option_value,
     _trust_remote_code,
     build_launch,
@@ -95,7 +96,7 @@ def test_stock_launcher_builds_worker_environment_and_preserves_server_args(tmp_
     )
     assert command[:3] == ["vllm", "serve", "org/model-1b"]
     assert "--dtype" in command and "bfloat16" in command
-    assert "--attention-config.backend" in command
+    assert "--attention-backend" in command
     assert "--max-model-len" in command
     assert environment["QCC_STOCK_VLLM_ADAPTER"].endswith("adapter.pt")
     assert packed.num_heads == 8
@@ -126,11 +127,17 @@ def test_stock_launcher_rejects_server_context_or_backend_mismatch(tmp_path: Pat
     else:
         raise AssertionError("mismatched server context was accepted")
     try:
-        build_launch(**common, passthrough=["--attention-config.backend", "FLASH_ATTN"])
+        build_launch(**common, passthrough=["--attention-backend", "FLASH_ATTN"])
     except ValueError as exc:
         assert "CUSTOM" in str(exc)
     else:
         raise AssertionError("mismatched attention backend was accepted")
+
+
+def test_stock_launcher_reads_json_attention_config():
+    assert _configured_attention_backend(
+        ["--attention-config", '{"backend":"CUSTOM","flash_attn_version":2}']
+    ) == "CUSTOM"
 
 
 def test_stock_launcher_rejects_context_above_native_limit(tmp_path: Path):

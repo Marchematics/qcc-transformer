@@ -10,5 +10,5 @@ def test_stock_launch_manifest_is_one_config_change(tmp_path: Path):
     config = QCCStockVLLMConfig(num_heads=8, head_dim=16)
     manifest = stock_launch_manifest(config, adapter_path=str(adapter))
     assert manifest["vllm_programmatic"] == {"attention_config": {"backend": "CUSTOM"}}
-    assert manifest["vllm_cli"] == ["--attention-config.backend", "CUSTOM"]
+    assert manifest["vllm_cli"] == ["--attention-backend", "CUSTOM"]
     assert manifest["application_model_code_changes"] == 0
