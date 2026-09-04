@@ -344,6 +344,11 @@ def main() -> None:
     parser.add_argument("--exact-ways", type=int, default=4)
     parser.add_argument("--exact-probe-sets", type=int, default=None)
     parser.add_argument("--max-inserts-per-chunk", type=int, default=8)
+    parser.add_argument(
+        "--quality-first",
+        action="store_true",
+        help="use a bounded FIFO exact shadow with soft reads; admission training is skipped",
+    )
     parser.add_argument("--layers", default="all")
     parser.add_argument("--teacher-queries", type=int, default=128)
     parser.add_argument("--teacher-topk", type=int, default=8)
@@ -423,6 +428,7 @@ def main() -> None:
             "exact_ways": args.exact_ways,
             "exact_probe_sets": args.exact_probe_sets,
             "max_inserts_per_chunk": args.max_inserts_per_chunk,
+            "quality_first": args.quality_first,
         },
     )
     if args.init_adapter is not None:
@@ -447,31 +453,37 @@ def main() -> None:
         archive = wrapper.qcc.archive
         if not isinstance(archive, HybridQCCArchive):
             raise TypeError("hybrid patch did not install HybridQCCArchive")
-        train_examples = _teacher_examples(
-            wrapper,
-            train_hidden,
-            layer_index=layer_index,
-            window_size=args.window_size,
-            num_teacher_queries=args.teacher_queries,
-            teacher_topk=args.teacher_topk,
-            positive_fraction=args.positive_fraction,
-        )
-        held_examples = _teacher_examples(
-            wrapper,
-            held_hidden,
-            layer_index=layer_index,
-            window_size=args.window_size,
-            num_teacher_queries=args.teacher_queries,
-            teacher_topk=args.teacher_topk,
-            positive_fraction=args.positive_fraction,
-        )
-        layer_reports[str(layer_index)] = _train_layer(
-            archive,
-            train_examples,
-            held_examples,
-            steps=args.steps,
-            lr=args.lr,
-        )
+        if args.quality_first:
+            layer_reports[str(layer_index)] = {
+                "mode": "quality_first",
+                "admission_training": "disabled",
+            }
+        else:
+            train_examples = _teacher_examples(
+                wrapper,
+                train_hidden,
+                layer_index=layer_index,
+                window_size=args.window_size,
+                num_teacher_queries=args.teacher_queries,
+                teacher_topk=args.teacher_topk,
+                positive_fraction=args.positive_fraction,
+            )
+            held_examples = _teacher_examples(
+                wrapper,
+                held_hidden,
+                layer_index=layer_index,
+                window_size=args.window_size,
+                num_teacher_queries=args.teacher_queries,
+                teacher_topk=args.teacher_topk,
+                positive_fraction=args.positive_fraction,
+            )
+            layer_reports[str(layer_index)] = _train_layer(
+                archive,
+                train_examples,
+                held_examples,
+                steps=args.steps,
+                lr=args.lr,
+            )
 
     trainable = sum(
         parameter.numel() for parameter in model.parameters() if parameter.requires_grad
@@ -490,7 +502,13 @@ def main() -> None:
         "exact_num_sets": args.exact_num_sets,
         "exact_ways": args.exact_ways,
         "exact_probe_sets": args.exact_probe_sets,
-        "max_inserts_per_chunk": args.max_inserts_per_chunk,
+        "max_inserts_per_chunk": (
+            args.exact_num_sets * args.exact_ways
+            if args.quality_first
+            else args.max_inserts_per_chunk
+        ),
+        "requested_max_inserts_per_chunk": args.max_inserts_per_chunk,
+        "quality_first": args.quality_first,
         "selected_layers": sorted(selected_layers),
         "trainable_parameters": trainable,
         "total_parameters": total,

@@ -159,6 +159,35 @@ def test_chunk_admission_reopens_budget_for_each_bounded_tile() -> None:
     assert int(torch.isfinite(hybrid.exact_bank.state.scores).sum()) == 6
 
 
+def test_quality_first_uses_bounded_fifo_soft_exact_shadow():
+    base = QCCArchive(
+        num_heads=1,
+        head_dim=4,
+        num_codes=2,
+        decay_rates=(0.9, 0.99),
+        window_size=2,
+        use_triton=False,
+        scan_block_size=16,
+    )
+    hybrid = HybridQCCArchive.from_archive(
+        base,
+        exact_num_sets=1,
+        exact_ways=4,
+        quality_first=True,
+    )
+    assert hybrid.exact_bank.replacement_policy == "fifo"
+    assert hybrid.exact_hard_read is False
+    assert hybrid.max_inserts_per_chunk == 4
+    assert hybrid.scan_block_size == 4
+    key = torch.randn(1, 1, 9, 4)
+    value = torch.randn_like(key)
+    query = torch.randn_like(key)
+    with torch.no_grad():
+        output = hybrid.update_read_chunk(key, value, query)
+    assert output.shape == query.shape
+    assert int(torch.isfinite(hybrid.exact_bank.state.scores).sum()) == 4
+
+
 def test_upgrade_qcc_attention_is_idempotent() -> None:
     attention = QCCSelfAttention(
         d_model=16,

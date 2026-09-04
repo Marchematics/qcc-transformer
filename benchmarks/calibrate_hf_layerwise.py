@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 
 import torch
+import torch.nn.functional as F
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from qcc_transformer import patch_hf_model, reset_hf_qcc_cache, save_retrofit_adapter
@@ -320,8 +321,8 @@ def _initialize_codebooks_from_teacher(
     budget.  ``random`` remains available as an explicit ablation.
     """
 
-    if strategy not in {"key-sample", "random"}:
-        raise ValueError("strategy must be 'key-sample' or 'random'")
+    if strategy not in {"key-sample", "kmeans", "random"}:
+        raise ValueError("strategy must be 'key-sample', 'kmeans', or 'random'")
     if strategy == "random":
         return
     wrappers = [
@@ -344,18 +345,67 @@ def _initialize_codebooks_from_teacher(
         if tokens <= 0:
             continue
         code_count = qcc.archive.num_codes
-        indices = torch.arange(code_count, device=keys.device) % tokens
-        if tokens > 1:
-            indices = torch.linspace(
-                0, tokens - 1, code_count, device=keys.device
-            ).round().to(torch.long)
-        sampled = keys[0, :, indices, :]
+        if strategy == "kmeans" and tokens > 1:
+            # Attention routing is primarily directional.  A deterministic
+            # cosine k-means++-style pass covers the teacher key manifold much
+            # better than temporal sampling, while the fixed code norm keeps
+            # the archive logits in the same range as the original init.
+            source = F.normalize(keys[0].float(), dim=-1)
+            centers = []
+            for head in range(source.shape[0]):
+                points = source[head]
+                first = 0
+                selected = [first]
+                center = points[first : first + 1]
+                for _ in range(1, min(code_count, tokens)):
+                    distance = 1.0 - points @ center.transpose(0, 1)
+                    next_index = int(distance.min(dim=1).values.argmax().item())
+                    selected.append(next_index)
+                    center = torch.cat((center, points[next_index : next_index + 1]), dim=0)
+                center = points[torch.tensor(selected, device=points.device)]
+                for _ in range(8):
+                    assignment = (points @ center.transpose(0, 1)).argmax(dim=1)
+                    updated = torch.zeros_like(center)
+                    updated.index_add_(0, assignment, points)
+                    counts = torch.bincount(
+                        assignment, minlength=center.shape[0]
+                    ).to(updated.dtype).unsqueeze(-1)
+                    center = F.normalize(
+                        torch.where(counts > 0, updated / counts.clamp_min(1.0), center),
+                        dim=-1,
+                    )
+                if center.shape[0] < code_count:
+                    center = torch.cat(
+                        (center, center[torch.arange(code_count - center.shape[0], device=center.device) % center.shape[0]]),
+                        dim=0,
+                    )
+                centers.append(center[:code_count])
+            sampled = torch.stack(centers, dim=0)
+        else:
+            indices = torch.arange(code_count, device=keys.device) % tokens
+            if tokens > 1:
+                indices = torch.linspace(
+                    0, tokens - 1, code_count, device=keys.device
+                ).round().to(torch.long)
+            sampled = keys[0, :, indices, :]
+            sampled = F.normalize(sampled.float(), dim=-1)
         # Match the existing random initialization scale per head.  This keeps
         # routing logits in a comparable range while preserving key geometry.
         target_norm = qcc.archive.codes.detach().float().norm(dim=-1).mean(dim=-1)
-        source_norm = sampled.float().norm(dim=-1).mean(dim=-1).clamp_min(1e-6)
-        sampled = sampled * (target_norm / source_norm).view(-1, 1, 1).to(sampled.dtype)
+        sampled = sampled * target_norm.view(-1, 1, 1)
         qcc.archive.codes.copy_(sampled.to(dtype=qcc.archive.codes.dtype))
+
+
+def _long_range_view(tensor: torch.Tensor, window_size: int) -> torch.Tensor:
+    """Return only positions whose attention can use the archive."""
+
+    if tensor.ndim < 2:
+        raise ValueError("tensor must have a sequence dimension")
+    if window_size <= 0:
+        raise ValueError("window_size must be positive")
+    if tensor.shape[-2] <= window_size:
+        return tensor
+    return tensor[..., window_size:, :]
 
 
 @torch.no_grad()
@@ -365,6 +415,7 @@ def _teacher_logits_and_inputs(
     *,
     max_capture_tokens: int = 256,
     selected_layers: set[int] | None = None,
+    attention_start: int = 0,
 ) -> tuple[
     list[torch.Tensor],
     dict[int, torch.Tensor],
@@ -381,6 +432,8 @@ def _teacher_logits_and_inputs(
 
     if max_capture_tokens <= 0:
         raise ValueError("max_capture_tokens must be positive")
+    if attention_start < 0:
+        raise ValueError("attention_start must be non-negative")
 
     attention_modules = [
         module
@@ -431,6 +484,8 @@ def _teacher_logits_and_inputs(
                 )
                 captured[layer_index].append(flat[indices])
             for layer_index, output in batch_attention.items():
+                if output.ndim == 3 and attention_start and output.shape[1] > attention_start:
+                    output = output[:, attention_start:]
                 flat = output.reshape(-1, output.shape[-1]).cpu()
                 take = min(max_capture_tokens, flat.shape[0])
                 indices = torch.linspace(
@@ -727,9 +782,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--code-init",
-        choices=("key-sample", "random"),
-        default="key-sample",
-        help="initialize archive codes from teacher K projections or keep random initialization",
+        choices=("key-sample", "kmeans", "random"),
+        default="kmeans",
+        help="initialize archive codes from teacher K projections, cosine k-means, or random initialization",
     )
     parser.add_argument(
         "--code-init-tokens",
@@ -742,6 +797,12 @@ def main() -> None:
         type=float,
         default=0.35,
         help="blend weight for selected-layer attention-output distillation",
+    )
+    parser.add_argument(
+        "--distill-long-range-only",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="train on positions outside the exact local window; use --no-distill-long-range-only for the legacy full-sequence loss",
     )
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--dtype", choices=("auto", "float16", "bfloat16", "float32"), default="auto")
@@ -914,6 +975,7 @@ def main() -> None:
             train_batches,
             max_capture_tokens=args.code_init_tokens,
             selected_layers=set(calibrate_layers),
+            attention_start=args.window_size if args.distill_long_range_only else 0,
         )
         held_out_teachers = [
             baseline(**batch, use_cache=False).logits.float().cpu()
@@ -1059,9 +1121,19 @@ def main() -> None:
             )
             if hidden_and_head is None:
                 student = patched(**train_batches[batch_index], use_cache=False).logits
+                teacher_target = (
+                    _long_range_view(train_teachers[batch_index], args.window_size)
+                    if args.distill_long_range_only
+                    else train_teachers[batch_index]
+                )
+                student_target = (
+                    _long_range_view(student, args.window_size)
+                    if args.distill_long_range_only
+                    else student
+                )
                 logit_loss = _distillation_loss(
-                    student,
-                    train_teachers[batch_index],
+                    student_target,
+                    teacher_target,
                     cosine_weight=args.cosine_weight,
                     kl_weight=args.kl_weight,
                     ce_weight=args.ce_weight,
@@ -1071,10 +1143,20 @@ def main() -> None:
                 )
             else:
                 student_hidden, student_head = hidden_and_head
+                teacher_target = (
+                    _long_range_view(train_teachers[batch_index], args.window_size)
+                    if args.distill_long_range_only
+                    else train_teachers[batch_index]
+                )
+                hidden_target = (
+                    _long_range_view(student_hidden, args.window_size)
+                    if args.distill_long_range_only
+                    else student_hidden
+                )
                 logit_loss = _distillation_loss_from_hidden(
-                    student_hidden,
+                    hidden_target,
                     student_head,
-                    train_teachers[batch_index],
+                    teacher_target,
                     cosine_weight=args.cosine_weight,
                     kl_weight=args.kl_weight,
                     ce_weight=args.ce_weight,
@@ -1093,6 +1175,8 @@ def main() -> None:
                         raise RuntimeError(
                             f"student did not expose attention output for layer {layer_index}"
                         )
+                    if args.distill_long_range_only and output.shape[-2] > args.window_size:
+                        output = output[:, args.window_size:]
                     flat = output.reshape(-1, output.shape[-1])
                     target = targets[batch_index]
                     take = min(target.shape[0], flat.shape[0])
@@ -1203,6 +1287,7 @@ def main() -> None:
             "code_init": args.code_init,
             "code_init_tokens": args.code_init_tokens,
             "attention_loss_weight": args.attention_loss_weight,
+            "distill_long_range_only": args.distill_long_range_only,
         },
     )
 

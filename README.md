@@ -148,15 +148,22 @@ passes their absolute `position_ids`; this is important for RoPE models because
 resetting every window to position zero trains a different distribution from
 128K/1M serving.  `--num-held-out-chunks N` applies the same protocol to
 validation and aggregates all windows before deciding the gate.  Adding
-`--code-init key-sample` (the default) initializes each archive codebook from
-uniformly sampled teacher K projections across every training chunk; use
-`--code-init random` only for the initialization ablation.  The number of
+`--code-init kmeans` (the default) initializes each archive codebook with a
+deterministic cosine k-means pass over teacher K projections across every
+training chunk; `--code-init key-sample` remains available for the simpler
+initialization ablation and `--code-init random` is only an initialization
+control.  The number of
 teacher K tokens staged per chunk is bounded by `--code-init-tokens` (default
 256), so longer calibration streams do not retain full hidden-state traces.
 The default `--attention-loss-weight 0.35` also matches the selected layers'
 attention outputs on the same bounded token samples; set it to `0` for the
 logit-only ablation.  This local signal reduces cross-layer compensation while
 leaving the final held-out logit/top-1 gate unchanged.
+Calibration defaults to `--distill-long-range-only`: the loss is evaluated on
+positions outside the exact local window, where the adapter actually changes
+the computation.  Use `--no-distill-long-range-only` only for a legacy
+full-sequence ablation.
+
 When the checkpoint exposes the standard HF backbone and output embedding,
 the training pass reads `last_hidden_state` and projects the output head in
 vocabulary tiles, avoiding a full student-logit allocation on the GPU; custom
@@ -181,6 +188,12 @@ python benchmarks/calibrate_hf_admission.py \
   --output artifacts/hf/qcc_hybrid_adapter.pt \
   --exact-num-sets 128 --exact-ways 4 --kv-head-policy repeat
 ```
+
+For a quality-first control before learned admission is available, add
+`--quality-first`.  It uses a fixed-capacity FIFO exact shadow, soft reads, and
+automatically admits one bounded tile at a time.  This remains O(1) in context
+length, but its exact-tier capacity and serving cost must be reported with the
+result; it is not evidence for the 80% memory or vLLM gates by itself.
 
 Use the resulting file with `--adapter` on the real-HF retrieval, latency,
 memory, concurrency, RULER, LongBench, or PG-19 runners.  `--exact-probe-sets`

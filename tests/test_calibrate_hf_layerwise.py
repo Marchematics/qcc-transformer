@@ -122,6 +122,29 @@ def test_key_sample_code_init_uses_teacher_key_geometry():
     assert torch.isfinite(model.attn.qcc.archive.codes).all()
 
 
+def test_kmeans_code_init_is_deterministic_and_finite():
+    model_a = _Model()
+    model_b = _Model()
+    model_b.load_state_dict(model_a.state_dict())
+    from qcc_transformer import patch_hf_model
+
+    torch.manual_seed(123)
+    patch_hf_model(model_a, window_size=4, num_codes=4, use_triton=False)
+    torch.manual_seed(123)
+    patch_hf_model(model_b, window_size=4, num_codes=4, use_triton=False)
+    hidden = torch.randn(1, 32, 16)
+    _MODULE._initialize_codebooks_from_teacher(
+        model_a, {0: hidden}, strategy="kmeans"
+    )
+    _MODULE._initialize_codebooks_from_teacher(
+        model_b, {0: hidden}, strategy="kmeans"
+    )
+    torch.testing.assert_close(
+        model_a.attn.qcc.archive.codes, model_b.attn.qcc.archive.codes
+    )
+    assert torch.isfinite(model_a.attn.qcc.archive.codes).all()
+
+
 def test_teacher_capture_samples_every_batch_and_selected_attention():
     import torch
 
@@ -138,6 +161,19 @@ def test_teacher_capture_samples_every_batch_and_selected_attention():
     assert len(attention[0]) == 2
     assert attention[0][0].shape == (4, 16)
     assert torch.isfinite(_hidden_distillation_loss(attention[0][0], attention[0][0]))
+
+
+def test_teacher_attention_capture_can_skip_exact_local_prefix():
+    model = _TeacherModel()
+    batches = [{"input_ids": torch.arange(12).view(1, -1)}]
+    _, _, attention = _teacher_logits_and_inputs(
+        model,
+        batches,
+        max_capture_tokens=4,
+        selected_layers={0},
+        attention_start=4,
+    )
+    assert attention[0][0].shape == (4, 16)
 
 
 def test_hidden_logit_loss_matches_full_logit_loss():

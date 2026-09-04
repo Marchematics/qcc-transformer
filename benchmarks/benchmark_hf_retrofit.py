@@ -85,6 +85,11 @@ def main() -> None:
     parser.add_argument("--hybrid-admission-threshold", type=float, default=0.0)
     parser.add_argument("--hybrid-admission-bias-init", type=float, default=-4.0)
     parser.add_argument("--hybrid-max-inserts-per-chunk", type=int, default=8)
+    parser.add_argument(
+        "--quality-first",
+        action="store_true",
+        help="use the bounded FIFO exact shadow with soft reads for a quality-first run",
+    )
     parser.add_argument("--hybrid-exact-mix-bias-init", type=float, default=-4.0)
     parser.add_argument("--hybrid-exact-confidence-threshold", type=float, default=0.60)
     parser.add_argument(
@@ -179,6 +184,7 @@ def main() -> None:
                 "admission_threshold": args.hybrid_admission_threshold,
                 "admission_bias_init": args.hybrid_admission_bias_init,
                 "max_inserts_per_chunk": args.hybrid_max_inserts_per_chunk,
+                "quality_first": args.quality_first,
                 "exact_mix_bias_init": args.hybrid_exact_mix_bias_init,
                 "exact_confidence_threshold": args.hybrid_exact_confidence_threshold,
             },
@@ -229,6 +235,7 @@ def main() -> None:
         "qcc_only": False,
         "adapter": str(args.adapter) if args.adapter is not None else None,
         "hybrid": args.hybrid,
+        "quality_first": args.quality_first if args.hybrid else False,
         "exact_num_sets": args.exact_num_sets if args.hybrid else None,
         "exact_ways": args.exact_ways if args.hybrid else None,
         "exact_probe_sets": args.exact_probe_sets if args.hybrid else None,

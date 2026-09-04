@@ -229,6 +229,11 @@ def main() -> None:
     parser.add_argument("--exact-num-sets", type=int, default=128)
     parser.add_argument("--exact-ways", type=int, default=4)
     parser.add_argument("--exact-probe-sets", type=int, default=None)
+    parser.add_argument(
+        "--quality-first",
+        action="store_true",
+        help="use the bounded FIFO exact shadow with soft reads",
+    )
     parser.add_argument("--archive-mix", type=float, default=0.125)
     parser.add_argument("--kv-head-policy", choices=("reject", "repeat"), default="repeat")
     parser.add_argument("--require-native-context", action=argparse.BooleanOptionalAction, default=True)
@@ -280,6 +285,7 @@ def main() -> None:
                 "exact_num_sets": args.exact_num_sets,
                 "exact_ways": args.exact_ways,
                 "exact_probe_sets": args.exact_probe_sets,
+                "quality_first": args.quality_first,
             },
             window_size=args.window_size,
             num_codes=args.num_codes,
@@ -430,6 +436,7 @@ def main() -> None:
         "semantic_distractor": header["semantic_distractor"],
         "depth_buckets": bucket_summary,
         "patched_layers": patched_layers,
+        "quality_first": args.quality_first if args.mode == "qcc" else False,
         "output_jsonl": str(args.output_jsonl),
     }
     args.summary.parent.mkdir(parents=True, exist_ok=True)

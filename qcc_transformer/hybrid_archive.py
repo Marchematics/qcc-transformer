@@ -110,12 +110,28 @@ class HybridQCCArchive(QCCArchive):
         exact_confidence_threshold: float = 0.60,
         exact_confidence_temperature: float = 20.0,
         exact_mix_bias_init: float = -4.0,
+        quality_first: bool = False,
     ) -> None:
         if active_codes is not None or lazy_decay:
             raise ValueError(
                 "HybridQCCArchive currently requires the dense base archive; "
                 "sparse/lazy fallbacks can double-dispatch virtual updates"
             )
+        if quality_first:
+            # Quality-first is an explicit bounded exact shadow.  It keeps the
+            # most recent fixed-capacity history in FIFO order, reads a soft
+            # kernel average, and gives that tier enough blend weight to be
+            # useful before a learned admission predictor is available.
+            exact_replacement_policy = "fifo"
+            exact_probe_sets = exact_num_sets
+            # Scores are bounded by the predictor's normalized features; a
+            # large finite floor keeps constructor validation meaningful.
+            admission_threshold = -1.0e9
+            exact_mix_bias_init = max(float(exact_mix_bias_init), 4.0)
+            exact_hard_read = False
+            max_inserts_per_chunk = exact_num_sets * exact_ways
+        else:
+            exact_hard_read = True
         super().__init__(
             num_heads,
             head_dim,
@@ -172,6 +188,13 @@ class HybridQCCArchive(QCCArchive):
         self.max_inserts_per_chunk = int(max_inserts_per_chunk)
         self.exact_confidence_threshold = float(exact_confidence_threshold)
         self.exact_confidence_temperature = float(exact_confidence_temperature)
+        self.quality_first = bool(quality_first)
+        self.exact_hard_read = exact_hard_read
+        # The exact tier admits a whole bounded tile in quality-first mode;
+        # matching the tile to its capacity avoids score-based subsampling of
+        # otherwise recoverable recent tokens.
+        if self.quality_first:
+            self.scan_block_size = min(self.scan_block_size, self.max_inserts_per_chunk)
 
     @classmethod
     def from_archive(
@@ -320,7 +343,7 @@ class HybridQCCArchive(QCCArchive):
 
     def read(self, query: Tensor) -> Tensor:
         recurrent = super().read(query)
-        exact, confidence = self.exact_bank.read(query, hard=True)
+        exact, confidence = self.exact_bank.read(query, hard=self.exact_hard_read)
         return self._blend_exact(recurrent, exact, confidence)
 
     @torch.no_grad()
@@ -351,7 +374,7 @@ class HybridQCCArchive(QCCArchive):
                         key[:, :, index], value[:, :, index], score[:, :, index]
                     )
                     result, conf = self.exact_bank.read(
-                        query[:, :, index], hard=True
+                        query[:, :, index], hard=self.exact_hard_read
                     )
                     exact[:, :, index] = result
                     confidence[:, :, index] = conf
@@ -394,7 +417,7 @@ class HybridQCCArchive(QCCArchive):
                 position = tile_start + int(position_tensor.item())
                 if position > cursor:
                     result, conf = self.exact_bank.read_chunk(
-                        query[:, :, cursor:position], hard=True
+                        query[:, :, cursor:position], hard=self.exact_hard_read
                     )
                     exact[:, :, cursor:position] = result
                     confidence[:, :, cursor:position] = conf
@@ -407,7 +430,7 @@ class HybridQCCArchive(QCCArchive):
                 cursor = position
             if cursor < tile_end:
                 result, conf = self.exact_bank.read_chunk(
-                    query[:, :, cursor:tile_end], hard=True
+                    query[:, :, cursor:tile_end], hard=self.exact_hard_read
                 )
                 exact[:, :, cursor:tile_end] = result
                 confidence[:, :, cursor:tile_end] = conf
