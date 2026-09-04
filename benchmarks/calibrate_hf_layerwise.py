@@ -12,6 +12,7 @@ reach the fidelity gate.
 from __future__ import annotations
 
 import argparse
+from contextlib import nullcontext
 import gc
 import json
 import sys
@@ -830,6 +831,12 @@ def main() -> None:
         help="checkpoint frozen blocks to reduce memory",
     )
     parser.add_argument(
+        "--cpu-offload-activations",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="move autograd-saved activations to CPU during calibration to fit full-layer runs on small GPUs",
+    )
+    parser.add_argument(
         "--quality-gate",
         type=float,
         default=0.99,
@@ -1131,94 +1138,100 @@ def main() -> None:
                 patched, batch_size=int(train_batches[batch_index]["input_ids"].shape[0])
             )
             student_attention_outputs.clear()
-            hidden_and_head = _forward_hidden_and_head(
-                patched, train_batches[batch_index]
+            offload_context = (
+                torch.autograd.graph.save_on_cpu(pin_memory=False)
+                if args.cpu_offload_activations and device.type == "cuda"
+                else nullcontext()
             )
-            if hidden_and_head is None:
-                student = patched(**train_batches[batch_index], use_cache=False).logits
-                teacher_target = (
-                    _long_range_view(train_teachers[batch_index], args.window_size)
-                    if args.distill_long_range_only
-                    else train_teachers[batch_index]
+            with offload_context:
+                hidden_and_head = _forward_hidden_and_head(
+                    patched, train_batches[batch_index]
                 )
-                student_target = (
-                    _long_range_view(student, args.window_size)
-                    if args.distill_long_range_only
-                    else student
-                )
-                logit_loss = _distillation_loss(
-                    student_target,
-                    teacher_target,
-                    cosine_weight=args.cosine_weight,
-                    kl_weight=args.kl_weight,
-                    ce_weight=args.ce_weight,
-                    margin_weight=args.margin_weight,
-                    margin=args.margin,
-                    kl_temperature=args.kl_temperature,
-                )
-            else:
-                student_hidden, student_head = hidden_and_head
-                teacher_target = (
-                    _long_range_view(train_teachers[batch_index], args.window_size)
-                    if args.distill_long_range_only
-                    else train_teachers[batch_index]
-                )
-                hidden_target = (
-                    _long_range_view(student_hidden, args.window_size)
-                    if args.distill_long_range_only
-                    else student_hidden
-                )
-                logit_loss = _distillation_loss_from_hidden(
-                    hidden_target,
-                    student_head,
-                    teacher_target,
-                    cosine_weight=args.cosine_weight,
-                    kl_weight=args.kl_weight,
-                    ce_weight=args.ce_weight,
-                    margin_weight=args.margin_weight,
-                    margin=args.margin,
-                    kl_temperature=args.kl_temperature,
-                )
-            attention_losses = []
-            if args.attention_loss_weight:
-                for layer_index in calibrate_layers:
-                    targets = train_attention_targets.get(layer_index, [])
-                    if not targets:
-                        continue
-                    output = student_attention_outputs.get(layer_index)
-                    if output is None:
-                        raise RuntimeError(
-                            f"student did not expose attention output for layer {layer_index}"
+                if hidden_and_head is None:
+                    student = patched(**train_batches[batch_index], use_cache=False).logits
+                    teacher_target = (
+                        _long_range_view(train_teachers[batch_index], args.window_size)
+                        if args.distill_long_range_only
+                        else train_teachers[batch_index]
+                    )
+                    student_target = (
+                        _long_range_view(student, args.window_size)
+                        if args.distill_long_range_only
+                        else student
+                    )
+                    logit_loss = _distillation_loss(
+                        student_target,
+                        teacher_target,
+                        cosine_weight=args.cosine_weight,
+                        kl_weight=args.kl_weight,
+                        ce_weight=args.ce_weight,
+                        margin_weight=args.margin_weight,
+                        margin=args.margin,
+                        kl_temperature=args.kl_temperature,
+                    )
+                else:
+                    student_hidden, student_head = hidden_and_head
+                    teacher_target = (
+                        _long_range_view(train_teachers[batch_index], args.window_size)
+                        if args.distill_long_range_only
+                        else train_teachers[batch_index]
+                    )
+                    hidden_target = (
+                        _long_range_view(student_hidden, args.window_size)
+                        if args.distill_long_range_only
+                        else student_hidden
+                    )
+                    logit_loss = _distillation_loss_from_hidden(
+                        hidden_target,
+                        student_head,
+                        teacher_target,
+                        cosine_weight=args.cosine_weight,
+                        kl_weight=args.kl_weight,
+                        ce_weight=args.ce_weight,
+                        margin_weight=args.margin_weight,
+                        margin=args.margin,
+                        kl_temperature=args.kl_temperature,
+                    )
+                attention_losses = []
+                if args.attention_loss_weight:
+                    for layer_index in calibrate_layers:
+                        targets = train_attention_targets.get(layer_index, [])
+                        if not targets:
+                            continue
+                        output = student_attention_outputs.get(layer_index)
+                        if output is None:
+                            raise RuntimeError(
+                                f"student did not expose attention output for layer {layer_index}"
+                            )
+                        if args.distill_long_range_only and output.shape[-2] > args.window_size:
+                            output = output[:, args.window_size:]
+                        flat = output.reshape(-1, output.shape[-1])
+                        target = targets[batch_index]
+                        take = min(target.shape[0], flat.shape[0])
+                        indices = torch.linspace(
+                            0, flat.shape[0] - 1, take, device=flat.device, dtype=torch.long
                         )
-                    if args.distill_long_range_only and output.shape[-2] > args.window_size:
-                        output = output[:, args.window_size:]
-                    flat = output.reshape(-1, output.shape[-1])
-                    target = targets[batch_index]
-                    take = min(target.shape[0], flat.shape[0])
-                    indices = torch.linspace(
-                        0, flat.shape[0] - 1, take, device=flat.device, dtype=torch.long
-                    )
-                    attention_losses.append(
-                        _hidden_distillation_loss(flat[indices], target[:take])
-                    )
-                if not attention_losses:
-                    raise RuntimeError(
-                        "attention-output supervision requested but no targets were captured"
-                    )
-            attention_loss = (
-                torch.stack(attention_losses).mean()
-                if attention_losses
-                else logit_loss.new_zeros(())
-            )
-            loss = (
-                (1.0 - args.attention_loss_weight) * logit_loss
-                + args.attention_loss_weight * attention_loss
-            )
-            if not torch.isfinite(loss):
-                raise FloatingPointError(
-                    "calibration diverged; lower --lr or reduce --max-tokens"
+                        attention_losses.append(
+                            _hidden_distillation_loss(flat[indices], target[:take])
+                        )
+                    if not attention_losses:
+                        raise RuntimeError(
+                            "attention-output supervision requested but no targets were captured"
+                        )
+                attention_loss = (
+                    torch.stack(attention_losses).mean()
+                    if attention_losses
+                    else logit_loss.new_zeros(())
                 )
-            loss.backward()
+                loss = (
+                    (1.0 - args.attention_loss_weight) * logit_loss
+                    + args.attention_loss_weight * attention_loss
+                )
+                if not torch.isfinite(loss):
+                    raise FloatingPointError(
+                        "calibration diverged; lower --lr or reduce --max-tokens"
+                    )
+                loss.backward()
             torch.nn.utils.clip_grad_norm_(trainable, 1.0)
             optimizer.step()
 
@@ -1303,6 +1316,7 @@ def main() -> None:
             "code_init_tokens": args.code_init_tokens,
             "attention_loss_weight": args.attention_loss_weight,
             "distill_long_range_only": args.distill_long_range_only,
+            "cpu_offload_activations": args.cpu_offload_activations,
         },
     )
 
@@ -1318,6 +1332,7 @@ def main() -> None:
         "hf_zero_code_changes": True,
         "vllm_zero_code_changes": True,
         "gradient_checkpointing": args.gradient_checkpointing,
+        "cpu_offload_activations": args.cpu_offload_activations,
         "output": str(args.output),
         "train_tokens": int(sum(batch["input_ids"].shape[-1] for batch in train_batches)),
         "train_chunks": len(train_batches),

@@ -154,6 +154,7 @@ teacher 特征现在通过未 patch attention 模块的 forward-pre-hook 直接�
 - 2026-09-05 后续质量校准：`--code-init kmeans` 已成为默认，采用 teacher key 的确定性 cosine k-means 初始化；`--distill-long-range-only` 默认只反向优化窗口之外的 archive 位置。两项改动尚未在真实长上下文 checkpoint 上产生新的 gate 结果。
 - 2026-09-05 T4 复核暴露两项工程问题并已修复：分层校准释放 teacher 时仍保留 attention 子模块引用，加载 student 会被系统 `SIGKILL`；现保存层数整数后显式删除模块列表并执行 `gc.collect()`。Phi-3.5 attention-output 辅助损失改为 fp32 计算，避免 fp16 平方溢出；新增单元测试覆盖该数值边界。
 - 同轮真实 Phi-3.5-mini T4 诊断：全层 512-token 反向仍因 activation peak OOM；last-quarter（8/32 层，0.0313% 参数）50 步可完成，但 held-out cosine `0.9148`、top-1 `0.4463`，未通过 `0.99`。固定容量 quality-first exact shadow 在 512-token matched HF 上最高记录 cosine `0.9687`、top-1 `0.5781`，仍不能替代 RULER/LongBench/PG-19。
+- 分层校准新增显式 `--cpu-offload-activations`：用 PyTorch `save_on_cpu` 将 autograd 保存张量移到主存，目标是在小显存卡上重新尝试全层校准；默认关闭，尚未形成新的真实质量结果。
 - 2026-09-05 质量优先校准：默认 `--distill-long-range-only` 只对超出 exact local window 的位置计算蒸馏损失，避免已精确匹配的前缀 token 稀释 archive 梯度；`--no-distill-long-range-only` 保留旧的全序列消融。`--code-init` 默认改为确定性 cosine k-means，`key-sample` 与 `random` 仍可复现旧初始化。
 
 ### 本地回归
