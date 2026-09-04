@@ -238,6 +238,9 @@ def main() -> None:
         "quality_first": args.quality_first if args.hybrid else False,
         "exact_num_sets": args.exact_num_sets if args.hybrid else None,
         "exact_ways": args.exact_ways if args.hybrid else None,
+        "exact_capacity_per_head": (
+            args.exact_num_sets * args.exact_ways if args.hybrid else None
+        ),
         "exact_probe_sets": args.exact_probe_sets if args.hybrid else None,
         "hybrid_admission_threshold": (
             args.hybrid_admission_threshold if args.hybrid else None

@@ -437,6 +437,11 @@ def main() -> None:
         "depth_buckets": bucket_summary,
         "patched_layers": patched_layers,
         "quality_first": args.quality_first if args.mode == "qcc" else False,
+        "exact_capacity_per_head": (
+            args.exact_num_sets * args.exact_ways
+            if args.mode == "qcc"
+            else None
+        ),
         "output_jsonl": str(args.output_jsonl),
     }
     args.summary.parent.mkdir(parents=True, exist_ok=True)
