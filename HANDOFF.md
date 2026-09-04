@@ -20,6 +20,7 @@
 - `ssh_phi_cal_20_fix`：512 tokens、20 steps、window 128、16 codes、bf16；adapter `artifacts/remote_gpu/ssh_runs/phi_cal_20_fix.adapter.pt`，参数 `3,825,864,704`，可训练 `4,785,152`（`0.1251%`），训练片段 cosine `0.999110`。
 - 四段独立短 held-out（每段约 450 tokens）平均 cosine `0.960659`、平均 top-1 `0.617042`，`fidelity_passed=false`；这是 matched HF 诊断，不是 RULER/LongBench/PG-19 结果。
 - 该次实验暴露并修复了 bf16 hidden 与 fp32 gate 的 dtype mismatch，修复提交为 `86c839e`。
+- 同配置扩大到 `1024 tokens / 40 steps` 时在 `_parallel_decay_scan` 申请约 672 MiB 时 OOM（A10G 已用约 23.0 GiB）；失败日志和未生成 adapter 保留在 `artifacts/remote_gpu/ssh_runs/phi_cal_40_1024.log`。当前可复现实验上限仍是 512 tokens。
 
 ## 1. 项目目标与验收口径
 
