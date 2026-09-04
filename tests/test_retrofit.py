@@ -203,10 +203,12 @@ def test_quality_first_prefill_keeps_future_queries_visible():
     )
     qcc = model.attn.qcc
     calls = []
+    quality_queries = []
     original = qcc.step_chunk
 
     def counted(hidden, **kwargs):
         calls.append(int(hidden.shape[1]))
+        quality_queries.append(kwargs.get("quality_query"))
         return original(hidden, **kwargs)
 
     qcc.step_chunk = counted
@@ -214,10 +216,10 @@ def test_quality_first_prefill_keeps_future_queries_visible():
     output, _, cache = model.attn(hidden, use_cache=True)
     assert output.shape == hidden.shape
     assert cache is not None and cache.get_seq_length() == hidden.shape[1]
-    # The quality-first path must expose the complete prefill query stream to
-    # its salience selector; explicit prefill_chunk_size remains the opt-in
-    # bounded-memory override tested above.
-    assert calls == [hidden.shape[1]]
+    # The quality-first path keeps normal chunks but exposes the complete
+    # future query stream to every salience decision.
+    assert calls == [4, 4, 2]
+    assert [query.shape[2] for query in quality_queries] == [6, 6, 6]
 
 
 def test_patch_hf_supports_modern_shared_cache_call():

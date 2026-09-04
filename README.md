@@ -209,11 +209,11 @@ tiles.  When the retrofit supplies both views, the exact shadow matches on
 rotary Q/K while the recurrent archive can remain position-invariant.  State
 remains O(1) in context length, but exact-tier capacity and serving cost must be
 reported with the result; it is not evidence for the 80% memory or vLLM gates
-by itself.  During a quality-first hybrid prefill, the HF adapter keeps the
-complete request visible to the salience selector while the archive scans its
-work in bounded blocks.  This prevents a later matching query from being hidden
-from an early needle; pass `--prefill-chunk-size` explicitly when an activation
-bound is more important than that quality-first behavior.
+by itself.  During a quality-first hybrid prefill, the HF adapter builds one
+rotary query side-channel for the complete request while the archive and local
+attention still run in bounded blocks.  This prevents a later matching query
+from being hidden from an early needle without forcing a full-sequence archive
+temporary.  Pass `--prefill-chunk-size` to tighten the local activation bound.
 
 Use the resulting file with `--adapter` on the real-HF retrieval, latency,
 memory, concurrency, RULER, LongBench, or PG-19 runners.  `--exact-probe-sets`

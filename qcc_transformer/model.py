@@ -735,6 +735,8 @@ class QCCArchive(nn.Module):
         _include_landmarks: bool = True,
         exact_key: Optional[Tensor] = None,
         exact_query: Optional[Tensor] = None,
+        quality_query: Optional[Tensor] = None,
+        quality_key_start: int = 0,
     ) -> Tensor:
         """Update and read a sequence of evicted tokens with a block scan.
 
@@ -750,7 +752,7 @@ class QCCArchive(nn.Module):
         # HybridQCCArchive.  The dense recurrent archive deliberately ignores
         # it, preserving the historical raw-Q/K equation for position-invariant
         # addressing.
-        del exact_key, exact_query
+        del exact_key, exact_query, quality_query, quality_key_start
         if output is not None and (output.shape != query.shape or output.device != query.device):
             raise ValueError("output must match query shape and device")
         batch, heads, events, dim = key.shape
@@ -2179,6 +2181,7 @@ class QCCSelfAttention(nn.Module):
         position_ids: Optional[Tensor] = None,
         archive_hint: Optional[Tensor] = None,
         position_embeddings: Optional[tuple[Tensor, Tensor]] = None,
+        quality_query: Optional[Tensor] = None,
     ) -> Tensor:
         """Decode a causal block while preserving the persistent cache.
 
@@ -2323,6 +2326,7 @@ class QCCSelfAttention(nn.Module):
             )
 
         if self.use_archive:
+            archive_event_offset = max(0, self._seen_tokens - self.window_size)
             archive_out = torch.zeros_like(local_out)
             event_start = max(0, self.window_size - old_length)
             event_count = length - event_start
@@ -2345,6 +2349,8 @@ class QCCSelfAttention(nn.Module):
                     output=archive_out[:, :, event_start:],
                     exact_key=exact_evicted_k,
                     exact_query=q[:, :, event_start:],
+                    quality_query=quality_query,
+                    quality_key_start=archive_event_offset,
                 )
                 # A chunk update changes the archive state for every active
                 # position.  Do not let a prior token-path remote read leak

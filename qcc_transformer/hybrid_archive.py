@@ -424,6 +424,9 @@ class HybridQCCArchive(QCCArchive):
         value: Tensor,
         query: Tensor,
         score: Tensor,
+        *,
+        quality_query: Tensor | None = None,
+        quality_key_start: int = 0,
     ) -> tuple[Tensor, Tensor]:
         """Causally read a block with a bounded number of admission events."""
 
@@ -474,8 +477,8 @@ class HybridQCCArchive(QCCArchive):
                 # slots and uses score replacement globally.
                 tile_score = self._quality_first_salience(
                     key[:, :, tile_start:tile_end],
-                    query,
-                    key_start=tile_start,
+                    query if quality_query is None else quality_query,
+                    key_start=quality_key_start + tile_start,
                 )
             admission_score = tile_score if self.quality_first else score[:, :, tile_start:tile_end]
             eligible = tile_score >= self.admission_threshold
@@ -530,6 +533,8 @@ class HybridQCCArchive(QCCArchive):
         admission_score: Tensor | None = None,
         exact_key: Tensor | None = None,
         exact_query: Tensor | None = None,
+        quality_query: Tensor | None = None,
+        quality_key_start: int = 0,
     ) -> Tensor:
         if admission_score is not None and (
             admission_score.shape != key.shape[:3]
@@ -540,6 +545,18 @@ class HybridQCCArchive(QCCArchive):
             exact_key = key
         if exact_query is None:
             exact_query = query
+        if quality_key_start < 0:
+            raise ValueError("quality_key_start must be non-negative")
+        if quality_query is not None and (
+            quality_query.ndim != 4
+            or quality_query.shape[0] != key.shape[0]
+            or quality_query.shape[1] != key.shape[1]
+            or quality_query.shape[-1] != key.shape[-1]
+            or quality_query.device != key.device
+        ):
+            raise ValueError(
+                "quality_query must have shape [batch, heads, tokens, head_dim] on key.device"
+            )
         if (
             exact_key.shape != key.shape
             or exact_query.shape != query.shape
@@ -560,6 +577,8 @@ class HybridQCCArchive(QCCArchive):
             value,
             exact_query,
             score,
+            quality_query=quality_query,
+            quality_key_start=quality_key_start,
         )
         result = self._blend_exact(recurrent, exact, confidence)
         if output is not None:
