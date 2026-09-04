@@ -192,6 +192,34 @@ def test_hf_prefill_is_chunked_when_prompt_exceeds_bound():
     assert model.attn.qcc._chunk_key_scratch.shape[2] <= 3 + 4
 
 
+def test_quality_first_prefill_keeps_future_queries_visible():
+    model = _Model()
+    patch_hf_model_hybrid(
+        model,
+        window_size=4,
+        num_codes=4,
+        use_triton=False,
+        hybrid_kwargs={"exact_num_sets": 2, "exact_ways": 2, "quality_first": True},
+    )
+    qcc = model.attn.qcc
+    calls = []
+    original = qcc.step_chunk
+
+    def counted(hidden, **kwargs):
+        calls.append(int(hidden.shape[1]))
+        return original(hidden, **kwargs)
+
+    qcc.step_chunk = counted
+    hidden = torch.randn(1, 10, 16)
+    output, _, cache = model.attn(hidden, use_cache=True)
+    assert output.shape == hidden.shape
+    assert cache is not None and cache.get_seq_length() == hidden.shape[1]
+    # The quality-first path must expose the complete prefill query stream to
+    # its salience selector; explicit prefill_chunk_size remains the opt-in
+    # bounded-memory override tested above.
+    assert calls == [hidden.shape[1]]
+
+
 def test_patch_hf_supports_modern_shared_cache_call():
     model = _Model()
     patch_hf_model(model, window_size=4, num_codes=4, use_triton=False)

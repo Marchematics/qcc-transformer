@@ -19,7 +19,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from qcc_transformer import patch_hf_model, reset_hf_qcc_cache
-from qcc_transformer.hybrid_archive import load_hybrid_retrofit_adapter
+from qcc_transformer.hybrid_archive import load_hybrid_retrofit_adapter, patch_hf_model_hybrid
 from qcc_transformer.hf_loading import load_hf_causal_lm, model_input_device
 from qcc_transformer.production_profile import enable_qkv_only_deployment_profile
 
@@ -137,6 +137,11 @@ def main() -> None:
     parser.add_argument("--exact-ways", type=int, default=4)
     parser.add_argument("--exact-probe-sets", type=int, default=None)
     parser.add_argument(
+        "--quality-first",
+        action="store_true",
+        help="use the fixed-capacity exact shadow and full-prefill salience path",
+    )
+    parser.add_argument(
         "--archive-position-invariant",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -199,14 +204,30 @@ def main() -> None:
     )
     patched_device = model_input_device(patched, device)
     if args.adapter is None:
-        replaced = patch_hf_model(
-            patched,
-            window_size=args.window_size,
-            num_codes=args.num_codes,
-            max_position_embeddings=native_context_tokens,
-            archive_position_invariant=args.archive_position_invariant,
-            kv_head_policy=args.kv_head_policy,
-        )
+        if args.quality_first:
+            replaced = patch_hf_model_hybrid(
+                patched,
+                window_size=args.window_size,
+                num_codes=args.num_codes,
+                max_position_embeddings=native_context_tokens,
+                archive_position_invariant=args.archive_position_invariant,
+                kv_head_policy=args.kv_head_policy,
+                hybrid_kwargs={
+                    "exact_num_sets": args.exact_num_sets,
+                    "exact_ways": args.exact_ways,
+                    "exact_probe_sets": args.exact_probe_sets,
+                    "quality_first": True,
+                },
+            )
+        else:
+            replaced = patch_hf_model(
+                patched,
+                window_size=args.window_size,
+                num_codes=args.num_codes,
+                max_position_embeddings=native_context_tokens,
+                archive_position_invariant=args.archive_position_invariant,
+                kv_head_policy=args.kv_head_policy,
+            )
     else:
         replaced = load_hybrid_retrofit_adapter(
             patched,
@@ -215,6 +236,7 @@ def main() -> None:
                 "exact_num_sets": args.exact_num_sets,
                 "exact_ways": args.exact_ways,
                 "exact_probe_sets": args.exact_probe_sets,
+                "quality_first": args.quality_first,
             },
             window_size=args.window_size,
             num_codes=args.num_codes,
@@ -273,6 +295,9 @@ def main() -> None:
         "synthetic": False,
         "official": True,
         "attn_implementation": args.attn_implementation,
+        "quality_first": args.quality_first,
+        "exact_num_sets": args.exact_num_sets if args.quality_first or args.adapter else None,
+        "exact_ways": args.exact_ways if args.quality_first or args.adapter else None,
         "full_suite": args.max_examples is None,
         "qcc_only": False,
         "qcc_score": qcc_correct / len(records),

@@ -458,6 +458,27 @@ class HFQCCAttention(nn.Module):
         if chunk_size is None:
             chunk_size = int(getattr(self.qcc.archive, "scan_block_size", 1024))
         chunk_size = max(1, chunk_size)
+        # Quality-first hybrid admission uses future query-key salience to
+        # decide which historical records enter the exact tier. Splitting a
+        # prefill here would hide later queries from early tiles, so a needle
+        # could be evicted before its matching query is observed. Keep the
+        # request as one logical prefill; ``step_chunk`` still bounds archive
+        # temporaries with its scan block and only retains the fixed local ring.
+        # An explicit ``prefill_chunk_size`` remains an opt-in memory/quality
+        # trade-off for callers that need stricter activation bounds.
+        if (
+            self.prefill_chunk_size is None
+            and bool(getattr(self.qcc.archive, "quality_first", False))
+            and reset
+            and length > chunk_size
+        ):
+            return self.qcc.step_chunk(
+                hidden_states,
+                reset_cache=reset,
+                position_ids=positions,
+                archive_hint=archive_hint,
+                position_embeddings=position_embeddings,
+            )
         if length <= chunk_size:
             return self.qcc.step_chunk(
                 hidden_states,

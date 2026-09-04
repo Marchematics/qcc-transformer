@@ -161,6 +161,7 @@ teacher 特征现在通过未 patch attention 模块的 forward-pre-hook 直接�
 - 2026-09-05 质量校准补偿：`QCCArchive` 新增默认 rank `8` 的零初始化 query-conditioned low-rank residual，作用于 archive read、位于 local/archive mixing 之前；未校准输出严格保持不变，校准时可用约 `0.03%` 级别额外参数学习系统性长程偏差。`calibrate_hf_retrofit.py`、`calibrate_hf_layerwise.py` 和 `benchmark_hf_retrofit.py` 均支持 `--archive-query-correction-rank`；旧 adapter 缺少该键时自动保留零初始化。新增 archive identity/legacy adapter 回归测试，尚未产生真实长上下文或官方 benchmark 数字。
 - 分层校准新增显式 `--cpu-offload-activations`：用 PyTorch `save_on_cpu` 将 autograd 保存张量移到主存，目标是在小显存卡上重新尝试全层校准；默认关闭，尚未形成新的真实质量结果。
 - 2026-09-05 质量优先校准：默认 `--distill-long-range-only` 只对超出 exact local window 的位置计算蒸馏损失，避免已精确匹配的前缀 token 稀释 archive 梯度；`--no-distill-long-range-only` 保留旧的全序列消融。`--code-init` 默认改为确定性 cosine k-means，`key-sample` 与 `random` 仍可复现旧初始化。
+- 2026-09-05 质量修复：HF quality-first hybrid 预填充默认不再把整段请求拆成独立块，使 exact-tier 的未来 query-key salience 能看到完整 prompt；archive 内部仍按 bounded scan 分块，状态容量不随上下文增长。需要更严格 activation 上限时显式传入 `--prefill-chunk-size`，但这会重新引入跨块 salience 的质量折衷。`benchmark_hf_ruler.py` 新增 `--quality-first`，可直接用 matched Full-KV/QCC 跑官方 RULER split。
 
 ### 本地回归
 
