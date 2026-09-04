@@ -18,7 +18,7 @@ from pathlib import Path
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from qcc_transformer import patch_hf_model, reset_hf_qcc_cache
+from qcc_transformer import load_retrofit_adapter, patch_hf_model, reset_hf_qcc_cache
 from qcc_transformer.hybrid_archive import load_hybrid_retrofit_adapter
 from qcc_transformer.hf_loading import load_hf_causal_lm, model_input_device
 from qcc_transformer.production_profile import enable_qkv_only_deployment_profile
@@ -265,20 +265,37 @@ def main() -> None:
             kv_head_policy=args.kv_head_policy,
         )
     else:
-        replaced = load_hybrid_retrofit_adapter(
-            patched,
-            args.adapter,
-            hybrid_kwargs={
-                "exact_num_sets": args.exact_num_sets,
-                "exact_ways": args.exact_ways,
-                "exact_probe_sets": args.exact_probe_sets,
-            },
-            window_size=args.window_size,
-            num_codes=args.num_codes,
-            max_position_embeddings=native_context_tokens,
-            archive_position_invariant=True,
-            kv_head_policy=args.kv_head_policy,
+        adapter_payload = torch.load(args.adapter, map_location="cpu")
+        adapter_format = (
+            adapter_payload.get("format")
+            if isinstance(adapter_payload, dict)
+            else None
         )
+        if adapter_format == "qcc-retrofit-v1":
+            replaced = load_retrofit_adapter(
+                patched,
+                args.adapter,
+                window_size=args.window_size,
+                num_codes=args.num_codes,
+                max_position_embeddings=native_context_tokens,
+                archive_position_invariant=True,
+                kv_head_policy=args.kv_head_policy,
+            )
+        else:
+            replaced = load_hybrid_retrofit_adapter(
+                patched,
+                args.adapter,
+                hybrid_kwargs={
+                    "exact_num_sets": args.exact_num_sets,
+                    "exact_ways": args.exact_ways,
+                    "exact_probe_sets": args.exact_probe_sets,
+                },
+                window_size=args.window_size,
+                num_codes=args.num_codes,
+                max_position_embeddings=native_context_tokens,
+                archive_position_invariant=True,
+                kv_head_policy=args.kv_head_policy,
+            )
         enable_qkv_only_deployment_profile(patched, archive_mix=args.archive_mix)
     reset_hf_qcc_cache(patched, batch_size=args.batch_size)
     qcc_result = _run_stream(
