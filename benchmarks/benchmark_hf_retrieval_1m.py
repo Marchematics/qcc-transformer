@@ -232,7 +232,7 @@ def main() -> None:
     parser.add_argument(
         "--quality-first",
         action="store_true",
-        help="use the bounded FIFO exact shadow with soft reads",
+        help="use the bounded score-ranked exact shadow with soft reads",
     )
     parser.add_argument("--archive-mix", type=float, default=0.125)
     parser.add_argument("--kv-head-policy", choices=("reject", "repeat"), default="repeat")

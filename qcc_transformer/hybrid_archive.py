@@ -118,11 +118,13 @@ class HybridQCCArchive(QCCArchive):
                 "sparse/lazy fallbacks can double-dispatch virtual updates"
             )
         if quality_first:
-            # Quality-first is an explicit bounded exact shadow.  It keeps the
-            # most recent fixed-capacity history in FIFO order, reads a soft
-            # kernel average, and gives that tier enough blend weight to be
-            # useful before a learned admission predictor is available.
-            exact_replacement_policy = "fifo"
+            # Quality-first is an explicit bounded exact shadow.  Use the
+            # score-based global table rather than FIFO: a long prefill is
+            # processed in many bounded tiles, and FIFO would overwrite all
+            # previously useful records at every tile boundary.  The chunk
+            # path below supplies a future query-key salience score so this
+            # table keeps retrieval-critical history across the whole stream.
+            exact_replacement_policy = "score"
             exact_probe_sets = exact_num_sets
             # Scores are bounded by the predictor's normalized features; a
             # large finite floor keeps constructor validation meaningful.
@@ -191,8 +193,9 @@ class HybridQCCArchive(QCCArchive):
         self.quality_first = bool(quality_first)
         self.exact_hard_read = exact_hard_read
         # The exact tier admits a whole bounded tile in quality-first mode;
-        # matching the tile to its capacity avoids score-based subsampling of
-        # otherwise recoverable recent tokens.
+        # matching the tile to its capacity lets the global score table see
+        # every candidate while retaining only the strongest fixed-capacity
+        # records across the complete stream.
         if self.quality_first:
             self.scan_block_size = min(self.scan_block_size, self.max_inserts_per_chunk)
 
@@ -335,6 +338,65 @@ class HybridQCCArchive(QCCArchive):
                 write_mask=mask,
             )
 
+    @torch.no_grad()
+    def _quality_first_salience(
+        self,
+        key: Tensor,
+        query: Tensor,
+        *,
+        key_start: int,
+        sample_queries: int = 32,
+    ) -> Tensor:
+        """Estimate future retrieval value for a bounded key tile.
+
+        ``update_read_chunk`` receives a whole prefill block, so future
+        queries are available even though the exact bank remains causal at
+        serving time.  Sampling a small, evenly spaced set of future queries
+        gives the score table a global view without materializing a
+        ``tokens x tokens`` attention matrix.  The returned score is a cosine
+        similarity in ``[-1, 1]`` with shape ``[batch, heads, tile]``.
+        """
+
+        if key.ndim != 4 or query.ndim != 4:
+            raise ValueError("key and query must be rank-4 tensors")
+        if key.shape[0] != query.shape[0] or key.shape[1] != query.shape[1]:
+            raise ValueError("key and query batch/head dimensions must match")
+        tile = key.shape[2]
+        if tile == 0 or query.shape[2] == 0:
+            return key.new_empty(key.shape[0], key.shape[1], tile, dtype=torch.float32)
+        query_count = min(int(sample_queries), query.shape[2])
+        if query_count <= 0:
+            return key.new_full((key.shape[0], key.shape[1], tile), -1.0, dtype=torch.float32)
+
+        # A key at absolute event index ``i`` can first be retrieved by the
+        # query whose event index is ``i - window + 1``.  Include that causal
+        # boundary in the sampled positions and mask earlier queries per key.
+        first_query = max(0, int(key_start) - self.window_size + 1)
+        positions = torch.linspace(
+            first_query,
+            query.shape[2] - 1,
+            query_count,
+            device=query.device,
+            dtype=torch.float32,
+        ).round().to(torch.long).unique(sorted=True)
+        if positions.numel() == 0:
+            return key.new_full((key.shape[0], key.shape[1], tile), -1.0, dtype=torch.float32)
+
+        normalized_key = F.normalize(key.float(), dim=-1)
+        normalized_query = F.normalize(query.index_select(2, positions).float(), dim=-1)
+        similarity = torch.einsum(
+            "bhtd,bhqd->bhtq", normalized_key, normalized_query
+        )
+        absolute_key = torch.arange(
+            int(key_start), int(key_start) + tile, device=query.device
+        )
+        # Query event j corresponds to an absolute token at j + window_size.
+        # Therefore j >= i - window_size + 1 is the causal eligibility test.
+        minimum_query = (absolute_key - self.window_size + 1).clamp_min(0)
+        valid = positions.view(1, 1, 1, -1) >= minimum_query.view(1, 1, -1, 1)
+        similarity = similarity.masked_fill(~valid, -1.0)
+        return similarity.max(dim=-1).values
+
     def update(self, key: Tensor, value: Tensor) -> None:
         super().update(key, value)
         with torch.no_grad():
@@ -395,6 +457,18 @@ class HybridQCCArchive(QCCArchive):
         for tile_start in range(0, tokens, tile_size):
             tile_end = min(tokens, tile_start + tile_size)
             tile_score = score[:, :, tile_start:tile_end]
+            if self.quality_first:
+                # The admission predictor is intentionally untrained in this
+                # mode.  Replace its constant bias with an oracle-free
+                # future query-key score computed from the current prefill
+                # block; the exact bank still only retains a fixed number of
+                # slots and uses score replacement globally.
+                tile_score = self._quality_first_salience(
+                    key[:, :, tile_start:tile_end],
+                    query,
+                    key_start=tile_start,
+                )
+            admission_score = tile_score if self.quality_first else score[:, :, tile_start:tile_end]
             eligible = tile_score >= self.admission_threshold
             position_score = torch.where(
                 eligible,
@@ -424,7 +498,7 @@ class HybridQCCArchive(QCCArchive):
                 self._admit_one(
                     key[:, :, position],
                     value[:, :, position],
-                    score[:, :, position],
+                    admission_score[:, :, position - tile_start],
                     write_mask=selected[:, position - tile_start].unsqueeze(0),
                 )
                 cursor = position

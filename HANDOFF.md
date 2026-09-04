@@ -118,7 +118,7 @@ teacher 特征现在通过未 patch attention 模块的 forward-pre-hook 直接�
 
 ### 3.7 Quality-first exact shadow（已实现，待远程验证）
 
-- `HybridQCCArchive(..., quality_first=True)` 提供显式质量优先控制：固定容量 FIFO exact tier、soft exact read、全量 bounded-tile admission 和较高 exact blend；容量仍与上下文长度无关。
+- `HybridQCCArchive(..., quality_first=True)` 提供显式质量优先控制：固定容量 score-ranked exact tier、soft exact read、按 bounded tile 的未来 query-key 相似度选择候选和较高 exact blend；容量仍与上下文长度无关。
 - `calibrate_hf_admission.py`、`benchmark_hf_retrofit.py` 与 `benchmark_hf_retrieval_1m.py` 均支持 `--quality-first`。该模式用于先验证真实模型质量，不得直接当作 80% memory、vLLM 或最终 99 gate 证据；报告必须包含 exact tier 容量和实际峰值显存。
 
 ### 3.8 Phi 远程代码兼容
@@ -154,6 +154,7 @@ teacher 特征现在通过未 patch attention 模块的 forward-pre-hook 直接�
 - 2026-09-05 后续质量校准：`--code-init kmeans` 已成为默认，采用 teacher key 的确定性 cosine k-means 初始化；`--distill-long-range-only` 默认只反向优化窗口之外的 archive 位置。两项改动尚未在真实长上下文 checkpoint 上产生新的 gate 结果。
 - 2026-09-05 T4 复核暴露两项工程问题并已修复：分层校准释放 teacher 时仍保留 attention 子模块引用，加载 student 会被系统 `SIGKILL`；现保存层数整数后显式删除模块列表并执行 `gc.collect()`。Phi-3.5 attention-output 辅助损失改为 fp32 计算，避免 fp16 平方溢出；新增单元测试覆盖该数值边界。
 - 同轮真实 Phi-3.5-mini T4 诊断：全层 512-token 反向仍因 activation peak OOM；last-quarter（8/32 层，0.0313% 参数）50 步可完成，但 held-out cosine `0.9148`、top-1 `0.4463`，未通过 `0.99`。固定容量 quality-first exact shadow 在 512-token matched HF 上最高记录 cosine `0.9687`、top-1 `0.5781`，仍不能替代 RULER/LongBench/PG-19。
+- 2026-09-05 质量修复：quality-first exact tier 不再按 tile FIFO 覆盖，而是使用全局 score-ranked 固定表；每个 bounded prefill tile 用采样的未来 query-key cosine 选取候选，避免长流中早期 salient token 被后续 tile 无条件淘汰。普通 admission 模式保持原有 score/FIFO 配置不变；新增跨 tile salient-token 回归测试。该修复尚未产生新的真实模型 benchmark 数字，旧质量结果不自动迁移。
 - 分层校准新增显式 `--cpu-offload-activations`：用 PyTorch `save_on_cpu` 将 autograd 保存张量移到主存，目标是在小显存卡上重新尝试全层校准；默认关闭，尚未形成新的真实质量结果。
 - 2026-09-05 质量优先校准：默认 `--distill-long-range-only` 只对超出 exact local window 的位置计算蒸馏损失，避免已精确匹配的前缀 token 稀释 archive 梯度；`--no-distill-long-range-only` 保留旧的全序列消融。`--code-init` 默认改为确定性 cosine k-means，`key-sample` 与 `random` 仍可复现旧初始化。
 

@@ -159,7 +159,7 @@ def test_chunk_admission_reopens_budget_for_each_bounded_tile() -> None:
     assert int(torch.isfinite(hybrid.exact_bank.state.scores).sum()) == 6
 
 
-def test_quality_first_uses_bounded_fifo_soft_exact_shadow():
+def test_quality_first_uses_bounded_score_soft_exact_shadow():
     base = QCCArchive(
         num_heads=1,
         head_dim=4,
@@ -175,7 +175,7 @@ def test_quality_first_uses_bounded_fifo_soft_exact_shadow():
         exact_ways=4,
         quality_first=True,
     )
-    assert hybrid.exact_bank.replacement_policy == "fifo"
+    assert hybrid.exact_bank.replacement_policy == "score"
     assert hybrid.exact_hard_read is False
     assert hybrid.max_inserts_per_chunk == 4
     assert hybrid.scan_block_size == 4
@@ -186,6 +186,39 @@ def test_quality_first_uses_bounded_fifo_soft_exact_shadow():
         output = hybrid.update_read_chunk(key, value, query)
     assert output.shape == query.shape
     assert int(torch.isfinite(hybrid.exact_bank.state.scores).sum()) == 4
+
+
+def test_quality_first_retains_future_salient_token_across_tiles():
+    base = QCCArchive(
+        num_heads=1,
+        head_dim=2,
+        num_codes=1,
+        decay_rates=(0.9,),
+        window_size=2,
+        use_triton=False,
+        scan_block_size=8,
+    )
+    hybrid = HybridQCCArchive.from_archive(
+        base,
+        exact_num_sets=1,
+        exact_ways=2,
+        quality_first=True,
+        exact_mix_bias_init=20.0,
+    )
+    needle = torch.tensor([[[[1.0, 0.0]]]])
+    key = torch.cat(
+        (needle, torch.tensor([[[-1.0, 0.0]]]).expand(1, 1, 5, 2)), dim=2
+    )
+    value = torch.arange(12, dtype=torch.float32).view(1, 1, 6, 2)
+    query = torch.tensor([[[[1.0, 0.0]]]]).expand(1, 1, 6, 2).clone()
+    query[:, :, 1:] = torch.tensor([-1.0, 0.0])
+    with torch.no_grad():
+        hybrid.update_read_chunk(key, value, query)
+    stored_keys = hybrid.exact_bank.state.keys.reshape(1, 1, -1, 2)
+    similarity = torch.nn.functional.cosine_similarity(
+        stored_keys, needle.expand_as(stored_keys), dim=-1
+    )
+    assert bool((similarity > 0.99).any())
 
 
 def test_upgrade_qcc_attention_is_idempotent() -> None:

@@ -193,10 +193,11 @@ python benchmarks/calibrate_hf_admission.py \
 ```
 
 For a quality-first control before learned admission is available, add
-`--quality-first`.  It uses a fixed-capacity FIFO exact shadow, soft reads, and
-automatically admits one bounded tile at a time.  This remains O(1) in context
-length, but its exact-tier capacity and serving cost must be reported with the
-result; it is not evidence for the 80% memory or vLLM gates by itself.
+`--quality-first`.  It uses a fixed-capacity score table with soft exact reads;
+each bounded prefill tile is ranked by sampled future query-key similarity so
+high-value historical records survive later tiles.  State remains O(1) in
+context length, but exact-tier capacity and serving cost must be reported with
+the result; it is not evidence for the 80% memory or vLLM gates by itself.
 
 Use the resulting file with `--adapter` on the real-HF retrieval, latency,
 memory, concurrency, RULER, LongBench, or PG-19 runners.  `--exact-probe-sets`

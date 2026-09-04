@@ -88,7 +88,7 @@ def main() -> None:
     parser.add_argument(
         "--quality-first",
         action="store_true",
-        help="use the bounded FIFO exact shadow with soft reads for a quality-first run",
+        help="use the bounded score-ranked exact shadow with soft reads for a quality-first run",
     )
     parser.add_argument("--hybrid-exact-mix-bias-init", type=float, default=-4.0)
     parser.add_argument("--hybrid-exact-confidence-threshold", type=float, default=0.60)

@@ -347,7 +347,7 @@ def main() -> None:
     parser.add_argument(
         "--quality-first",
         action="store_true",
-        help="use a bounded FIFO exact shadow with soft reads; admission training is skipped",
+        help="use a bounded score-ranked exact shadow with soft reads; admission training is skipped",
     )
     parser.add_argument("--layers", default="all")
     parser.add_argument("--teacher-queries", type=int, default=128)
