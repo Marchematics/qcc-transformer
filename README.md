@@ -137,7 +137,10 @@ legacy per-code-normalized ablation. Adapters should be recalibrated when this
 equation changes; the switch is a quality experiment, not a claim of benchmark
 parity. Calibration CLIs also expose `--archive-scan-block-size` (default `256`)
 to bound backward temporary memory and `--ce-weight` to include teacher top-1
-cross entropy in the distillation objective.
+cross entropy in the distillation objective. On GPUs where a full-layer run
+still exceeds memory, `--cpu-offload-activations` moves only autograd-saved
+activations to host memory during calibration; it does not alter the inference
+adapter or serving state.
 
 For layer-wise calibration on long-context checkpoints, use
 `benchmarks/calibrate_hf_layerwise.py`.  The default now calibrates `all`
