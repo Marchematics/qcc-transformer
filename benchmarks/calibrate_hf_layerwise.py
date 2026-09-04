@@ -12,6 +12,7 @@ reach the fidelity gate.
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import sys
 from pathlib import Path
@@ -531,9 +532,13 @@ def _hidden_distillation_loss(
         )
     if not 0.0 <= cosine_weight <= 1.0:
         raise ValueError("cosine_weight must lie in [0, 1]")
-    teacher = teacher_cpu.to(device=student.device, dtype=student.dtype)
-    mse = torch.nn.functional.mse_loss(student, teacher)
-    cosine = torch.nn.functional.cosine_similarity(student, teacher, dim=-1).mean()
+    # Phi attention outputs can exceed fp16's safe square range even when the
+    # final logits remain finite.  Keep this bounded auxiliary objective in
+    # fp32; only the frozen backbone and trainable adapter stay in model dtype.
+    student_f = student.float()
+    teacher = teacher_cpu.to(device=student.device, dtype=torch.float32)
+    mse = torch.nn.functional.mse_loss(student_f, teacher)
+    cosine = torch.nn.functional.cosine_similarity(student_f, teacher, dim=-1).mean()
     return (1.0 - cosine_weight) * mse + cosine_weight * (1.0 - cosine)
 
 
@@ -972,6 +977,7 @@ def main() -> None:
     calibrate_layers = parse_layer_spec(
         args.calibrate_layers, len(teacher_attention_modules)
     )
+    teacher_num_layers = len(teacher_attention_modules)
 
     with torch.no_grad():
         train_teachers, teacher_hidden, train_attention_targets = _teacher_logits_and_inputs(
@@ -986,7 +992,12 @@ def main() -> None:
             for batch in held_out_batches
         ]
 
+    # The module list contains strong references to every attention submodule.
+    # Drop it before loading the student, otherwise the released teacher can
+    # remain resident and a 24 GB-class GPU may OOM during checkpoint loading.
+    del teacher_attention_modules
     del baseline
+    gc.collect()
     if device.type == "cuda":
         torch.cuda.empty_cache()
 
@@ -1044,10 +1055,10 @@ def main() -> None:
     # Determine which layers to calibrate. The teacher and patched model must
     # expose the same attention-module ordering for hidden-output supervision.
     num_layers = len(replaced)
-    if num_layers != len(teacher_attention_modules):
+    if num_layers != teacher_num_layers:
         raise RuntimeError(
             "teacher/student attention layer counts differ: "
-            f"{len(teacher_attention_modules)} vs {num_layers}"
+            f"{teacher_num_layers} vs {num_layers}"
         )
     print(f"Calibrating layers: {calibrate_layers} out of {num_layers}", file=sys.stderr)
 

@@ -176,6 +176,15 @@ def test_teacher_attention_capture_can_skip_exact_local_prefix():
     assert attention[0][0].shape == (4, 16)
 
 
+def test_hidden_attention_loss_uses_fp32_for_fp16_scale():
+    student = torch.full((1, 4, 8), 400.0, dtype=torch.float16, requires_grad=True)
+    teacher = torch.full((1, 4, 8), 399.0, dtype=torch.float16)
+    loss = _hidden_distillation_loss(student, teacher)
+    assert torch.isfinite(loss)
+    loss.backward()
+    assert torch.isfinite(student.grad).all()
+
+
 def test_hidden_logit_loss_matches_full_logit_loss():
     torch.manual_seed(7)
     hidden = torch.randn(1, 5, 6, requires_grad=True)
