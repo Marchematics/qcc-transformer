@@ -124,6 +124,17 @@ and fraction, together with a shared `run_id` and HF/vLLM zero-code integration
 flags, so the result can be audited by `gate_99.py` rather than inferred from
 the adapter file size.
 
+The archive read uses the globally normalized separable-softmax equation by
+default: code and decay-scale numerator/denominator masses are combined before
+one final division. This is selectable as `archive_global_normalization=True`
+in Python or `--archive-global-normalization` in the HF retrofit benchmark and
+calibration CLIs. Use `--no-archive-global-normalization` only to reproduce the
+legacy per-code-normalized ablation. Adapters should be recalibrated when this
+equation changes; the switch is a quality experiment, not a claim of benchmark
+parity. Calibration CLIs also expose `--archive-scan-block-size` (default `256`)
+to bound backward temporary memory and `--ce-weight` to include teacher top-1
+cross entropy in the distillation objective.
+
 For layer-wise calibration on long-context checkpoints, use
 `benchmarks/calibrate_hf_layerwise.py`.  It supports multi-chunk held-out
 distillation via `--num-train-chunks`; adding `--cosine-weight 0.2` mixes a
