@@ -38,6 +38,26 @@ def _ensure_remote_code_compat() -> None:
     if not hasattr(transformers_utils, "LossKwargs"):
         transformers_utils.LossKwargs = dict[str, Any]
 
+    # Transformers 5.x removed the legacy-cache conversion helpers while
+    # older Phi remote-code snapshots still call both methods.  The current
+    # DynamicCache constructor accepts the legacy tuples directly, so a small
+    # compatibility shim is sufficient and keeps the model code untouched.
+    try:
+        from transformers.cache_utils import DynamicCache
+    except ImportError:  # pragma: no cover - handled by the caller
+        return
+    if not hasattr(DynamicCache, "from_legacy_cache"):
+        @classmethod
+        def from_legacy_cache(cls, past_key_values):
+            return cls() if past_key_values is None else cls(past_key_values)
+
+        DynamicCache.from_legacy_cache = from_legacy_cache
+    if not hasattr(DynamicCache, "to_legacy_cache"):
+        def to_legacy_cache(self):
+            return tuple((entry[0], entry[1]) for entry in self)
+
+        DynamicCache.to_legacy_cache = to_legacy_cache
+
 
 def load_hf_causal_lm(
     model_id: str,
