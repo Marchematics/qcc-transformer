@@ -811,6 +811,7 @@ def load_retrofit_adapter(
             ".qcc.archive." in key
             and not key.endswith("archive.decay_rates")
             and "query_correction_" not in key
+            and not key.endswith("archive.query_scale_logits")
         )
         or ".qcc.gate." in key
     ]

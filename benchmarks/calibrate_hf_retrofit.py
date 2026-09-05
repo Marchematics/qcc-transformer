@@ -371,6 +371,7 @@ def main() -> None:
             "archive_scan_block_size": args.archive_scan_block_size,
             "archive_global_normalization": args.archive_global_normalization,
             "archive_query_correction_rank": args.archive_query_correction_rank,
+            "archive_query_scale_selector": args.archive_query_correction_rank > 0,
             "patched_layers": replaced,
             "kv_head_policy": args.kv_head_policy,
             "gate_bias_init": args.gate_bias_init,

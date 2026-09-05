@@ -155,6 +155,49 @@ def test_query_conditioned_archive_residual_is_identity_until_calibrated() -> No
     assert not torch.equal(base.read(query), corrected.read(query))
 
 
+def test_query_conditioned_scale_mixture_is_zero_initialized_and_trainable() -> None:
+    torch.manual_seed(18)
+    base = QCCArchive(
+        num_heads=2,
+        head_dim=4,
+        num_codes=4,
+        decay_rates=(0.8, 0.95),
+        window_size=2,
+        use_triton=False,
+        query_correction_rank=0,
+    )
+    calibrated = QCCArchive(
+        num_heads=2,
+        head_dim=4,
+        num_codes=4,
+        decay_rates=(0.8, 0.95),
+        window_size=2,
+        use_triton=False,
+        query_correction_rank=3,
+    )
+    calibrated.load_state_dict(base.state_dict(), strict=False)
+    assert torch.count_nonzero(calibrated.query_correction_u) == 0
+    assert torch.count_nonzero(calibrated.query_correction_v) > 0
+    keys = torch.randn(1, 2, 6, 4)
+    values = torch.randn_like(keys)
+    query = torch.randn(1, 2, 4)
+    with torch.no_grad():
+        for index in range(keys.shape[2]):
+            base.update(keys[:, :, index], values[:, :, index])
+            calibrated.update(keys[:, :, index], values[:, :, index])
+        reference = base.read(query)
+        initial = calibrated.read(query)
+    torch.testing.assert_close(initial, reference)
+
+    calibrated.query_scale_logits.data.normal_(std=0.2)
+    calibrated.query_scale_logits.requires_grad_(True)
+    output = calibrated.read(query)
+    assert not torch.equal(output, reference)
+    output.square().mean().backward()
+    assert calibrated.query_scale_logits.grad is not None
+    assert torch.isfinite(calibrated.query_scale_logits.grad).all()
+
+
 def test_archive_global_normalization_matches_separable_softmax_equation():
     """Code routing must weight raw numerator/denominator mass jointly."""
 

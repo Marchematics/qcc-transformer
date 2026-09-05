@@ -1407,6 +1407,7 @@ def main() -> None:
             "archive_scan_block_size": args.archive_scan_block_size,
             "archive_global_normalization": args.archive_global_normalization,
             "archive_query_correction_rank": args.archive_query_correction_rank,
+            "archive_query_scale_selector": args.archive_query_correction_rank > 0,
             "archive_position_invariant": args.archive_position_invariant,
             "patched_layers": replaced,
             "calibrated_layers": calibrate_layers,
@@ -1459,6 +1460,7 @@ def main() -> None:
         "archive_scan_block_size": args.archive_scan_block_size,
         "archive_global_normalization": args.archive_global_normalization,
         "archive_query_correction_rank": args.archive_query_correction_rank,
+        "archive_query_scale_selector": args.archive_query_correction_rank > 0,
         "train_mean_logit_cosine": float(train_cosine.item()),
         "train_top1_agreement": float(train_agreement.item()),
     }

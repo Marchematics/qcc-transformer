@@ -156,6 +156,13 @@ well below the 1% trainable-parameter budget. Set the rank to `0` for the legacy
 ablation; adapters made before this option remain loadable and retain the zero
 residual initialization.
 
+The same low-rank coordinates also expose a zero-initialized,
+query-conditioned mixture over the archive's decay scales. After calibration,
+each query can choose a short or long memory horizon instead of sharing one
+static scale mixture across all tokens. This adds no context-sized state and is
+identity-preserving until the new adapter weights are trained; older adapters
+load with this selector at zero.
+
 For layer-wise calibration on long-context checkpoints, use
 `benchmarks/calibrate_hf_layerwise.py`.  The default now calibrates `all`
 patched layers; use `--calibrate-layers last-half` or an explicit list only for

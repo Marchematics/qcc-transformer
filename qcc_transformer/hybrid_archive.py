@@ -671,6 +671,7 @@ def load_hybrid_retrofit_adapter(
         if (".qcc.archive." in key
             and not key.endswith("archive.decay_rates")
             and "query_correction_" not in key
+            and not key.endswith("archive.query_scale_logits")
             and not (
                 ".qcc.archive.exact_" in key
                 or ".qcc.archive.exact_bank." in key

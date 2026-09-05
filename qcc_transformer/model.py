@@ -160,14 +160,28 @@ class QCCArchive(nn.Module):
         # and preserves the historical uncalibrated output exactly.
         self.query_correction_rank = int(query_correction_rank)
         if self.query_correction_rank:
+            # Keep one factor random and the output factors at zero.  Starting
+            # both factors at zero would make their bilinear gradients zero,
+            # preventing calibration from learning either correction or the
+            # scale selector below.  This arrangement is still an exact
+            # identity before calibration because ``query_correction_u`` is
+            # zero-initialized.
             self.query_correction_u = nn.Parameter(
-                torch.empty(num_heads, self.query_correction_rank, head_dim)
+                torch.zeros(num_heads, self.query_correction_rank, head_dim)
             )
             self.query_correction_v = nn.Parameter(
-                torch.zeros(num_heads, head_dim, self.query_correction_rank)
+                torch.empty(num_heads, head_dim, self.query_correction_rank)
+            )
+            # Reuse the same low-rank query coordinates to select the archive
+            # time scale.  A static per-code mixture cannot distinguish a
+            # query that needs recent history from one that needs a distant
+            # association; this tiny zero-initialized head lets calibration
+            # learn that choice without changing the recurrent state.
+            self.query_scale_logits = nn.Parameter(
+                torch.zeros(num_heads, self.query_correction_rank, self.num_scales)
             )
             nn.init.normal_(
-                self.query_correction_u,
+                self.query_correction_v,
                 mean=0.0,
                 std=1.0 / math.sqrt(head_dim),
             )
@@ -256,6 +270,52 @@ class QCCArchive(nn.Module):
             if include_landmarks
             else response
         )
+
+    def _query_scale_delta(self, query: Tensor) -> Tensor | None:
+        """Return a query-conditioned additive bias over decay scales.
+
+        The delta is intentionally initialized to zero, so checkpoints created
+        before this feature retain bitwise-equivalent reads until calibration
+        updates the new parameter.  The returned shape is ``[B,H,S]`` for a
+        single query or ``[B,H,T,S]`` for a query block.
+        """
+
+        if not self.query_correction_rank:
+            return None
+        query_v = self.query_correction_v.to(device=query.device, dtype=torch.float32)
+        scale = self.query_scale_logits.to(device=query.device, dtype=torch.float32)
+        query_f = query.float()
+        if query.ndim == 3:
+            latent = torch.einsum("bhd,hdr->bhr", query_f, query_v)
+            return torch.einsum("bhr,hrs->bhs", latent, scale)
+        if query.ndim == 4:
+            latent = torch.einsum("bhtd,hdr->bhtr", query_f, query_v)
+            return torch.einsum("bhtr,hrs->bhts", latent, scale)
+        raise ValueError("query must have rank 3 or 4")
+
+    def _scale_mix_logits(self, query: Tensor) -> Tensor:
+        """Add the optional query-dependent bias to the scale mixture.
+
+        A static mixture has shape ``[H,M,S]``.  When the calibrated scale
+        head is present, the returned tensor is expanded only as a view to
+        ``[B,H,M,S]`` or ``[B,H,T,M,S]``; no context-sized parameter is stored.
+        """
+
+        base = self.mix_logits.to(device=query.device, dtype=torch.float32)
+        delta = self._query_scale_delta(query)
+        if delta is None:
+            if query.ndim == 3:
+                return base.unsqueeze(0).expand(query.shape[0], -1, -1, -1)
+            if query.ndim == 4:
+                return base.unsqueeze(0).unsqueeze(2).expand(
+                    query.shape[0], -1, query.shape[2], -1, -1
+                )
+            raise ValueError("query must have rank 3 or 4")
+        if query.ndim == 3:
+            return base.unsqueeze(0) + delta.unsqueeze(2)
+        if query.ndim == 4:
+            return base.unsqueeze(0).unsqueeze(2) + delta.unsqueeze(3)
+        raise ValueError("query must have rank 3 or 4")
 
     def reset_state(
         self,
@@ -1003,11 +1063,10 @@ class QCCArchive(nn.Module):
                     / math.sqrt(self.head_dim)
                 ).clamp(min=-20.0, max=10.0)
             )
-            mix = F.softmax(
-                self.mix_logits.to(device=query.device, dtype=numerator.dtype), dim=-1
-            )
-            weighted_num = torch.einsum("hmj,bhmjd->bhmd", mix, numerator)
-            weighted_den = torch.einsum("hmj,bhmj->bhm", mix, denominator)
+            mix_logits = self._scale_mix_logits(query)
+            mix = F.softmax(mix_logits, dim=-1).to(numerator.dtype)
+            weighted_num = torch.einsum("bhms,bhmsd->bhmd", mix, numerator)
+            weighted_den = torch.einsum("bhms,bhms->bhm", mix, denominator)
             total_num = (feature.unsqueeze(-1) * weighted_num).sum(dim=2)
             total_den = (feature * weighted_den).sum(dim=2).clamp_min(1e-8)
             response = (total_num / total_den.unsqueeze(-1)).to(query.dtype)
@@ -1017,11 +1076,10 @@ class QCCArchive(nn.Module):
         if self.global_normalization and (
             active is None or active >= self.num_codes or torch.is_grad_enabled()
         ):
-            mix = F.softmax(
-                self.mix_logits.to(device=query.device, dtype=numerator.dtype), dim=-1
-            )
-            weighted_num = torch.einsum("hmj,bhmjd->bhmd", mix, numerator)
-            weighted_den = torch.einsum("hmj,bhmj->bhm", mix, denominator)
+            mix_logits = self._scale_mix_logits(query)
+            mix = F.softmax(mix_logits, dim=-1).to(numerator.dtype)
+            weighted_num = torch.einsum("bhms,bhmsd->bhmd", mix, numerator)
+            weighted_den = torch.einsum("bhms,bhms->bhm", mix, denominator)
             routing = torch.exp(routing_logits.clamp(min=-20.0, max=10.0))
             total_num = (routing.unsqueeze(-1) * weighted_num).sum(dim=2)
             total_den = (routing * weighted_den).sum(dim=2).clamp_min(1e-8)
@@ -1032,10 +1090,9 @@ class QCCArchive(nn.Module):
         if active is None or active >= self.num_codes or torch.is_grad_enabled():
             denom = denominator.clamp_min(1e-8)
             response = numerator / denom.unsqueeze(-1)
-            mix = F.softmax(
-                self.mix_logits.to(device=query.device, dtype=response.dtype), dim=-1
-            )
-            response = torch.einsum("hmj,bhmjd->bhmd", mix, response)
+            mix_logits = self._scale_mix_logits(query)
+            mix = F.softmax(mix_logits, dim=-1).to(response.dtype)
+            response = torch.einsum("bhms,bhmsd->bhmd", mix, response)
             routing = F.softmax(routing_logits, dim=-1).to(response.dtype)
             response = torch.einsum("bhm,bhmd->bhd", routing, response).to(query.dtype)
             return self._finish_read(
@@ -1049,9 +1106,12 @@ class QCCArchive(nn.Module):
         )
         selected_den = denominator.gather(2, index_scales)
         selected = selected_num / selected_den.clamp_min(1e-8).unsqueeze(-1)
-        mix_logits = self.mix_logits.to(device=query.device).unsqueeze(0).expand(query.shape[0], -1, -1, -1).gather(
-            2, index_scales
-        )
+        mix_logits = self.mix_logits.to(device=query.device, dtype=torch.float32).unsqueeze(0).expand(
+            query.shape[0], -1, -1, -1
+        ).gather(2, index_scales)
+        scale_delta = self._query_scale_delta(query)
+        if scale_delta is not None:
+            mix_logits = mix_logits + scale_delta.unsqueeze(2)
         mix = F.softmax(mix_logits, dim=-1).to(selected.dtype)
         selected = (mix.unsqueeze(-1) * selected).sum(dim=3)
         routing = F.softmax(values, dim=-1).to(selected.dtype)
@@ -1118,9 +1178,7 @@ class QCCArchive(nn.Module):
         numerator = numerator * decay.unsqueeze(-1)
         denominator = denominator * decay
         response = numerator / denominator.clamp_min(1e-8).unsqueeze(-1)
-        mix_logits = self.mix_logits.to(device=query.device).unsqueeze(0).expand(query.shape[0], -1, -1, -1).gather(
-            2, index_scales
-        )
+        mix_logits = self._scale_mix_logits(query).gather(2, index_scales)
         mix = F.softmax(mix_logits, dim=-1).to(response.dtype)
         if self.global_normalization:
             weighted_num = (mix.unsqueeze(-1) * numerator).sum(dim=3)
@@ -1161,11 +1219,10 @@ class QCCArchive(nn.Module):
                     routing_logits - 0.5 * query_norm_sq / math.sqrt(self.head_dim)
                 ).clamp(min=-20.0, max=10.0)
             )
-            mix = F.softmax(
-                self.mix_logits.to(device=query.device, dtype=numerator.dtype), dim=-1
-            )
-            weighted_num = torch.einsum("hmj,bhemjd->bhemd", mix, numerator)
-            weighted_den = torch.einsum("hmj,bhemj->bhem", mix, denominator)
+            mix_logits = self._scale_mix_logits(query)
+            mix = F.softmax(mix_logits, dim=-1).to(numerator.dtype)
+            weighted_num = torch.einsum("bhtms,bhtmsd->bhtmd", mix, numerator)
+            weighted_den = torch.einsum("bhtms,bhtms->bhtm", mix, denominator)
             total_num = (feature.unsqueeze(-1) * weighted_num).sum(dim=3)
             total_den = (feature * weighted_den).sum(dim=3).clamp_min(1e-8)
             response = (total_num / total_den.unsqueeze(-1)).to(query.dtype)
@@ -1175,11 +1232,10 @@ class QCCArchive(nn.Module):
         if self.global_normalization and (
             active is None or active >= self.num_codes or torch.is_grad_enabled()
         ):
-            mix = F.softmax(
-                self.mix_logits.to(device=query.device, dtype=numerator.dtype), dim=-1
-            )
-            weighted_num = torch.einsum("hmj,bhemjd->bhemd", mix, numerator)
-            weighted_den = torch.einsum("hmj,bhemj->bhem", mix, denominator)
+            mix_logits = self._scale_mix_logits(query)
+            mix = F.softmax(mix_logits, dim=-1).to(numerator.dtype)
+            weighted_num = torch.einsum("bhtms,bhtmsd->bhtmd", mix, numerator)
+            weighted_den = torch.einsum("bhtms,bhtms->bhtm", mix, denominator)
             routing = torch.exp(routing_logits.clamp(min=-20.0, max=10.0))
             total_num = (routing.unsqueeze(-1) * weighted_num).sum(dim=3)
             total_den = (routing * weighted_den).sum(dim=3).clamp_min(1e-8)
@@ -1190,10 +1246,9 @@ class QCCArchive(nn.Module):
         if active is None or active >= self.num_codes:
             denom = denominator.clamp_min(1e-8)
             response = numerator / denom.unsqueeze(-1)
-            mix = F.softmax(
-                self.mix_logits.to(device=query.device, dtype=response.dtype), dim=-1
-            )
-            response = torch.einsum("hmj,bhemjd->bhemd", mix, response)
+            mix_logits = self._scale_mix_logits(query)
+            mix = F.softmax(mix_logits, dim=-1).to(response.dtype)
+            response = torch.einsum("bhtms,bhtmsd->bhtmd", mix, response)
             routing = F.softmax(routing_logits, dim=-1).to(response.dtype)
             response = torch.einsum("bhem,bhemd->bhed", routing, response).to(query.dtype)
             return self._finish_read(
@@ -1207,9 +1262,12 @@ class QCCArchive(nn.Module):
         )
         selected_den = denominator.gather(3, index_scales)
         selected = selected_num / selected_den.clamp_min(1e-8).unsqueeze(-1)
-        mix_logits = self.mix_logits.to(device=query.device).unsqueeze(0).unsqueeze(2).expand(
+        mix_logits = self.mix_logits.to(device=query.device, dtype=torch.float32).unsqueeze(0).unsqueeze(2).expand(
             query.shape[0], -1, query.shape[2], -1, -1
         ).gather(3, index_scales)
+        scale_delta = self._query_scale_delta(query)
+        if scale_delta is not None:
+            mix_logits = mix_logits + scale_delta.unsqueeze(3)
         mix = F.softmax(mix_logits, dim=-1).to(selected.dtype)
         selected = (mix.unsqueeze(-1) * selected).sum(dim=4)
         routing = F.softmax(values, dim=-1).to(selected.dtype)
