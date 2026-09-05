@@ -162,6 +162,7 @@ teacher 特征现在通过未 patch attention 模块的 forward-pre-hook 直接�
 - 分层校准新增显式 `--cpu-offload-activations`：用 PyTorch `save_on_cpu` 将 autograd 保存张量移到主存，目标是在小显存卡上重新尝试全层校准；默认关闭，尚未形成新的真实质量结果。
 - 2026-09-05 质量优先校准：默认 `--distill-long-range-only` 只对超出 exact local window 的位置计算蒸馏损失，避免已精确匹配的前缀 token 稀释 archive 梯度；`--no-distill-long-range-only` 保留旧的全序列消融。`--code-init` 默认改为确定性 cosine k-means，`key-sample` 与 `random` 仍可复现旧初始化。
 - 2026-09-05 质量修复：HF quality-first hybrid 预填充现在先构造整段请求的 rotary query side-channel，再按普通 bounded chunks 执行 archive/local attention；因此 early needle 的 exact-tier salience 能看到后续 query，同时不强制保留 full-sequence archive 临时张量。`benchmark_hf_ruler.py` 新增 `--quality-first`，可直接用 matched Full-KV/QCC 跑官方 RULER split。
+- 2026-09-05 T4 复核：真实 `Qwen/Qwen2.5-0.5B-Instruct`、470 tokens、quality-first exact tier（32 sets x 8 ways）、显式 128-token chunks 的 matched HF logit cosine/top-1 为 `0.83514/0.95745`；同配置旧的块内 salience 路径为 `0.78942/0.95106`。这是短上下文实现诊断，未校准、非官方 RULER/LongBench/PG-19，不能外推到长上下文质量。
 
 ### 本地回归
 
