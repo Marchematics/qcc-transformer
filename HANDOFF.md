@@ -166,6 +166,8 @@ teacher 特征现在通过未 patch attention 模块的 forward-pre-hook 直接�
 - 2026-09-05 Colab T4 复核（同一真实 `Qwen/Qwen2.5-0.5B-Instruct`、470 tokens、显式 128-token prefill chunks）：regular `window=128` 为 cosine/top-1 `0.51829/0.37447`，quality-first exact tier（128 sets x 4 ways）为 `0.58413/0.37021`；将 exact local window 提高到 `512` 后 regular 与 hybrid 均为 `0.99981/0.98511`，因为该输入没有发生历史淘汰。这验证了短上下文质量失败主要由窗口不足造成，但不代表 128K/1M 或官方任务质量。
 - 同轮 Qwen quality-first exact read 对照：在相同 470-token 输入和 `window=128` 下，hard read 为 cosine/top-1 `0.56581/0.36170`；临时切换 soft read 为 `0.60030/0.34894`，降低 confidence threshold 后为 `0.58329/0.37021`。cosine 与 top-1 没有一致改善，因此保留 hard-read 默认，不把该短样本当作质量结论。
 - 2026-09-05 质量评测默认值：`benchmark_hf_retrofit.py` 与 `benchmark_hf_ruler.py` 默认 `--window-size` 调整为 `1024`，性能对照仍可显式传 `128`；quality-first 帮助文本更正为 hard nearest reads。更大窗口只改变有界 exact local state，不能替代长上下文 RULER/LongBench/PG-19 结果。
+- 2026-09-05 Qwen2.5-1.5B NF4 质量复核暴露并修复两项数值问题：量化 Q/K 的 fp16 局部点积会溢出为 NaN，现改为 fp32 logits/softmax 累加；校准 cosine/MSE 的词表归约也改为 fp32。短文本不足以越过 `window_size` 时，校准 CLI 现在直接拒绝，避免生成无 archive 梯度的假 adapter。完整本地回归为 `89 passed, 7 skipped`，修复已推送提交 `67ffc35`。
+- 同轮真实 `Qwen/Qwen2.5-1.5B-Instruct`、T4、NF4、`window=128/codes=64` 的 5-step README 校准在训练段为 cosine `0.93330`、top-1 `0.65625`；独立 5 条 held-out（共 `4033` tokens）regular QCC 为 cosine `0.79167`、top-1 `0.47688`。quality-first exact shadow 单条 held-out（`588` tokens）在 128-slot 和 512-slot 配置分别为 `0.89995/0.64626` 与 `0.89966/0.64456`；仍未达到 `0.99` fidelity，更不是 RULER/LongBench/PG-19 证据。远端临时会话随后丢失，adapter/log 未作为本地证据归档。
 
 ### 本地回归
 
