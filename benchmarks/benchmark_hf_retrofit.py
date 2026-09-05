@@ -36,10 +36,10 @@ def main() -> None:
         "--jsonl", type=Path, default=None,
         help="held-out JSONL with a 'text'/'prompt' field; each record is scored independently",
     )
-    # This runner is primarily a matched quality diagnostic. Keep the
-    # performance-oriented 128-token setting explicit instead of making it the
-    # default source of avoidable long-range fidelity failures.
-    parser.add_argument("--window-size", type=int, default=1024)
+    # This runner is primarily a matched quality diagnostic. Keep a larger
+    # bounded local window by default; performance experiments should pass
+    # their intended smaller window explicitly.
+    parser.add_argument("--window-size", type=int, default=4096)
     parser.add_argument("--num-codes", type=int, default=64)
     parser.add_argument(
         "--archive-kernel-features",

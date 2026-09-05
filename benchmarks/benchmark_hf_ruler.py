@@ -130,9 +130,9 @@ def main() -> None:
     )
     parser.add_argument("--load-in-4bit", action="store_true", help="load the real checkpoint through bitsandbytes NF4")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
-    # RULER is a quality gate, so keep a larger exact local window by default.
-    # Performance experiments should pass their intended window explicitly.
-    parser.add_argument("--window-size", type=int, default=1024)
+    # RULER is a quality evaluation, so keep a larger exact local window by
+    # default. Performance experiments should pass their intended window.
+    parser.add_argument("--window-size", type=int, default=4096)
     parser.add_argument("--num-codes", type=int, default=64)
     parser.add_argument("--adapter", type=Path, default=None)
     parser.add_argument("--exact-num-sets", type=int, default=128)

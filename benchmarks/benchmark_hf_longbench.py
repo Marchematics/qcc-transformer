@@ -72,7 +72,8 @@ def main() -> None:
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--dtype", choices=("float16", "bfloat16", "float32"), default="bfloat16")
     parser.add_argument("--load-in-4bit", action="store_true", help="load the real checkpoint through bitsandbytes NF4")
-    parser.add_argument("--window-size", type=int, default=128)
+    # Quality-oriented default; pass 128 explicitly for the speed ablation.
+    parser.add_argument("--window-size", type=int, default=4096)
     parser.add_argument("--num-codes", type=int, default=64)
     parser.add_argument("--exact-num-sets", type=int, default=128)
     parser.add_argument("--exact-ways", type=int, default=4)
