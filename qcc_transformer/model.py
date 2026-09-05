@@ -1493,10 +1493,37 @@ class QCCSelfAttention(nn.Module):
         raw_v_proj = getattr(self.v_proj, "base", self.v_proj)
         expanded_kv = raw_k_proj is not self.k_proj or raw_v_proj is not self.v_proj
         projection_sources = (self.q_proj, raw_k_proj, raw_v_proj, self.gate)
-        can_fuse = all(
-            isinstance(projection, nn.Linear)
-            for projection in projection_sources
-        )
+
+        def supports_fused_linear(projection: nn.Module) -> bool:
+            """Return whether a projection exposes a safe dense weight view.
+
+            bitsandbytes ``Linear4bit`` subclasses ``nn.Linear`` but its
+            ``weight`` is packed metadata rather than a ``[out, in]`` matrix.
+            Concatenating it with the other projections corrupts the fused GEMM
+            shape and defeats the quantized kernel.  Quantized modules must own
+            their individual forward calls instead.
+            """
+
+            if not isinstance(projection, nn.Linear):
+                return False
+            projection_name = projection.__class__.__name__.lower()
+            if "4bit" in projection_name or "8bit" in projection_name:
+                return False
+            if getattr(projection, "is_quantized", False) or hasattr(
+                projection, "quant_state"
+            ):
+                return False
+            weight = getattr(projection, "weight", None)
+            weight_name = type(weight).__name__.lower()
+            weight_module = type(weight).__module__.lower()
+            if "4bit" in weight_name or "8bit" in weight_name:
+                return False
+            if "bitsandbytes" in weight_module or hasattr(weight, "quant_state"):
+                return False
+            module_name = projection.__class__.__module__.lower()
+            return "bitsandbytes" not in module_name
+
+        can_fuse = all(supports_fused_linear(projection) for projection in projection_sources)
         if not can_fuse:
             q = self.q_proj(hidden)
             k = self.k_proj(hidden)
@@ -1610,14 +1637,21 @@ class QCCSelfAttention(nn.Module):
         positions = old_length + torch.arange(length, device=query.device)
         key_windows = key_windows[:, :, positions]
         value_windows = value_windows[:, :, positions]
-        logits = torch.einsum("bhtd,bhtwd->bhtw", query, key_windows)
+        # Quantized HF projections can produce large fp16 Q/K activations.
+        # Accumulate the dot product in fp32 so a finite attention score does
+        # not overflow before softmax (the fused SDPA path already does this
+        # internally on supported accelerators).
+        logits = torch.einsum(
+            "bhtd,bhtwd->bhtw", query.float(), key_windows.float()
+        )
         logits = logits / math.sqrt(self.head_dim)
         valid = torch.arange(window, device=query.device)[None, :] >= (
             window - 1 - positions[:, None]
         )
         logits = logits.masked_fill(~valid[None, None], torch.finfo(logits.dtype).min)
+        probabilities = F.softmax(logits, dim=-1).to(value_windows.dtype)
         return torch.einsum(
-            "bhtw,bhtwd->bhtd", F.softmax(logits, dim=-1), value_windows
+            "bhtw,bhtwd->bhtd", probabilities, value_windows
         )
 
     def _local_sdpa_attention(
@@ -2770,7 +2804,9 @@ class QCCSelfAttention(nn.Module):
             v_pad = F.pad(v.transpose(-1, -2), (window - 1, 0))
             k_windows = k_pad.unfold(-1, window, 1).permute(0, 1, 3, 4, 2)
             v_windows = v_pad.unfold(-1, window, 1).permute(0, 1, 3, 4, 2)
-            local_logits = torch.einsum("bhtd,bhtwd->bhtw", q, k_windows)
+            local_logits = torch.einsum(
+                "bhtd,bhtwd->bhtw", q.float(), k_windows.float()
+            )
             local_logits = local_logits / math.sqrt(self.head_dim)
             valid = torch.arange(window, device=hidden.device)[None, :] >= (
                 window - 1 - torch.arange(length, device=hidden.device)[:, None]
@@ -2778,7 +2814,7 @@ class QCCSelfAttention(nn.Module):
             local_logits = local_logits.masked_fill(
                 ~valid[None, None], torch.finfo(local_logits.dtype).min
             )
-            local_prob = F.softmax(local_logits, dim=-1)
+            local_prob = F.softmax(local_logits, dim=-1).to(v_windows.dtype)
             local_out = torch.einsum("bhtw,bhtwd->bhtd", local_prob, v_windows)
 
         if self.use_archive:
@@ -2890,8 +2926,10 @@ class QCCSelfAttention(nn.Module):
 
             lk = torch.stack(local_keys, dim=2)
             lv = torch.stack(local_values, dim=2)
-            local_logits = torch.einsum("bhd,bhld->bhl", q[:, :, t], lk) * scale
-            local_prob = F.softmax(local_logits, dim=-1)
+            local_logits = torch.einsum(
+                "bhd,bhld->bhl", q[:, :, t].float(), lk.float()
+            ) * scale
+            local_prob = F.softmax(local_logits, dim=-1).to(lv.dtype)
             local_out = torch.einsum("bhl,bhld->bhd", local_prob, lv)
             if self.use_archive and t >= self.window_size:
                 archive_out = self.archive.read(archive_q_source[:, :, t])

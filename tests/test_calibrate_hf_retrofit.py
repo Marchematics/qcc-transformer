@@ -31,3 +31,13 @@ def test_teacher_argmax_cross_entropy_rejects_shape_mismatch():
         _MODULE._teacher_argmax_cross_entropy(
             torch.zeros(1, 2, 3), torch.zeros(1, 3, 3)
         )
+
+
+def test_mean_cosine_reduces_large_fp16_vocab_in_fp32():
+    import torch
+
+    student = torch.full((1, 2, 4096), 100.0, dtype=torch.float16)
+    teacher = student.float().cpu()
+    cosine = _MODULE._mean_cosine_from_cpu(student, teacher, chunk_size=512)
+    assert torch.isfinite(cosine)
+    assert cosine.item() == pytest.approx(1.0)

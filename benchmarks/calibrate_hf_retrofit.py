@@ -31,13 +31,15 @@ def _chunked_mse(student: torch.Tensor, teacher_cpu: torch.Tensor, *, chunk_size
     """
     if student.shape != teacher_cpu.shape:
         raise ValueError(f"student/teacher shape mismatch: {student.shape} vs {teacher_cpu.shape}")
-    total = student.new_zeros(())
+    # Accumulate over the full vocabulary in fp32; fp16 reduction can
+    # overflow even when each individual logit error is finite.
+    total = torch.zeros((), device=student.device, dtype=torch.float32)
     vocab = student.shape[-1]
     for start in range(0, vocab, chunk_size):
         end = min(start + chunk_size, vocab)
         target = teacher_cpu[..., start:end].to(device=student.device, dtype=student.dtype)
         total = total + torch.nn.functional.mse_loss(
-            student[..., start:end], target, reduction="sum"
+            student[..., start:end].float(), target.float(), reduction="sum"
         )
     return total / student.numel()
 
@@ -46,13 +48,17 @@ def _mean_cosine_from_cpu(student: torch.Tensor, teacher_cpu: torch.Tensor, *, c
     """Mean per-token cosine without copying the full teacher to GPU."""
     if student.shape != teacher_cpu.shape:
         raise ValueError(f"student/teacher shape mismatch: {student.shape} vs {teacher_cpu.shape}")
-    dot = student.new_zeros((student.shape[0], student.shape[1]))
-    student_sq = student.new_zeros(dot.shape)
-    teacher_sq = student.new_zeros(dot.shape)
+    # The vocabulary reduction is much larger than fp16's finite range.
+    # Keep all three accumulators in fp32 before the final token mean.
+    dot = torch.zeros(
+        (student.shape[0], student.shape[1]), device=student.device, dtype=torch.float32
+    )
+    student_sq = torch.zeros_like(dot)
+    teacher_sq = torch.zeros_like(dot)
     for start in range(0, student.shape[-1], chunk_size):
         end = min(start + chunk_size, student.shape[-1])
-        s = student[..., start:end]
-        t = teacher_cpu[..., start:end].to(device=student.device, dtype=student.dtype)
+        s = student[..., start:end].float()
+        t = teacher_cpu[..., start:end].to(device=student.device, dtype=torch.float32)
         dot = dot + (s * t).sum(dim=-1)
         student_sq = student_sq + (s * s).sum(dim=-1)
         teacher_sq = teacher_sq + (t * t).sum(dim=-1)
@@ -215,6 +221,12 @@ def main() -> None:
         truncation=True,
         max_length=args.max_tokens,
     )
+    token_count = int(encoded["input_ids"].shape[-1])
+    if token_count <= args.window_size:
+        raise ValueError(
+            "text-file must tokenize to more than window-size so calibration "
+            "actually exercises the QCC archive"
+        )
     encoded = {key: value.to(device) for key, value in encoded.items()}
     # Materialize the teacher only long enough to capture logits, then release
     # its 1--7B backbone before loading the trainable retrofit copy.  Keeping

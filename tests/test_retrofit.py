@@ -161,6 +161,17 @@ def test_fused_qkv_projection_uses_one_source_and_repeats_gqa():
     assert torch.equal(k.view(1, 3, 2, 8)[:, :, 0], k.view(1, 3, 2, 8)[:, :, 1])
 
 
+def test_quantized_projection_uses_native_forward_instead_of_weight_concat():
+    model = _Model()
+    patch_hf_model(model, window_size=4, num_codes=4, use_triton=False)
+    # bitsandbytes Linear4bit exposes this marker while still subclassing
+    # nn.Linear. The retrofit must avoid treating its packed weight as dense.
+    model.attn.qcc.q_proj.quant_state = object()
+    q, k, v, gate = model.attn.qcc._project_qkv_gate(torch.randn(1, 3, 16))
+    assert q.shape == k.shape == v.shape == (1, 3, 16)
+    assert gate.shape == (1, 3, 4)
+
+
 def test_patch_hf_attention_preserves_prefill_and_decode_shapes():
     model = _Model()
     assert patch_hf_model(model, window_size=4, num_codes=4, use_triton=False) == ["attn"]

@@ -15,6 +15,25 @@ from qcc_transformer.triton_kernels import (
 )
 
 
+def test_local_attention_promotes_large_qk_logits_before_softmax() -> None:
+    """Large projected activations must not turn the fp16 softmax into NaN."""
+
+    torch.manual_seed(122)
+    attention = QCCSelfAttention(
+        d_model=16,
+        num_heads=4,
+        window_size=8,
+        num_codes=2,
+        use_triton=False,
+    )
+    with torch.no_grad():
+        attention.q_proj.weight.mul_(100.0)
+        attention.k_proj.weight.mul_(100.0)
+    hidden = torch.randn(1, 4, 16)
+    output = attention(hidden, reset_state=True)
+    assert torch.isfinite(output).all()
+
+
 @pytest.mark.skipif(not TRITON_AVAILABLE or not torch.cuda.is_available(), reason="Triton CUDA unavailable")
 def test_triton_local_chunk_matches_unfolded_reference() -> None:
     torch.manual_seed(123)
