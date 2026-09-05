@@ -163,6 +163,12 @@ static scale mixture across all tokens. This adds no context-sized state and is
 identity-preserving until the new adapter weights are trained; older adapters
 load with this selector at zero.
 
+The regular single-text calibrator now also initializes archive codebooks from
+the teacher's projected keys (`--code-init kmeans`, default). This removes the
+avoidable random-address warm-up on real checkpoints; use `--code-init random`
+only for an explicit ablation. The staged key sample is bounded by
+`--code-init-tokens` and is discarded before student calibration.
+
 For layer-wise calibration on long-context checkpoints, use
 `benchmarks/calibrate_hf_layerwise.py`.  The default now calibrates `all`
 patched layers; use `--calibrate-layers last-half` or an explicit list only for

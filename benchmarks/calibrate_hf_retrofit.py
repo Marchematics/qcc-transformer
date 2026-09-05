@@ -19,6 +19,10 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from qcc_transformer import patch_hf_model, reset_hf_qcc_cache, save_retrofit_adapter
 from qcc_transformer.hf_loading import load_hf_causal_lm, model_input_device
+from benchmarks.calibrate_hf_layerwise import (
+    _initialize_codebooks_from_teacher,
+    _teacher_logits_and_inputs,
+)
 
 
 def _chunked_mse(student: torch.Tensor, teacher_cpu: torch.Tensor, *, chunk_size: int = 8192) -> torch.Tensor:
@@ -130,6 +134,18 @@ def main() -> None:
     parser.add_argument("--window-size", type=int, default=128)
     parser.add_argument("--num-codes", type=int, default=64)
     parser.add_argument(
+        "--code-init",
+        choices=("kmeans", "key-sample", "random"),
+        default="kmeans",
+        help="initialize archive codes from teacher keys before optimization",
+    )
+    parser.add_argument(
+        "--code-init-tokens",
+        type=int,
+        default=256,
+        help="bounded teacher hidden samples used for code initialization",
+    )
+    parser.add_argument(
         "--archive-global-normalization",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -183,6 +199,8 @@ def main() -> None:
         raise ValueError("steps, lr, and max-tokens must be positive")
     if args.archive_scan_block_size <= 0:
         raise ValueError("archive-scan-block-size must be positive")
+    if args.code_init_tokens <= 0:
+        raise ValueError("code-init-tokens must be positive")
     if args.archive_query_correction_rank < 0:
         raise ValueError("archive-query-correction-rank must be non-negative")
     if args.max_tokens <= args.window_size:
@@ -242,7 +260,13 @@ def main() -> None:
     model_device = model_input_device(baseline, device)
     encoded = {key: value.to(model_device) for key, value in encoded.items()}
     with torch.no_grad():
-        teacher = baseline(**encoded, use_cache=False).logits.float().cpu()
+        teachers, teacher_hidden, _ = _teacher_logits_and_inputs(
+            baseline,
+            [encoded],
+            max_capture_tokens=args.code_init_tokens,
+            selected_layers=set(),
+        )
+        teacher = teachers[0]
     del baseline
     if device.type == "cuda":
         torch.cuda.empty_cache()
@@ -266,6 +290,9 @@ def main() -> None:
         archive_query_correction_rank=args.archive_query_correction_rank,
         kv_head_policy=args.kv_head_policy,
         gate_bias_init=args.gate_bias_init,
+    )
+    _initialize_codebooks_from_teacher(
+        patched, teacher_hidden, strategy=args.code_init
     )
     # The backbone may be fp16/bf16 on a single GPU, but AdamW should not
     # update a trainable gate in half precision.  Keep the tiny adapter gate
@@ -372,6 +399,8 @@ def main() -> None:
             "archive_global_normalization": args.archive_global_normalization,
             "archive_query_correction_rank": args.archive_query_correction_rank,
             "archive_query_scale_selector": args.archive_query_correction_rank > 0,
+            "code_init": args.code_init,
+            "code_init_tokens": args.code_init_tokens,
             "patched_layers": replaced,
             "kv_head_policy": args.kv_head_policy,
             "gate_bias_init": args.gate_bias_init,
@@ -398,6 +427,8 @@ def main() -> None:
                 "kl_weight": args.kl_weight,
                 "ce_weight": args.ce_weight,
                 "kl_temperature": args.kl_temperature,
+                "code_init": args.code_init,
+                "code_init_tokens": args.code_init_tokens,
                 "final_mse": last_loss,
                 "mean_logit_cosine": float(cosine.item()),
                 "top1_agreement": float(agreement.item()),

@@ -131,6 +131,22 @@ def test_patch_hf_archive_scan_block_size_is_forwarded():
     assert model.attn.qcc.archive.scan_block_size == 7
 
 
+def test_patch_hf_quality_selector_uses_query_correction_rank():
+    model = _Model()
+    patch_hf_model(
+        model,
+        window_size=4,
+        num_codes=4,
+        archive_global_normalization=True,
+        archive_position_invariant=True,
+        archive_query_correction_rank=8,
+        use_triton=False,
+    )
+    archive = model.attn.qcc.archive
+    assert archive.query_correction_rank == 8
+    assert archive.query_scale_logits.shape == (4, 8, archive.num_scales)
+
+
 def test_archive_norm_gating_suppresses_scale_mismatch():
     model = _Model()
     patch_hf_model(model, window_size=4, num_codes=4, use_triton=False, archive_norm_gating=True)
