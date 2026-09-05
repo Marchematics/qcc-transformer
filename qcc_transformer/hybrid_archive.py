@@ -200,6 +200,11 @@ class HybridQCCArchive(QCCArchive):
         self.exact_confidence_temperature = float(exact_confidence_temperature)
         self.quality_first = bool(quality_first)
         self.exact_hard_read = exact_hard_read
+        # Per-read confidence gate consumed by QCCSelfAttention.  Keeping it
+        # separate from the blended response lets quality-first mode promote
+        # a true exact hit without changing the conservative recurrent/local
+        # mix for unrelated queries.
+        self._last_exact_gate: Tensor | None = None
         # The exact tier admits a whole bounded tile in quality-first mode;
         # matching the tile to its capacity lets the global score table see
         # every candidate while retaining only the strongest fixed-capacity
@@ -268,6 +273,7 @@ class HybridQCCArchive(QCCArchive):
         dtype: torch.dtype | None = None,
     ) -> None:
         super().reset_state(batch_size, device=device, dtype=dtype)
+        self._last_exact_gate = None
         if hasattr(self, "exact_bank"):
             self.exact_bank.reset_state(
                 batch_size,
@@ -318,6 +324,7 @@ class HybridQCCArchive(QCCArchive):
         confidence_gate = torch.where(
             valid, confidence_gate, torch.zeros_like(confidence_gate)
         ).to(recurrent.dtype)
+        self._last_exact_gate = confidence_gate.detach()
         return (
             (1.0 - confidence_gate.unsqueeze(-1)) * recurrent
             + confidence_gate.unsqueeze(-1) * exact.to(recurrent.dtype)

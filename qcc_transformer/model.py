@@ -2200,6 +2200,18 @@ class QCCSelfAttention(nn.Module):
                 if self.archive.prefix_landmark
                 else torch.sigmoid(gate_proj[:, 0]).unsqueeze(-1)
             )
+            # A quality-first hybrid archive exposes the confidence of its
+            # exact nearest-neighbour read.  Promote only a high-confidence
+            # exact hit to the remote path; unrelated queries retain the
+            # learned conservative local/archive gate.  This avoids diluting
+            # a recovered needle while preserving the regular QCC behavior.
+            exact_gate = getattr(self.archive, "_last_exact_gate", None)
+            if (
+                exact_gate is not None
+                and bool(getattr(self.archive, "quality_first", False))
+                and exact_gate.shape == gate.shape[:-1]
+            ):
+                gate = gate * (1.0 - exact_gate.unsqueeze(-1).to(gate.dtype))
             head_out = self._mix_local_archive(local_out, archive_out, gate)
         else:
             head_out = local_out
@@ -2396,6 +2408,13 @@ class QCCSelfAttention(nn.Module):
                 if self.archive.prefix_landmark
                 else torch.sigmoid(gate_proj).transpose(1, 2).unsqueeze(-1)
             )
+            exact_gate = getattr(self.archive, "_last_exact_gate", None)
+            if (
+                exact_gate is not None
+                and bool(getattr(self.archive, "quality_first", False))
+                and exact_gate.shape == gate.shape[:-1]
+            ):
+                gate = gate * (1.0 - exact_gate.unsqueeze(-1).to(gate.dtype))
             mixed_out = self._mix_local_archive(local_out, archive_out, gate)
             active = (
                 self._seen_tokens + torch.arange(length, device=hidden.device)

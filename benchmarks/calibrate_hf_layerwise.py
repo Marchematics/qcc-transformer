@@ -142,6 +142,40 @@ def quality_gate_passed(cosine: float, top1: float, threshold: float) -> bool:
     return cosine >= threshold and top1 >= threshold
 
 
+@torch.no_grad()
+def _evaluate_model_batches(
+    model,
+    batches: list[dict[str, torch.Tensor]],
+    teachers: list[torch.Tensor],
+) -> tuple[float, float]:
+    """Evaluate independent validation requests without leaking QCC state."""
+
+    if len(batches) != len(teachers):
+        raise ValueError("validation batches and teacher targets must have equal length")
+    was_training = model.training
+    model.eval()
+    cosines: list[torch.Tensor] = []
+    agreements: list[torch.Tensor] = []
+    try:
+        for batch, teacher in zip(batches, teachers):
+            reset_hf_qcc_cache(
+                model, batch_size=int(batch["input_ids"].shape[0])
+            )
+            student = model(**batch, use_cache=False).logits
+            cosines.append(_mean_cosine_from_cpu(student, teacher))
+            agreements.append(
+                (student.argmax(-1).cpu() == teacher.argmax(-1)).float().mean()
+            )
+    finally:
+        if was_training:
+            model.train()
+    if not cosines:
+        raise ValueError("at least one validation batch is required")
+    return float(torch.stack(cosines).mean().item()), float(
+        torch.stack(agreements).mean().item()
+    )
+
+
 def _distillation_loss(
     student: torch.Tensor,
     teacher_cpu: torch.Tensor,
@@ -731,6 +765,12 @@ def main() -> None:
                         help="held-out text file for quality gate")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--steps", type=int, default=100)
+    parser.add_argument(
+        "--validation-interval",
+        type=int,
+        default=10,
+        help="evaluate held-out chunks and retain the best checkpoint every N steps",
+    )
     parser.add_argument("--lr", type=float, default=0.02)
     parser.add_argument("--window-size", type=int, default=64)
     parser.add_argument("--num-codes", type=int, default=32)
@@ -877,6 +917,7 @@ def main() -> None:
 
     if (
         args.steps <= 0
+        or args.validation_interval <= 0
         or args.lr <= 0
         or args.max_tokens <= 0
         or args.num_train_chunks <= 0
@@ -885,7 +926,7 @@ def main() -> None:
         or not 0.0 <= args.attention_loss_weight <= 1.0
     ):
         raise ValueError(
-            "steps, lr, max-tokens, chunk counts, and code-init-tokens must be positive; "
+            "steps, validation-interval, lr, max-tokens, chunk counts, and code-init-tokens must be positive; "
             "attention-loss-weight must lie in [0, 1]"
         )
     if args.archive_scan_block_size <= 0:
@@ -1120,6 +1161,31 @@ def main() -> None:
     optimizer = torch.optim.AdamW(trainable, lr=args.lr)
     patched.train()
 
+    # Long-range distillation can improve the sampled training windows while
+    # degrading held-out positions.  Keep a CPU snapshot of the best adapter
+    # selected by the same two metrics used by the quality gate, so the saved
+    # checkpoint is never silently replaced by a late overfit step.
+    best_validation_score = float("-inf")
+    best_validation_cosine: float | None = None
+    best_validation_agreement: float | None = None
+    best_trainable_state: list[torch.Tensor] | None = None
+
+    if held_out_batches:
+        initial_cosine, initial_agreement = _evaluate_model_batches(
+            patched, held_out_batches, held_out_teachers
+        )
+        best_validation_score = min(initial_cosine, initial_agreement)
+        best_validation_cosine = initial_cosine
+        best_validation_agreement = initial_agreement
+        best_trainable_state = [
+            parameter.detach().cpu().clone() for parameter in trainable
+        ]
+        print(
+            f"Validation step 0/{args.steps}: cosine={initial_cosine:.6f} "
+            f"top1={initial_agreement:.6f}",
+            file=sys.stderr,
+        )
+
     student_attention_outputs: dict[int, torch.Tensor] = {}
     student_hooks = []
     for module in patched.modules():
@@ -1244,6 +1310,28 @@ def main() -> None:
             torch.nn.utils.clip_grad_norm_(trainable, 1.0)
             optimizer.step()
 
+            if held_out_batches and (
+                (step + 1) % args.validation_interval == 0
+                or step == args.steps - 1
+            ):
+                validation_cosine, validation_agreement = _evaluate_model_batches(
+                    patched, held_out_batches, held_out_teachers
+                )
+                validation_score = min(validation_cosine, validation_agreement)
+                if validation_score > best_validation_score:
+                    best_validation_score = validation_score
+                    best_validation_cosine = validation_cosine
+                    best_validation_agreement = validation_agreement
+                    best_trainable_state = [
+                        parameter.detach().cpu().clone() for parameter in trainable
+                    ]
+                print(
+                    f"Validation step {step+1}/{args.steps}: "
+                    f"cosine={validation_cosine:.6f} top1={validation_agreement:.6f} "
+                    f"best={best_validation_score:.6f}",
+                    file=sys.stderr,
+                )
+
             if (step + 1) % 10 == 0 or step == 0:
                 print(
                     f"Step {step+1}/{args.steps}: loss={loss.item():.6f} "
@@ -1254,6 +1342,10 @@ def main() -> None:
         for hook in student_hooks:
             hook.remove()
         student_attention_outputs.clear()
+
+    if best_trainable_state is not None:
+        for parameter, saved in zip(trainable, best_trainable_state):
+            parameter.data.copy_(saved.to(device=parameter.device, dtype=parameter.dtype))
 
     # Evaluate
     patched.eval()
@@ -1322,6 +1414,9 @@ def main() -> None:
             "gate_bias_init": args.gate_bias_init,
             "num_train_chunks": len(train_batches),
             "num_held_out_chunks": len(held_out_batches),
+            "validation_interval": args.validation_interval,
+            "best_validation_cosine": best_validation_cosine,
+            "best_validation_top1_agreement": best_validation_agreement,
             "code_init": args.code_init,
             "code_init_tokens": args.code_init_tokens,
             "attention_loss_weight": args.attention_loss_weight,
@@ -1348,6 +1443,9 @@ def main() -> None:
         "train_chunks": len(train_batches),
         "held_out_chunks": len(held_out_batches),
         "steps": args.steps,
+        "validation_interval": args.validation_interval,
+        "best_validation_cosine": best_validation_cosine,
+        "best_validation_top1_agreement": best_validation_agreement,
         "code_init": args.code_init,
         "code_init_tokens": args.code_init_tokens,
         "attention_loss_weight": args.attention_loss_weight,

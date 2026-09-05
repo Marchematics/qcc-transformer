@@ -167,6 +167,8 @@ teacher 特征现在通过未 patch attention 模块的 forward-pre-hook 直接�
 - 同轮 Qwen quality-first exact read 对照：在相同 470-token 输入和 `window=128` 下，hard read 为 cosine/top-1 `0.56581/0.36170`；临时切换 soft read 为 `0.60030/0.34894`，降低 confidence threshold 后为 `0.58329/0.37021`。cosine 与 top-1 没有一致改善，因此保留 hard-read 默认，不把该短样本当作质量结论。
 - 2026-09-05 质量评测默认值：`benchmark_hf_retrofit.py` 与 `benchmark_hf_ruler.py` 默认 `--window-size` 调整为 `1024`，性能对照仍可显式传 `128`；quality-first 帮助文本更正为 hard nearest reads。更大窗口只改变有界 exact local state，不能替代长上下文 RULER/LongBench/PG-19 结果。
 - 2026-09-05 Qwen2.5-1.5B NF4 质量复核暴露并修复两项数值问题：量化 Q/K 的 fp16 局部点积会溢出为 NaN，现改为 fp32 logits/softmax 累加；校准 cosine/MSE 的词表归约也改为 fp32。短文本不足以越过 `window_size` 时，校准 CLI 现在直接拒绝，避免生成无 archive 梯度的假 adapter。完整本地回归为 `89 passed, 7 skipped`，修复已推送提交 `67ffc35`。
+- 2026-09-05 后续质量修复：quality-first hybrid exact tier 现在把每次 exact read 的置信度以有界 side-channel 暴露给 `QCCSelfAttention`；仅在高置信 exact 命中时动态压低 local/archive gate，未命中仍保持原保守 gate。这样不会改变普通 QCC 或未命中 query 的行为，并新增跨 tile exact-confidence 回归测试。
+- 2026-09-05 后续校准修复：`calibrate_hf_layerwise.py` 新增 `--validation-interval`（默认 10），在 held-out chunks 上按 `min(cosine, top-1)` 选择并恢复最佳 trainable adapter，避免最后一步训练集过拟合覆盖更好的中间 checkpoint；报告和 adapter manifest 同时记录最佳验证指标。该流程改进尚未产生新的真实 RULER/LongBench/PG-19 结果。
 - 同轮真实 `Qwen/Qwen2.5-1.5B-Instruct`、T4、NF4、`window=128/codes=64` 的 5-step README 校准在训练段为 cosine `0.93330`、top-1 `0.65625`；独立 5 条 held-out（共 `4033` tokens）regular QCC 为 cosine `0.79167`、top-1 `0.47688`。quality-first exact shadow 单条 held-out（`588` tokens）在 128-slot 和 512-slot 配置分别为 `0.89995/0.64626` 与 `0.89966/0.64456`；仍未达到 `0.99` fidelity，更不是 RULER/LongBench/PG-19 证据。远端临时会话随后丢失，adapter/log 未作为本地证据归档。
 
 ### 本地回归

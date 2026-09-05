@@ -188,6 +188,35 @@ def test_quality_first_uses_bounded_score_hard_exact_shadow():
     assert int(torch.isfinite(hybrid.exact_bank.state.scores).sum()) == 4
 
 
+def test_quality_first_exposes_exact_confidence_for_outer_gate():
+    base = QCCArchive(
+        num_heads=1,
+        head_dim=2,
+        num_codes=1,
+        decay_rates=(0.9,),
+        window_size=2,
+        use_triton=False,
+    )
+    hybrid = HybridQCCArchive.from_archive(
+        base,
+        exact_num_sets=1,
+        exact_ways=2,
+        quality_first=True,
+        exact_mix_bias_init=20.0,
+    )
+    key = torch.tensor([[[[1.0, 0.0]]]]).expand(1, 1, 4, 2).clone()
+    value = torch.randn_like(key)
+    query = key.clone()
+    with torch.no_grad():
+        hybrid.update_read_chunk(key, value, query)
+    assert hybrid._last_exact_gate is not None
+    assert hybrid._last_exact_gate.shape == (1, 1, 4)
+    # At least the query after the first admitted record is an exact hit.  The
+    # attention wrapper uses this bounded signal to avoid diluting that hit
+    # with the local path.
+    assert float(hybrid._last_exact_gate.max()) > 0.99
+
+
 def test_quality_first_retains_future_salient_token_across_tiles():
     base = QCCArchive(
         num_heads=1,

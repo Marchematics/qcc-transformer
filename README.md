@@ -190,6 +190,10 @@ objective, while `--margin-weight 0.2 --margin 0.0` directly penalizes a
 teacher top-1/top-2 logit swap.  The quality gate now requires both mean logit
 cosine and top-1 agreement to reach the threshold; a high cosine with poor
 argmax agreement is reported as a failure.
+When a held-out file is supplied, `--validation-interval N` (default `10`)
+evaluates it during calibration and saves the adapter from the best
+`min(cosine, top-1)` checkpoint instead of blindly saving the final step.
+The selected validation metrics are recorded in the adapter manifest.
 
 For the hybrid exact tier, first calibrate the regular QCC adapter, then pass it
 as `--init-adapter` to `benchmarks/calibrate_hf_admission.py`.  That second
@@ -218,6 +222,9 @@ rotary query side-channel for the complete request while the archive and local
 attention still run in bounded blocks.  This prevents a later matching query
 from being hidden from an early needle without forcing a full-sequence archive
 temporary.  Pass `--prefill-chunk-size` to tighten the local activation bound.
+On a high-confidence exact hit, the wrapper promotes the exact remote
+response instead of diluting it with the default local gate; unmatched
+queries retain the conservative local/archive mix.
 
 Use the resulting file with `--adapter` on the real-HF retrieval, latency,
 memory, concurrency, RULER, LongBench, or PG-19 runners.  `--exact-probe-sets`
