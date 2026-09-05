@@ -117,6 +117,10 @@ python benchmarks/benchmark_hf_retrofit.py \
   --model <model-id> --jsonl heldout.jsonl --quality-gate 0.99
 ```
 
+This quality diagnostic defaults to a 1024-token exact local window; pass
+`--window-size 128` explicitly when measuring the performance-oriented
+configuration.
+
 The benchmark loads the Full-KV teacher first, releases it, then loads the
 patched student; this keeps the comparison usable on a single GPU.  It reports
 per-record and aggregate logit cosine/top-1 agreement.  Passing this gate is

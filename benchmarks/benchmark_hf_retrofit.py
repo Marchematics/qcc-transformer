@@ -36,7 +36,10 @@ def main() -> None:
         "--jsonl", type=Path, default=None,
         help="held-out JSONL with a 'text'/'prompt' field; each record is scored independently",
     )
-    parser.add_argument("--window-size", type=int, default=128)
+    # This runner is primarily a matched quality diagnostic. Keep the
+    # performance-oriented 128-token setting explicit instead of making it the
+    # default source of avoidable long-range fidelity failures.
+    parser.add_argument("--window-size", type=int, default=1024)
     parser.add_argument("--num-codes", type=int, default=64)
     parser.add_argument(
         "--archive-kernel-features",
@@ -94,7 +97,7 @@ def main() -> None:
     parser.add_argument(
         "--quality-first",
         action="store_true",
-        help="use the bounded score-ranked exact shadow with soft reads for a quality-first run",
+        help="use the bounded score-ranked exact shadow with hard nearest reads for a quality-first run",
     )
     parser.add_argument("--hybrid-exact-mix-bias-init", type=float, default=-4.0)
     parser.add_argument("--hybrid-exact-confidence-threshold", type=float, default=0.60)
