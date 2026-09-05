@@ -164,6 +164,7 @@ teacher 特征现在通过未 patch attention 模块的 forward-pre-hook 直接�
 - 2026-09-05 质量修复：HF quality-first hybrid 预填充现在先构造整段请求的 rotary query side-channel，再按普通 bounded chunks 执行 archive/local attention；因此 early needle 的 exact-tier salience 能看到后续 query，同时不强制保留 full-sequence archive 临时张量。`benchmark_hf_ruler.py` 新增 `--quality-first`，可直接用 matched Full-KV/QCC 跑官方 RULER split。
 - 2026-09-05 T4 复核：真实 `Qwen/Qwen2.5-0.5B-Instruct`、470 tokens、quality-first exact tier（32 sets x 8 ways）、显式 128-token chunks 的 matched HF logit cosine/top-1 为 `0.83514/0.95745`；同配置旧的块内 salience 路径为 `0.78942/0.95106`。这是短上下文实现诊断，未校准、非官方 RULER/LongBench/PG-19，不能外推到长上下文质量。
 - 2026-09-05 Colab T4 复核（同一真实 `Qwen/Qwen2.5-0.5B-Instruct`、470 tokens、显式 128-token prefill chunks）：regular `window=128` 为 cosine/top-1 `0.51829/0.37447`，quality-first exact tier（128 sets x 4 ways）为 `0.58413/0.37021`；将 exact local window 提高到 `512` 后 regular 与 hybrid 均为 `0.99981/0.98511`，因为该输入没有发生历史淘汰。这验证了短上下文质量失败主要由窗口不足造成，但不代表 128K/1M 或官方任务质量。
+- 同轮 Qwen quality-first exact read 对照：在相同 470-token 输入和 `window=128` 下，hard read 为 cosine/top-1 `0.56581/0.36170`；临时切换 soft read 为 `0.60030/0.34894`，降低 confidence threshold 后为 `0.58329/0.37021`。cosine 与 top-1 没有一致改善，因此保留 hard-read 默认，不把该短样本当作质量结论。
 - 2026-09-05 质量评测默认值：`benchmark_hf_retrofit.py` 与 `benchmark_hf_ruler.py` 默认 `--window-size` 调整为 `1024`，性能对照仍可显式传 `128`；quality-first 帮助文本更正为 hard nearest reads。更大窗口只改变有界 exact local state，不能替代长上下文 RULER/LongBench/PG-19 结果。
 
 ### 本地回归
