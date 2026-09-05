@@ -128,6 +128,22 @@ per-record and aggregate logit cosine/top-1 agreement.  Passing this gate is
 necessary for the retrofit claim, but is not a substitute for held-out RULER,
 LongBench, or perplexity measurements.
 
+For a numerically conservative quality control, run the matched reference and
+retrofit with the same eager equation and disable Triton:
+
+```bash
+python benchmarks/benchmark_hf_retrofit.py \
+  --model <model-id> --prompt-file prompt.txt \
+  --attn-implementation eager --local-attention-backend eager \
+  --no-use-triton --forward-chunk-size 1024
+```
+
+The `eager` local backend keeps the HF ordering (native-dtype QK matmul,
+scaling, fp32 softmax, then V matmul). It is intended for fidelity diagnosis;
+`sdpa`/Triton remain the serving-oriented paths. `--prefill-chunk-size` can be
+used to separate chunk-boundary effects from attention-kernel effects. These
+switches do not turn a matched logit result into an official task score.
+
 `calibrate_hf_retrofit.py` emits the adapter's exact trainable-parameter count
 and fraction, together with a shared `run_id` and HF/vLLM zero-code integration
 flags, so the result can be audited by `gate_99.py` rather than inferred from

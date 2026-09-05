@@ -107,6 +107,15 @@ def test_patch_hf_assigns_stable_layer_indices():
     )
 
 
+def test_patch_hf_preserves_parent_training_mode():
+    model = _Model().eval()
+    patch_hf_model(model, window_size=4, num_codes=4, use_triton=False)
+    assert model.attn.training is False
+    model = _Model().train()
+    patch_hf_model(model, window_size=4, num_codes=4, use_triton=False)
+    assert model.attn.training is True
+
+
 def test_patch_hf_gate_bias_ablation_is_explicit():
     model = _Model()
     patch_hf_model(model, window_size=4, num_codes=4, use_triton=False, gate_bias_init=0.0)
@@ -129,6 +138,18 @@ def test_patch_hf_archive_scan_block_size_is_forwarded():
         use_triton=False,
     )
     assert model.attn.qcc.archive.scan_block_size == 7
+
+
+def test_patch_hf_local_attention_backend_is_forwarded():
+    model = _Model()
+    patch_hf_model(
+        model,
+        window_size=4,
+        num_codes=4,
+        local_attention_backend="eager",
+        use_triton=False,
+    )
+    assert model.attn.qcc.local_attention_backend == "eager"
 
 
 def test_patch_hf_quality_selector_uses_query_correction_rank():

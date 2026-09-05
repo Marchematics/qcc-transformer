@@ -1119,6 +1119,22 @@ def main() -> None:
         )
     print(f"Calibrating layers: {calibrate_layers} out of {num_layers}", file=sys.stderr)
 
+    # Only the suffix beginning at the first selected layer participates in
+    # autograd.  Prefix blocks are frozen and can run under no_grad, which is
+    # the difference between a usable layerwise calibration and an activation
+    # OOM on a 24 GB card.  The default ``all`` selection leaves the historical
+    # full-graph behavior unchanged.
+    first_selected_layer = min(calibrate_layers)
+    for module in patched.modules():
+        qcc = getattr(module, "qcc", None)
+        if qcc is not None:
+            layer_index = getattr(qcc, "_qcc_layer_index", None)
+            qcc._calibration_frozen = (
+                first_selected_layer > 0
+                and layer_index is not None
+                and layer_index < first_selected_layer
+            )
+
     # Freeze all, then selectively unfreeze
     for parameter in patched.parameters():
         parameter.requires_grad = False

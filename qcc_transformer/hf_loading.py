@@ -83,7 +83,7 @@ def load_hf_causal_lm(
     """
 
     try:
-        from transformers import AutoModelForCausalLM
+        from transformers import AutoConfig, AutoModelForCausalLM
     except ImportError as exc:  # pragma: no cover - optional dependency
         raise RuntimeError("install qcc-transformer[hf] to load a HF checkpoint") from exc
 
@@ -92,6 +92,24 @@ def load_hf_causal_lm(
 
     load_kwargs = dict(kwargs)
     load_kwargs["trust_remote_code"] = trust_remote_code
+
+    # Qwen2.5-VL is a causal language model wrapped in a multimodal container,
+    # so it is intentionally absent from AutoModelForCausalLM's mapping in
+    # several Transformers releases.  Route that architecture to its native
+    # class while retaining the usual AutoModel path for text-only models.
+    model_cls: Any = AutoModelForCausalLM
+    try:
+        config = AutoConfig.from_pretrained(model_id, trust_remote_code=trust_remote_code)
+        architectures = tuple(getattr(config, "architectures", ()) or ())
+        if any("Qwen2_5_VL" in name for name in architectures):
+            from transformers import Qwen2_5_VLForConditionalGeneration
+
+            model_cls = Qwen2_5_VLForConditionalGeneration
+    except (ImportError, OSError, TypeError, ValueError):
+        # AutoModelForCausalLM below provides the historical error message for
+        # ordinary checkpoints whose config cannot be inspected independently.
+        model_cls = AutoModelForCausalLM
+
     if load_in_4bit:
         if device is None or torch.device(device).type != "cuda":
             raise ValueError("load_in_4bit requires a CUDA device")
@@ -110,11 +128,11 @@ def load_hf_causal_lm(
             bnb_4bit_use_double_quant=True,
         )
         load_kwargs["device_map"] = device_map or "auto"
-        return AutoModelForCausalLM.from_pretrained(model_id, **load_kwargs).eval()
+        return model_cls.from_pretrained(model_id, **load_kwargs).eval()
 
     if dtype is not None:
         load_kwargs["torch_dtype"] = dtype
-    model = AutoModelForCausalLM.from_pretrained(model_id, **load_kwargs)
+    model = model_cls.from_pretrained(model_id, **load_kwargs)
     if device is not None:
         model = model.to(device)
     return model.eval()

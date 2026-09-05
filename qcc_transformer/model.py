@@ -797,6 +797,7 @@ class QCCArchive(nn.Module):
         exact_query: Optional[Tensor] = None,
         quality_query: Optional[Tensor] = None,
         quality_key_start: int = 0,
+        quality_query_start: int = 0,
     ) -> Tensor:
         """Update and read a sequence of evicted tokens with a block scan.
 
@@ -812,7 +813,7 @@ class QCCArchive(nn.Module):
         # HybridQCCArchive.  The dense recurrent archive deliberately ignores
         # it, preserving the historical raw-Q/K equation for position-invariant
         # addressing.
-        del exact_key, exact_query, quality_query, quality_key_start
+        del exact_key, exact_query, quality_query, quality_key_start, quality_query_start
         if output is not None and (output.shape != query.shape or output.device != query.device):
             raise ValueError("output must match query shape and device")
         batch, heads, events, dim = key.shape
@@ -1344,6 +1345,7 @@ class QCCSelfAttention(nn.Module):
         archive_query_correction_rank: int = 8,
         archive_lexical_landmark: bool = False,
         archive_position_invariant: bool = False,
+        local_attention_backend: str = "sdpa",
         rope_theta: Optional[float] = None,
         max_position_embeddings: int = 4096,
         decay_rates: Optional[tuple[float, ...]] = None,
@@ -1363,6 +1365,8 @@ class QCCSelfAttention(nn.Module):
             raise ValueError("archive_read_stride must be positive")
         if archive_query_cosine_threshold is not None and not -1.0 <= archive_query_cosine_threshold <= 1.0:
             raise ValueError("archive_query_cosine_threshold must be in [-1, 1]")
+        if local_attention_backend not in {"sdpa", "eager"}:
+            raise ValueError("local_attention_backend must be 'sdpa' or 'eager'")
         if rope_theta is not None and rope_theta <= 0:
             raise ValueError("rope_theta must be positive")
         if max_position_embeddings <= 0:
@@ -1412,8 +1416,12 @@ class QCCSelfAttention(nn.Module):
         self.v_proj = nn.Linear(d_model, d_model)
         self.out_proj = nn.Linear(d_model, d_model)
         self.gate = nn.Linear(d_model, num_heads)
-        # Keep an uncalibrated archive close to the exact local path. The
-        # bias remains trainable and 0.0 preserves the historical ablation.
+        # The gate is a newly introduced retrofit parameter.  Random weights
+        # would inject an unrelated, token-dependent local/archive mixture
+        # before calibration and can dominate the approximation error on a
+        # pretrained model.  Start from a fixed bias-only mixture; calibration
+        # can still learn the full gate later.
+        nn.init.zeros_(self.gate.weight)
         nn.init.constant_(self.gate.bias, gate_bias_init)
         # Choose half-lives from the exact window to the configured context so
         # a 1M-token model does not silently forget everything after a few
@@ -1453,6 +1461,11 @@ class QCCSelfAttention(nn.Module):
         # content address.  This opt-in path keeps local q/k rotary while
         # feeding unrotated projections to the long-range archive.
         self.archive_position_invariant = archive_position_invariant
+        # ``eager`` mirrors Hugging Face's reference attention equation
+        # (matmul -> scale -> fp32 softmax -> value matmul) and is useful for
+        # quality gates where a one-bit top-1 change matters.  ``sdpa`` stays
+        # the default for serving and fused accelerator kernels.
+        self.local_attention_backend = local_attention_backend
         # Optional adaptive remote-read suppression. ``None`` keeps exact
         # archive reads; otherwise a read is skipped when the new query is
         # cosine-close to the previous refreshed query. The state is still
@@ -1742,6 +1755,21 @@ class QCCSelfAttention(nn.Module):
             query, keys, values, attn_mask=mask, dropout_p=0.0
         )
 
+    def _local_eager_attention(
+        self, query: Tensor, keys: Tensor, values: Tensor, mask: Tensor
+    ) -> Tensor:
+        """Reference HF attention equation over a bounded causal key slice."""
+
+        # Match HF eager attention exactly: the projection dtype is retained
+        # for the QK matmul and scale, then only the softmax is accumulated in
+        # fp32.  Casting Q/K before matmul changes reduction rounding enough
+        # to flip close vocabulary logits after many decoder layers.
+        logits = torch.matmul(query, keys.transpose(-2, -1))
+        logits = logits * (self.head_dim ** -0.5)
+        logits = logits.masked_fill(~mask, torch.finfo(logits.dtype).min)
+        probabilities = F.softmax(logits, dim=-1, dtype=torch.float32).to(values.dtype)
+        return torch.matmul(probabilities, values)
+
     def _lexical_archive_triplet(
         self, archive_hint: Optional[Tensor]
     ) -> tuple[Optional[Tensor], Optional[Tensor], Optional[Tensor]]:
@@ -1861,8 +1889,13 @@ class QCCSelfAttention(nn.Module):
                 angles = torch.where(use_long, long_angles, short_angles)
             else:
                 angles = position_values * self.rope_inv_freq.to(device=query.device)
-            cos = angles.cos().unsqueeze(1).to(query.dtype)
-            sin = angles.sin().unsqueeze(1).to(query.dtype)
+            # Keep the trigonometric values in fp32 until the optional HF
+            # LongRoPE scaling has been applied.  Phi's reference rotary
+            # module multiplies by this factor before casting to bf16/fp16;
+            # doing it in the reverse order creates avoidable q/k drift that
+            # is large enough to flip close top-1 logits.
+            cos = angles.cos().unsqueeze(1)
+            sin = angles.sin().unsqueeze(1)
         elif query.ndim == 3:
             if positions.ndim == 0:
                 positions = positions.expand(query.shape[0])
@@ -1880,8 +1913,9 @@ class QCCSelfAttention(nn.Module):
                 angles = torch.where(use_long, long_angles, short_angles)
             else:
                 angles = position_values * self.rope_inv_freq.to(device=query.device)
-            cos = angles.cos().unsqueeze(1).to(query.dtype)
-            sin = angles.sin().unsqueeze(1).to(query.dtype)
+            # See the rank-4 path above: match HF's fp32 RoPE scaling order.
+            cos = angles.cos().unsqueeze(1)
+            sin = angles.sin().unsqueeze(1)
         else:
             raise ValueError("q/k tensors must have rank 3 or 4")
         rotary_dim = self.rope_inv_freq.numel() * 2
@@ -1893,8 +1927,12 @@ class QCCSelfAttention(nn.Module):
         # model but is catastrophic for a retrofit because every attention
         # score changes.  Expand the per-frequency cos/sin values to the full
         # rotary width before applying the checkpoint-compatible transform.
-        cos_full = torch.cat((cos, cos), dim=-1) * self._rope_attention_scaling
-        sin_full = torch.cat((sin, sin), dim=-1) * self._rope_attention_scaling
+        cos_full = (
+            torch.cat((cos, cos), dim=-1) * self._rope_attention_scaling
+        ).to(query.dtype)
+        sin_full = (
+            torch.cat((sin, sin), dim=-1) * self._rope_attention_scaling
+        ).to(query.dtype)
 
         def rotate(tensor: Tensor) -> Tensor:
             prefix = tensor[..., :rotary_dim]
@@ -2197,7 +2235,14 @@ class QCCSelfAttention(nn.Module):
             local_keys = self._full_key_cache[:, :, : self._seen_tokens + 1]
             local_values = self._full_value_cache[:, :, : self._seen_tokens + 1]
         if self.use_archive:
-            if key.is_cuda and self._cache_length == self.window_size:
+            if self.local_attention_backend == "eager":
+                valid = torch.ones(
+                    (1, local_keys.shape[2]), device=hidden.device, dtype=torch.bool
+                )
+                local_out = self._local_eager_attention(
+                    q.unsqueeze(2), local_keys, local_values, valid
+                ).squeeze(2)
+            elif key.is_cuda and self._cache_length == self.window_size:
                 # Once the ring is full, a single Triton program computes the
                 # exact local softmax/value reduction.  This removes the SDPA
                 # wrapper and its mask setup from the persistent one-token path.
@@ -2286,6 +2331,7 @@ class QCCSelfAttention(nn.Module):
         archive_hint: Optional[Tensor] = None,
         position_embeddings: Optional[tuple[Tensor, Tensor]] = None,
         quality_query: Optional[Tensor] = None,
+        quality_query_start: int = 0,
     ) -> Tensor:
         """Decode a causal block while preserving the persistent cache.
 
@@ -2396,7 +2442,7 @@ class QCCSelfAttention(nn.Module):
             # reference path.  Fall back to the readable implementation when
             # Triton is unavailable (e.g. a CUDA build without Triton).
             local_out = None
-            if self.use_triton:
+            if self.use_triton and self.local_attention_backend == "sdpa":
                 from .triton_kernels import TRITON_AVAILABLE, triton_local_chunk_attention
 
                 if TRITON_AVAILABLE:
@@ -2408,9 +2454,16 @@ class QCCSelfAttention(nn.Module):
                         window_size=self.window_size,
                     )
             if local_out is None:
-                if length >= self.archive.scan_block_size:
-                    local_out = self._local_window_attention(
-                        q, combined_k, combined_v, old_length=old_length
+                # The readable unfold implementation materializes
+                # ``[batch, heads, time, window, head_dim]`` and can exceed
+                # a 24 GB card when a quality run intentionally uses a large
+                # exact window (for example 8K).  SDPA keeps the same causal
+                # band semantics while selecting a fused/memory-efficient
+                # backend, so the non-Triton control remains usable for
+                # numerical A/B validation at long context.
+                if self.local_attention_backend == "eager":
+                    local_out = self._local_eager_attention(
+                        q, combined_k, combined_v, valid
                     )
                 else:
                     local_out = _scaled_dot_product_attention(
@@ -2455,6 +2508,7 @@ class QCCSelfAttention(nn.Module):
                     exact_query=q[:, :, event_start:],
                     quality_query=quality_query,
                     quality_key_start=archive_event_offset,
+                    quality_query_start=quality_query_start,
                 )
                 # A chunk update changes the archive state for every active
                 # position.  Do not let a prior token-path remote read leak
@@ -2845,7 +2899,7 @@ class QCCSelfAttention(nn.Module):
             # key slice contains at most ``window + block_size - 1`` tokens;
             # the boolean mask keeps exact causal local-window semantics.
             local_out = None
-            if self.use_triton:
+            if self.use_triton and self.local_attention_backend == "sdpa":
                 from .triton_kernels import TRITON_AVAILABLE, triton_local_chunk_attention
 
                 if TRITON_AVAILABLE:
@@ -2863,36 +2917,49 @@ class QCCSelfAttention(nn.Module):
                     valid = (key_positions[None, :] <= query_positions[:, None]) & (
                         key_positions[None, :] >= query_positions[:, None] - window + 1
                     )
-                    local_outputs.append(
-                        _scaled_dot_product_attention(
-                            q[:, :, start:end],
-                            k[:, :, key_start:end],
-                            v[:, :, key_start:end],
-                            attn_mask=valid,
-                            dropout_p=0.0,
+                    if self.local_attention_backend == "eager":
+                        local_outputs.append(
+                            self._local_eager_attention(
+                                q[:, :, start:end],
+                                k[:, :, key_start:end],
+                                v[:, :, key_start:end],
+                                valid,
+                            )
                         )
-                    )
+                    else:
+                        local_outputs.append(
+                            _scaled_dot_product_attention(
+                                q[:, :, start:end],
+                                k[:, :, key_start:end],
+                                v[:, :, key_start:end],
+                                attn_mask=valid,
+                                dropout_p=0.0,
+                            )
+                        )
                 local_out = torch.cat(local_outputs, dim=2)
         else:
             # The CPU SDPA backend currently pays a relatively high per-block
             # mask setup cost. Keep the reference's single vectorized unfold
             # there; it remains exact and avoids thousands of tiny dispatches.
-            k_pad = F.pad(k.transpose(-1, -2), (window - 1, 0))
-            v_pad = F.pad(v.transpose(-1, -2), (window - 1, 0))
-            k_windows = k_pad.unfold(-1, window, 1).permute(0, 1, 3, 4, 2)
-            v_windows = v_pad.unfold(-1, window, 1).permute(0, 1, 3, 4, 2)
-            local_logits = torch.einsum(
-                "bhtd,bhtwd->bhtw", q.float(), k_windows.float()
-            )
-            local_logits = local_logits / math.sqrt(self.head_dim)
             valid = torch.arange(window, device=hidden.device)[None, :] >= (
                 window - 1 - torch.arange(length, device=hidden.device)[:, None]
             )
-            local_logits = local_logits.masked_fill(
-                ~valid[None, None], torch.finfo(local_logits.dtype).min
-            )
-            local_prob = F.softmax(local_logits, dim=-1).to(v_windows.dtype)
-            local_out = torch.einsum("bhtw,bhtwd->bhtd", local_prob, v_windows)
+            if self.local_attention_backend == "eager":
+                local_out = self._local_eager_attention(q, k, v, valid)
+            else:
+                k_pad = F.pad(k.transpose(-1, -2), (window - 1, 0))
+                v_pad = F.pad(v.transpose(-1, -2), (window - 1, 0))
+                k_windows = k_pad.unfold(-1, window, 1).permute(0, 1, 3, 4, 2)
+                v_windows = v_pad.unfold(-1, window, 1).permute(0, 1, 3, 4, 2)
+                local_logits = torch.einsum(
+                    "bhtd,bhtwd->bhtw", q.float(), k_windows.float()
+                )
+                local_logits = local_logits / math.sqrt(self.head_dim)
+                local_logits = local_logits.masked_fill(
+                    ~valid[None, None], torch.finfo(local_logits.dtype).min
+                )
+                local_prob = F.softmax(local_logits, dim=-1).to(v_windows.dtype)
+                local_out = torch.einsum("bhtw,bhtwd->bhtd", local_prob, v_windows)
 
         if self.use_archive:
             self.archive.reset_state(bsz, device=hidden.device)

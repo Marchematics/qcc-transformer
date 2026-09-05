@@ -27,6 +27,74 @@ from qcc_transformer.hf_loading import load_hf_causal_lm, model_input_device
 from qcc_transformer.hybrid_archive import load_hybrid_retrofit_adapter
 
 
+def _forward_logits(
+    model: torch.nn.Module,
+    encoded: dict[str, torch.Tensor],
+    *,
+    chunk_size: int = 0,
+    logits_to_keep: int = 0,
+) -> torch.Tensor:
+    """Run an exact causal forward, optionally in bounded cache-backed chunks.
+
+    Some remote-code checkpoints only expose the eager attention implementation,
+    whose full-prompt score matrix can exceed a small GPU even for an otherwise
+    valid 8K evaluation.  Splitting the same request into cache-backed chunks
+    preserves Full-KV semantics while bounding the temporary query-by-key matrix.
+    """
+
+    input_ids = encoded.get("input_ids")
+    if input_ids is None or input_ids.ndim != 2:
+        raise ValueError("chunked evaluation requires 2D input_ids")
+    length = int(input_ids.shape[1])
+    if chunk_size <= 0 or chunk_size >= length:
+        kwargs: dict[str, object] = {"use_cache": False}
+        if logits_to_keep:
+            kwargs["logits_to_keep"] = logits_to_keep
+        return model(**encoded, **kwargs).logits
+
+    outputs: list[torch.Tensor] = []
+    qcc_model = any(hasattr(module, "qcc") for module in model.modules())
+    try:
+        from transformers.cache_utils import DynamicCache
+
+        cache = None if qcc_model else DynamicCache()
+    except ImportError:  # pragma: no cover - Transformers is required by main()
+        cache = None
+    batch = int(input_ids.shape[0])
+    for start in range(0, length, chunk_size):
+        end = min(length, start + chunk_size)
+        chunk: dict[str, torch.Tensor] = {}
+        for key, value in encoded.items():
+            if not isinstance(value, torch.Tensor):
+                continue
+            if key == "attention_mask":
+                # With no padding, Phi's own helper constructs the correctly
+                # offset causal mask from the cache length.  Passing a growing
+                # 2D mask triggers shape mismatches in older remote snapshots.
+                continue
+            elif value.ndim >= 2 and value.shape[1] == length:
+                chunk[key] = value[:, start:end]
+            else:
+                chunk[key] = value
+        if qcc_model:
+            chunk["position_ids"] = torch.arange(
+                start, end, device=input_ids.device, dtype=torch.long
+            ).view(1, -1).expand(batch, -1)
+        kwargs = {"use_cache": not qcc_model}
+        if cache is not None:
+            kwargs["past_key_values"] = cache
+        result = model(**chunk, **kwargs)
+        outputs.append(result.logits)
+        if not qcc_model:
+            cache = getattr(result, "past_key_values", None)
+        if not qcc_model and cache is None:
+            raise RuntimeError(
+                "chunked evaluation requested, but the checkpoint returned no past_key_values"
+            )
+    logits = torch.cat(outputs, dim=1)
+    return logits[:, -logits_to_keep:] if logits_to_keep else logits
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", required=True, help="Hugging Face model id or local path")
@@ -69,6 +137,42 @@ def main() -> None:
     parser.add_argument("--dtype", choices=("float16", "bfloat16", "float32"), default="bfloat16")
     parser.add_argument("--load-in-4bit", action="store_true", help="load the real checkpoint through bitsandbytes NF4")
     parser.add_argument("--trust-remote-code", action="store_true")
+    parser.add_argument(
+        "--attn-implementation",
+        choices=("auto", "eager", "sdpa", "flash_attention_2"),
+        default="auto",
+        help="attention backend for the Full-KV reference model; SDPA avoids quadratic materialization on long prompts",
+    )
+    parser.add_argument(
+        "--use-triton",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="use the Triton local-attention kernel in the retrofit; disable for a numerically conservative quality control",
+    )
+    parser.add_argument(
+        "--local-attention-backend",
+        choices=("sdpa", "eager"),
+        default="sdpa",
+        help="bounded local attention equation for the retrofit; eager matches HF fp32-softmax ordering",
+    )
+    parser.add_argument(
+        "--forward-chunk-size",
+        type=int,
+        default=0,
+        help="split long reference and retrofit forwards into exact HF cache-backed chunks (0 keeps one call)",
+    )
+    parser.add_argument(
+        "--prefill-chunk-size",
+        type=int,
+        default=None,
+        help="internal QCC prefill chunk bound; defaults to the archive scan block",
+    )
+    parser.add_argument(
+        "--logits-to-keep",
+        type=int,
+        default=0,
+        help="retain only the final N logits when the checkpoint supports it (0 keeps the full sequence)",
+    )
     parser.add_argument("--quality-gate", type=float, default=0.99)
     parser.add_argument("--kv-head-policy", choices=("reject", "repeat"), default="reject")
     parser.add_argument(
@@ -134,6 +238,12 @@ def main() -> None:
         raise ValueError("quality-gate must lie in [0, 1]")
     if args.archive_query_correction_rank < 0:
         raise ValueError("archive-query-correction-rank must be non-negative")
+    if args.logits_to_keep < 0:
+        raise ValueError("logits-to-keep must be non-negative")
+    if args.forward_chunk_size < 0:
+        raise ValueError("forward-chunk-size must be non-negative")
+    if args.prefill_chunk_size is not None and args.prefill_chunk_size <= 0:
+        raise ValueError("prefill-chunk-size must be positive when provided")
     try:
         from transformers import AutoModelForCausalLM, AutoTokenizer
     except ImportError as exc:  # pragma: no cover - optional dependency
@@ -141,8 +251,9 @@ def main() -> None:
 
     device = torch.device(args.device)
     dtype = {"float16": torch.float16, "bfloat16": torch.bfloat16, "float32": torch.float32}[args.dtype]
-    common = {"trust_remote_code": args.trust_remote_code}
-    tokenizer = AutoTokenizer.from_pretrained(args.model, **common)
+    tokenizer = AutoTokenizer.from_pretrained(
+        args.model, trust_remote_code=args.trust_remote_code
+    )
     # Count the actual checkpoint from the Full-KV instance that is already
     # needed for the matched reference.  A separate metadata load creates an
     # avoidable CPU/GPU peak on small cards, especially for real 1--7B models.
@@ -152,6 +263,7 @@ def main() -> None:
         device=device,
         trust_remote_code=args.trust_remote_code,
         load_in_4bit=args.load_in_4bit,
+        **({"attn_implementation": args.attn_implementation} if args.attn_implementation != "auto" else {}),
     )
     parameter_count = sum(parameter.numel() for parameter in baseline.parameters())
     model_device = model_input_device(baseline, device)
@@ -160,7 +272,20 @@ def main() -> None:
         encoded = tokenizer(prompt, return_tensors="pt", add_special_tokens=True)
         encoded = {key: value.to(model_device) for key, value in encoded.items()}
         with torch.no_grad():
-            references.append((encoded, baseline(**encoded, use_cache=False).logits.cpu()))
+            try:
+                reference_logits = _forward_logits(
+                    baseline,
+                    encoded,
+                    chunk_size=args.forward_chunk_size,
+                    logits_to_keep=args.logits_to_keep,
+                )
+            except TypeError:
+                if not args.logits_to_keep:
+                    raise
+                raise TypeError(
+                    "the selected checkpoint does not support --logits-to-keep"
+                )
+            references.append((encoded, reference_logits.cpu()))
     del baseline
     if device.type == "cuda":
         torch.cuda.empty_cache()
@@ -170,6 +295,7 @@ def main() -> None:
         device=device,
         trust_remote_code=args.trust_remote_code,
         load_in_4bit=args.load_in_4bit,
+        **({"attn_implementation": args.attn_implementation} if args.attn_implementation != "auto" else {}),
     )
     patch_kwargs = {
         "window_size": args.window_size,
@@ -178,6 +304,9 @@ def main() -> None:
         "archive_global_normalization": args.archive_global_normalization,
         "archive_position_invariant": args.archive_position_invariant,
         "archive_query_correction_rank": args.archive_query_correction_rank,
+        "use_triton": args.use_triton,
+        "local_attention_backend": args.local_attention_backend,
+        "prefill_chunk_size": args.prefill_chunk_size,
         "max_position_embeddings": args.max_position_embeddings,
         "kv_head_policy": args.kv_head_policy,
         "gate_bias_init": args.gate_bias_init,
@@ -216,7 +345,19 @@ def main() -> None:
                 patched, batch_size=int(encoded["input_ids"].shape[0])
             )
             patched_encoded = {key: value.to(patched_device) for key, value in encoded.items()}
-            candidate = patched(**patched_encoded, use_cache=False).logits.cpu()
+            try:
+                candidate = _forward_logits(
+                    patched,
+                    patched_encoded,
+                    chunk_size=args.forward_chunk_size,
+                    logits_to_keep=args.logits_to_keep,
+                ).cpu()
+            except TypeError:
+                if not args.logits_to_keep:
+                    raise
+                raise TypeError(
+                    "the selected checkpoint does not support --logits-to-keep"
+                )
             reports.append(compare_logits(reference, candidate, quality_gate=args.quality_gate))
     cosine = sum(r.mean_logit_cosine for r in reports) / len(reports)
     top1 = sum(r.top1_agreement for r in reports) / len(reports)
@@ -238,6 +379,9 @@ def main() -> None:
         "archive_query_scale_selector": args.archive_query_correction_rank > 0,
         "gate_bias_init": args.gate_bias_init,
         "archive_position_invariant": args.archive_position_invariant,
+        "use_triton": args.use_triton,
+        "local_attention_backend": args.local_attention_backend,
+        "prefill_chunk_size": args.prefill_chunk_size,
         "mean_logit_cosine": float(cosine),
         "top1_agreement": float(top1),
         "quality_gate": args.quality_gate,
@@ -247,6 +391,8 @@ def main() -> None:
         "official": False,
         "synthetic": False,
         "qcc_only": False,
+        "logits_to_keep": args.logits_to_keep or None,
+        "forward_chunk_size": args.forward_chunk_size or None,
         "adapter": str(args.adapter) if args.adapter is not None else None,
         "hybrid": args.hybrid,
         "quality_first": args.quality_first if args.hybrid else False,

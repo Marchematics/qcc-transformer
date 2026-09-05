@@ -361,6 +361,7 @@ class HybridQCCArchive(QCCArchive):
         query: Tensor,
         *,
         key_start: int,
+        query_start: int = 0,
         sample_queries: int = 32,
     ) -> Tensor:
         """Estimate future retrieval value for a bounded key tile.
@@ -387,18 +388,27 @@ class HybridQCCArchive(QCCArchive):
         # A key at absolute event index ``i`` can first be retrieved by the
         # query whose event index is ``i - window + 1``.  Include that causal
         # boundary in the sampled positions and mask earlier queries per key.
-        first_query = max(0, int(key_start) - self.window_size + 1)
-        positions = torch.linspace(
+        query_start = int(query_start)
+        if query_start < 0:
+            raise ValueError("query_start must be non-negative")
+        first_query = max(query_start, int(key_start) - self.window_size + 1)
+        last_query = query_start + query.shape[2] - 1
+        if first_query > last_query:
+            return key.new_full(
+                (key.shape[0], key.shape[1], tile), -1.0, dtype=torch.float32
+            )
+        positions_abs = torch.linspace(
             first_query,
-            query.shape[2] - 1,
+            last_query,
             query_count,
             device=query.device,
             dtype=torch.float32,
         ).round().to(torch.long).unique(sorted=True)
-        if positions.numel() == 0:
+        if positions_abs.numel() == 0:
             return key.new_full((key.shape[0], key.shape[1], tile), -1.0, dtype=torch.float32)
 
         normalized_key = F.normalize(key.float(), dim=-1)
+        positions = positions_abs - query_start
         normalized_query = F.normalize(query.index_select(2, positions).float(), dim=-1)
         similarity = torch.einsum(
             "bhtd,bhqd->bhtq", normalized_key, normalized_query
@@ -409,7 +419,7 @@ class HybridQCCArchive(QCCArchive):
         # Query event j corresponds to an absolute token at j + window_size.
         # Therefore j >= i - window_size + 1 is the causal eligibility test.
         minimum_query = (absolute_key - self.window_size + 1).clamp_min(0)
-        valid = positions.view(1, 1, 1, -1) >= minimum_query.view(1, 1, -1, 1)
+        valid = positions_abs.view(1, 1, 1, -1) >= minimum_query.view(1, 1, -1, 1)
         similarity = similarity.masked_fill(~valid, -1.0)
         return similarity.max(dim=-1).values
 
@@ -434,6 +444,7 @@ class HybridQCCArchive(QCCArchive):
         *,
         quality_query: Tensor | None = None,
         quality_key_start: int = 0,
+        quality_query_start: int = 0,
     ) -> tuple[Tensor, Tensor]:
         """Causally read a block with a bounded number of admission events."""
 
@@ -486,6 +497,7 @@ class HybridQCCArchive(QCCArchive):
                     key[:, :, tile_start:tile_end],
                     query if quality_query is None else quality_query,
                     key_start=quality_key_start + tile_start,
+                    query_start=quality_query_start,
                 )
             admission_score = tile_score if self.quality_first else score[:, :, tile_start:tile_end]
             eligible = tile_score >= self.admission_threshold
@@ -542,6 +554,7 @@ class HybridQCCArchive(QCCArchive):
         exact_query: Tensor | None = None,
         quality_query: Tensor | None = None,
         quality_key_start: int = 0,
+        quality_query_start: int = 0,
     ) -> Tensor:
         if admission_score is not None and (
             admission_score.shape != key.shape[:3]
@@ -554,6 +567,8 @@ class HybridQCCArchive(QCCArchive):
             exact_query = query
         if quality_key_start < 0:
             raise ValueError("quality_key_start must be non-negative")
+        if quality_query_start < 0:
+            raise ValueError("quality_query_start must be non-negative")
         if quality_query is not None and (
             quality_query.ndim != 4
             or quality_query.shape[0] != key.shape[0]
@@ -586,6 +601,7 @@ class HybridQCCArchive(QCCArchive):
             score,
             quality_query=quality_query,
             quality_key_start=quality_key_start,
+            quality_query_start=quality_query_start,
         )
         result = self._blend_exact(recurrent, exact, confidence)
         if output is not None:

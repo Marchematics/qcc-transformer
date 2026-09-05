@@ -241,6 +241,7 @@ class HFQCCAttention(nn.Module):
         archive_query_correction_rank: int = 8,
         archive_lexical_landmark: bool = False,
         archive_position_invariant: bool = True,
+        local_attention_backend: str = "sdpa",
         kv_head_policy: str = "reject",
         gate_bias_init: float = 2.0,
         kv_heads: Optional[int] = None,
@@ -317,6 +318,7 @@ class HFQCCAttention(nn.Module):
             archive_query_correction_rank=archive_query_correction_rank,
             archive_lexical_landmark=archive_lexical_landmark,
             archive_position_invariant=archive_position_invariant,
+            local_attention_backend=local_attention_backend,
             gate_bias_init=gate_bias_init,
             **(rope_kwargs or {}),
         )
@@ -459,6 +461,7 @@ class HFQCCAttention(nn.Module):
             chunk_size = int(getattr(self.qcc.archive, "scan_block_size", 1024))
         chunk_size = max(1, chunk_size)
         quality_query = None
+        quality_query_start = 0
         if bool(getattr(self.qcc.archive, "quality_first", False)) and reset:
             # Admission needs queries from later chunks to rank early needles.
             # Build the rotary query side-channel once, then pass only this
@@ -472,7 +475,8 @@ class HFQCCAttention(nn.Module):
                 positions,
                 position_embeddings,
             )
-            quality_query = q_rotary[:, :, min(self.qcc.window_size, length) :]
+            quality_query_start = min(self.qcc.window_size, length)
+            quality_query = q_rotary[:, :, quality_query_start:]
         if length <= chunk_size:
             return self.qcc.step_chunk(
                 hidden_states,
@@ -481,6 +485,7 @@ class HFQCCAttention(nn.Module):
                 archive_hint=archive_hint,
                 position_embeddings=position_embeddings,
                 quality_query=quality_query,
+                quality_query_start=quality_query_start,
             )
         outputs: list[Tensor] = []
         for start in range(0, length, chunk_size):
@@ -500,6 +505,7 @@ class HFQCCAttention(nn.Module):
                     archive_hint=piece_hint,
                     position_embeddings=piece_embeddings,
                     quality_query=quality_query,
+                    quality_query_start=quality_query_start,
                 )
             )
         return torch.cat(outputs, dim=1)
@@ -534,7 +540,27 @@ class HFQCCAttention(nn.Module):
                 or not all(isinstance(angle, Tensor) for angle in position_embeddings)
             ):
                 raise ValueError("position_embeddings must be a (cos, sin) tensor pair")
-            position_embeddings = (position_embeddings[0], position_embeddings[1])
+            cos, sin = position_embeddings
+            # Qwen2.5-VL represents M-RoPE as three [batch, sequence, dim]
+            # routes.  Text-only tokens use the same route three times; fold
+            # that redundant leading axis so the causal text retrofit keeps
+            # the model's exact rotary phases.  Vision/spatial routes are not
+            # interchangeable and must not be silently approximated.
+            if cos.ndim == 4 or sin.ndim == 4:
+                if cos.ndim != 4 or sin.ndim != 4 or cos.shape[0] != 3 or sin.shape[0] != 3:
+                    raise ValueError("unsupported M-RoPE position embedding shape")
+                if not (
+                    torch.equal(cos[0], cos[1])
+                    and torch.equal(cos[0], cos[2])
+                    and torch.equal(sin[0], sin[1])
+                    and torch.equal(sin[0], sin[2])
+                ):
+                    raise ValueError(
+                        "QCC HF retrofit supports text-only M-RoPE; "
+                        "non-uniform vision/spatial routes are unsupported"
+                    )
+                cos, sin = cos[0], sin[0]
+            position_embeddings = (cos, sin)
         seen = int(self.qcc._seen_tokens)
         # QCC deliberately does not expose physical historical K/V tensors.
         # Consequently a modern HF generation loop may pass ``None`` (or a
@@ -558,13 +584,28 @@ class HFQCCAttention(nn.Module):
             # persistent-cache path below; callers must explicitly train with
             # ``use_cache=False`` so recurrent state is not reused across
             # optimizer steps.
-            output = self.qcc(
-                hidden_states,
-                reset_state=reset,
-                position_ids=positions,
-                archive_hint=archive_hint,
-                position_embeddings=position_embeddings,
-            )
+            # A frozen prefix does not need an autograd graph.  Calibration
+            # marks only the prefix before its first trainable QCC layer with
+            # ``_calibration_frozen``; keeping the suffix differentiable still
+            # propagates the loss to the selected archive parameters while
+            # avoiding a full-model activation peak on 24 GB GPUs.
+            if bool(getattr(self.qcc, "_calibration_frozen", False)):
+                with torch.no_grad():
+                    output = self.qcc(
+                        hidden_states,
+                        reset_state=reset,
+                        position_ids=positions,
+                        archive_hint=archive_hint,
+                        position_embeddings=position_embeddings,
+                    )
+            else:
+                output = self.qcc(
+                    hidden_states,
+                    reset_state=reset,
+                    position_ids=positions,
+                    archive_hint=archive_hint,
+                    position_embeddings=position_embeddings,
+                )
         elif length == 1 and not reset:
             output = self.qcc.step(
                 hidden_states[:, 0],
@@ -619,6 +660,7 @@ def patch_hf_model(
     archive_query_correction_rank: int = 8,
     archive_lexical_landmark: bool = False,
     archive_position_invariant: bool = True,
+    local_attention_backend: str = "sdpa",
     kv_head_policy: str = "reject",
     gate_bias_init: float = 2.0,
     prefill_chunk_size: Optional[int] = None,
@@ -715,6 +757,7 @@ def patch_hf_model(
             archive_query_correction_rank=archive_query_correction_rank,
             archive_lexical_landmark=archive_lexical_landmark,
             archive_position_invariant=archive_position_invariant,
+            local_attention_backend=local_attention_backend,
             kv_head_policy=kv_head_policy,
             gate_bias_init=gate_bias_init,
             kv_heads=kv_heads,
@@ -724,6 +767,11 @@ def patch_hf_model(
             rope_kwargs=rope_kwargs,
             prefill_chunk_size=prefill_chunk_size,
         )
+        # ``from_pretrained`` returns an eval-mode model, but a newly-created
+        # wrapper defaults to ``training=True``.  Preserve the parent model's
+        # mode so inference benchmarks use the bounded serving path instead of
+        # the differentiable calibration path.
+        wrapper.train(model.training)
         # Track layer index for selective calibration
         wrapper.qcc._qcc_layer_index = layer_index
         # The original module remains registered below the wrapper so its

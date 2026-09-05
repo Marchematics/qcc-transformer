@@ -188,6 +188,39 @@ def test_quality_first_uses_bounded_score_hard_exact_shadow():
     assert int(torch.isfinite(hybrid.exact_bank.state.scores).sum()) == 4
 
 
+def test_quality_first_salience_respects_sliced_query_origin():
+    base = QCCArchive(
+        num_heads=1,
+        head_dim=4,
+        num_codes=2,
+        decay_rates=(0.9,),
+        window_size=4,
+        use_triton=False,
+    )
+    hybrid = HybridQCCArchive.from_archive(
+        base,
+        exact_num_sets=2,
+        exact_ways=2,
+        quality_first=True,
+    )
+    key = torch.tensor([[[[1.0, 0.0, 0.0, 0.0]]]])
+    future_queries = torch.tensor(
+        [[[
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [1.0, 0.0, 0.0, 0.0],
+        ]]]
+    )
+    score = hybrid._quality_first_salience(
+        key,
+        future_queries,
+        key_start=6,
+        query_start=4,
+        sample_queries=3,
+    )
+    assert float(score.item()) > 0.99
+
+
 def test_quality_first_exposes_exact_confidence_for_outer_gate():
     base = QCCArchive(
         num_heads=1,
