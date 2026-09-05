@@ -128,6 +128,24 @@ def main() -> None:
         default="sdpa",
         help="attention backend for both matched Full-KV and QCC models",
     )
+    parser.add_argument(
+        "--use-triton",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="use the Triton local-attention kernel in the retrofit",
+    )
+    parser.add_argument(
+        "--local-attention-backend",
+        choices=("sdpa", "eager"),
+        default="sdpa",
+        help="local attention equation used by the QCC retrofit",
+    )
+    parser.add_argument(
+        "--prefill-chunk-size",
+        type=int,
+        default=None,
+        help="bound QCC prefill chunks while retaining the same causal state",
+    )
     parser.add_argument("--load-in-4bit", action="store_true", help="load the real checkpoint through bitsandbytes NF4")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     # RULER is a quality evaluation, so keep a larger exact local window by
@@ -155,6 +173,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.max_new_tokens <= 0:
         raise ValueError("max-new-tokens must be positive")
+    if args.prefill_chunk_size is not None and args.prefill_chunk_size <= 0:
+        raise ValueError("prefill-chunk-size must be positive when provided")
     records = list(_records(args.ruler_jsonl, args.max_examples))
     if not records:
         raise ValueError("RULER JSONL contains no records")
@@ -214,6 +234,9 @@ def main() -> None:
                 max_position_embeddings=native_context_tokens,
                 archive_position_invariant=args.archive_position_invariant,
                 kv_head_policy=args.kv_head_policy,
+                use_triton=args.use_triton,
+                local_attention_backend=args.local_attention_backend,
+                prefill_chunk_size=args.prefill_chunk_size,
                 hybrid_kwargs={
                     "exact_num_sets": args.exact_num_sets,
                     "exact_ways": args.exact_ways,
@@ -229,6 +252,9 @@ def main() -> None:
                 max_position_embeddings=native_context_tokens,
                 archive_position_invariant=args.archive_position_invariant,
                 kv_head_policy=args.kv_head_policy,
+                use_triton=args.use_triton,
+                local_attention_backend=args.local_attention_backend,
+                prefill_chunk_size=args.prefill_chunk_size,
             )
     else:
         replaced = load_hybrid_retrofit_adapter(
@@ -245,6 +271,9 @@ def main() -> None:
             max_position_embeddings=native_context_tokens,
             archive_position_invariant=args.archive_position_invariant,
             kv_head_policy=args.kv_head_policy,
+            use_triton=args.use_triton,
+            local_attention_backend=args.local_attention_backend,
+            prefill_chunk_size=args.prefill_chunk_size,
         )
         enable_qkv_only_deployment_profile(patched)
     qcc_results = _run_model(
@@ -297,6 +326,9 @@ def main() -> None:
         "synthetic": False,
         "official": True,
         "attn_implementation": args.attn_implementation,
+        "use_triton": args.use_triton,
+        "local_attention_backend": args.local_attention_backend,
+        "prefill_chunk_size": args.prefill_chunk_size,
         "quality_first": args.quality_first,
         "exact_num_sets": args.exact_num_sets if args.quality_first or args.adapter else None,
         "exact_ways": args.exact_ways if args.quality_first or args.adapter else None,
