@@ -422,6 +422,7 @@ try:  # pragma: no cover - exercised only on a Triton-enabled GPU runner
         HEAD_DIM: tl.constexpr,
         BLOCK_D: tl.constexpr,
         BLOCK_M: tl.constexpr,
+        GLOBAL_NORMALIZATION: tl.constexpr,
     ):
         pid = tl.program_id(0)
         batch = pid // num_heads
@@ -448,33 +449,69 @@ try:  # pragma: no cover - exercised only on a Triton-enabled GPU runner
         routing = tl.exp(logits - max_logit)
         routing = tl.where(mask_m, routing / tl.sum(routing, axis=0), 0.0)
 
-        output = tl.zeros((BLOCK_D,), tl.float32)
-        for code_id in range(NUM_CODES):
-            response = tl.zeros((BLOCK_D,), tl.float32)
-            for scale in range(NUM_SCALES):
-                den_offset = (
-                    batch * stride_db
-                    + head * stride_dh
-                    + code_id * stride_dm
-                    + scale * stride_dj
-                )
-                den = tl.maximum(tl.load(denominator_ptr + den_offset).to(tl.float32), 1e-8)
-                num_offset = (
-                    batch * stride_nb
-                    + head * stride_nh
-                    + code_id * stride_nm
-                    + scale * stride_nj
-                    + offs_d * stride_nd
-                )
-                num = tl.load(numerator_ptr + num_offset, mask=mask_d, other=0.0).to(tl.float32)
-                mix = tl.load(mix_ptr + head * stride_mh + code_id * stride_mm + scale * stride_mj).to(tl.float32)
-                response += mix * num / den
-            # Triton does not support indexing a vector with the Python loop
-            # variable in all compiler versions.  Select the scalar through a
-            # masked reduction instead; ``code_id`` is compile-time here and
-            # this lowers to the same single-lane value.
-            route_weight = tl.sum(tl.where(offs_m == code_id, routing, 0.0), axis=0)
-            output += route_weight * response
+        if GLOBAL_NORMALIZATION:
+            total_num = tl.zeros((BLOCK_D,), tl.float32)
+            total_den = tl.zeros((), tl.float32)
+            for code_id in range(NUM_CODES):
+                route_weight = tl.sum(tl.where(offs_m == code_id, routing, 0.0), axis=0)
+                for scale in range(NUM_SCALES):
+                    den_offset = (
+                        batch * stride_db
+                        + head * stride_dh
+                        + code_id * stride_dm
+                        + scale * stride_dj
+                    )
+                    den = tl.load(denominator_ptr + den_offset).to(tl.float32)
+                    num_offset = (
+                        batch * stride_nb
+                        + head * stride_nh
+                        + code_id * stride_nm
+                        + scale * stride_nj
+                        + offs_d * stride_nd
+                    )
+                    num = tl.load(numerator_ptr + num_offset, mask=mask_d, other=0.0).to(tl.float32)
+                    mix = tl.load(
+                        mix_ptr
+                        + head * stride_mh
+                        + code_id * stride_mm
+                        + scale * stride_mj
+                    ).to(tl.float32)
+                    total_num += route_weight * mix * num
+                    total_den += route_weight * mix * den
+            output = total_num / tl.maximum(total_den, 1e-8)
+        else:
+            output = tl.zeros((BLOCK_D,), tl.float32)
+            for code_id in range(NUM_CODES):
+                response = tl.zeros((BLOCK_D,), tl.float32)
+                for scale in range(NUM_SCALES):
+                    den_offset = (
+                        batch * stride_db
+                        + head * stride_dh
+                        + code_id * stride_dm
+                        + scale * stride_dj
+                    )
+                    den = tl.maximum(tl.load(denominator_ptr + den_offset).to(tl.float32), 1e-8)
+                    num_offset = (
+                        batch * stride_nb
+                        + head * stride_nh
+                        + code_id * stride_nm
+                        + scale * stride_nj
+                        + offs_d * stride_nd
+                    )
+                    num = tl.load(numerator_ptr + num_offset, mask=mask_d, other=0.0).to(tl.float32)
+                    mix = tl.load(
+                        mix_ptr
+                        + head * stride_mh
+                        + code_id * stride_mm
+                        + scale * stride_mj
+                    ).to(tl.float32)
+                    response += mix * num / den
+                # Triton does not support indexing a vector with the Python loop
+                # variable in all compiler versions.  Select the scalar through a
+                # masked reduction instead; ``code_id`` is compile-time here and
+                # this lowers to the same single-lane value.
+                route_weight = tl.sum(tl.where(offs_m == code_id, routing, 0.0), axis=0)
+                output += route_weight * response
         tl.store(
             output_ptr + batch * stride_ob + head * stride_oh + offs_d * stride_od,
             output,
@@ -707,6 +744,7 @@ try:  # pragma: no cover - exercised only on a Triton-enabled GPU runner
     @triton.jit
     def _qcc_update_read_partial_kernel(
         partial_ptr,
+        partial_den_ptr,
         key_ptr,
         value_ptr,
         codes_ptr,
@@ -723,6 +761,10 @@ try:  # pragma: no cover - exercised only on a Triton-enabled GPU runner
         stride_pe,
         stride_pc,
         stride_pd,
+        stride_pdb,
+        stride_pdh,
+        stride_pde,
+        stride_pdc,
         stride_kb,
         stride_kh,
         stride_ke,
@@ -751,6 +793,7 @@ try:  # pragma: no cover - exercised only on a Triton-enabled GPU runner
         NUM_CODES: tl.constexpr,
         NUM_SCALES: tl.constexpr,
         HEAD_DIM: tl.constexpr,
+        GLOBAL_NORMALIZATION: tl.constexpr,
     ):
         """Update every scale for one code and emit its mixed response.
 
@@ -833,12 +876,16 @@ try:  # pragma: no cover - exercised only on a Triton-enabled GPU runner
             addition = weight * aged_rates
             state_den = state_den * rates + addition
             state_num = state_num * rates[:, None] + addition[:, None] * value[None, :]
-            response = tl.sum(
-                mix[:, None]
-                * state_num
-                / tl.maximum(state_den[:, None], 1e-8),
-                axis=0,
-            )
+            if GLOBAL_NORMALIZATION:
+                response = tl.sum(mix[:, None] * state_num, axis=0)
+                response_den = tl.sum(mix * state_den, axis=0)
+            else:
+                response = tl.sum(
+                    mix[:, None]
+                    * state_num
+                    / tl.maximum(state_den[:, None], 1e-8),
+                    axis=0,
+                )
             partial_offsets = (
                 batch * stride_pb
                 + head * stride_ph
@@ -847,6 +894,14 @@ try:  # pragma: no cover - exercised only on a Triton-enabled GPU runner
                 + offs_d * stride_pd
             )
             tl.store(partial_ptr + partial_offsets, response, mask=mask_d)
+            if GLOBAL_NORMALIZATION:
+                partial_den_offsets = (
+                    batch * stride_pdb
+                    + head * stride_pdh
+                    + event * stride_pde
+                    + code_id * stride_pdc
+                )
+                tl.store(partial_den_ptr + partial_den_offsets, response_den)
 
         tl.store(
             numerator_ptr + state_num_offsets,
@@ -864,6 +919,7 @@ try:  # pragma: no cover - exercised only on a Triton-enabled GPU runner
         output_ptr,
         query_ptr,
         partial_ptr,
+        partial_den_ptr,
         codes_ptr,
         num_heads,
         stride_ob,
@@ -879,6 +935,10 @@ try:  # pragma: no cover - exercised only on a Triton-enabled GPU runner
         stride_pe,
         stride_pc,
         stride_pd,
+        stride_pdb,
+        stride_pdh,
+        stride_pde,
+        stride_pdc,
         stride_ch,
         stride_cm,
         stride_cd,
@@ -887,6 +947,7 @@ try:  # pragma: no cover - exercised only on a Triton-enabled GPU runner
         BLOCK_C: tl.constexpr,
         NUM_CODES: tl.constexpr,
         HEAD_DIM: tl.constexpr,
+        GLOBAL_NORMALIZATION: tl.constexpr,
     ):
         """Route per-code responses for a query block in one GPU launch."""
 
@@ -935,7 +996,21 @@ try:  # pragma: no cover - exercised only on a Triton-enabled GPU runner
         partial = tl.load(partial_ptr + partial_offsets, mask=code_mask, other=0.0).to(
             tl.float32
         )
-        output = tl.sum(routing[:, None] * partial, axis=0)
+        if GLOBAL_NORMALIZATION:
+            partial_den_offsets = (
+                batch * stride_pdb
+                + head * stride_pdh
+                + event * stride_pde
+                + offs_c * stride_pdc
+            )
+            partial_den = tl.load(
+                partial_den_ptr + partial_den_offsets, mask=mask_c, other=0.0
+            ).to(tl.float32)
+            total_num = tl.sum(routing[:, None] * partial, axis=0)
+            total_den = tl.sum(routing * partial_den, axis=0)
+            output = total_num / tl.maximum(total_den, 1e-8)
+        else:
+            output = tl.sum(routing[:, None] * partial, axis=0)
         output_offsets = (
             batch * stride_ob
             + head * stride_oh
@@ -1790,8 +1865,14 @@ def triton_read_archive(
     mix_logits: torch.Tensor,
     *,
     prepared_mix: torch.Tensor | None = None,
+    global_normalization: bool = False,
 ) -> torch.Tensor:
-    """Fuse routing, scale mixing, and response normalization for one read."""
+    """Fuse routing, scale mixing, and response normalization for one read.
+
+    ``global_normalization`` selects the mathematically corrected separable
+    softmax equation, which combines all code/scale masses before the final
+    division.  The default preserves the legacy per-code-normalized kernel.
+    """
 
     if not TRITON_AVAILABLE or not query.is_cuda:
         raise RuntimeError("Triton CUDA runtime is unavailable")
@@ -1831,6 +1912,7 @@ def triton_read_archive(
         HEAD_DIM=dim,
         BLOCK_D=block_dim,
         BLOCK_M=block_m,
+        GLOBAL_NORMALIZATION=bool(global_normalization),
     )
     return output.to(query.dtype)
 
@@ -1989,6 +2071,7 @@ def triton_update_read_archive_chunk(
     output: torch.Tensor | None = None,
     content_threshold: float | None = None,
     prepared_mix: torch.Tensor | None = None,
+    global_normalization: bool = False,
 ) -> torch.Tensor:
     """Fuse dense archive update/read for a block of evicted tokens.
 
@@ -2058,6 +2141,15 @@ def triton_update_read_archive_chunk(
         device=key.device,
         dtype=torch.float32,
     )
+    partial_den_scratch = (
+        torch.empty(
+            (batch, heads, scratch_size, num_codes),
+            device=key.device,
+            dtype=torch.float32,
+        )
+        if global_normalization
+        else None
+    )
 
     for start in range(0, events, block_size):
         count = min(block_size, events - start)
@@ -2065,8 +2157,14 @@ def triton_update_read_archive_chunk(
         value_block = value[:, :, start : start + count]
         query_block = query[:, :, start : start + count]
         partial = partial_scratch[:, :, :count]
+        partial_den = (
+            partial_den_scratch[:, :, :count]
+            if partial_den_scratch is not None
+            else partial_scratch[:, :, :count, :, 0]
+        )
         _qcc_update_read_partial_kernel[(batch * heads * num_codes,)](
             partial,
+            partial_den,
             key_block,
             value_block,
             codes,
@@ -2079,6 +2177,7 @@ def triton_update_read_archive_chunk(
             count,
             heads,
             *partial.stride(),
+            *partial_den.stride(),
             *key_block.stride(),
             *value_block.stride(),
             *codes.stride(),
@@ -2090,23 +2189,27 @@ def triton_update_read_archive_chunk(
             NUM_CODES=num_codes,
             NUM_SCALES=num_scales,
             HEAD_DIM=dim,
+            GLOBAL_NORMALIZATION=bool(global_normalization),
         )
         output_block = output[:, :, start : start + count]
         _qcc_route_partial_kernel[(batch * heads * count,)](
             output_block,
             query_block,
             partial,
+            partial_den,
             codes,
             heads,
             *output.stride(),
             *query_block.stride(),
             *partial.stride(),
+            *partial_den.stride(),
             *codes.stride(),
             count,
             BLOCK_D=block_dim,
             BLOCK_C=block_codes,
             NUM_CODES=num_codes,
             HEAD_DIM=dim,
+            GLOBAL_NORMALIZATION=bool(global_normalization),
         )
 
     if numerator.data_ptr() != original_numerator.data_ptr():

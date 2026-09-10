@@ -926,7 +926,6 @@ class QCCArchive(nn.Module):
             and key.is_cuda
             and self.active_codes is None
             and not self.kernel_features
-            and not self.global_normalization
             and self.query_correction_rank == 0
         ):
             from .triton_kernels import TRITON_AVAILABLE, triton_update_read_archive_chunk
@@ -946,6 +945,7 @@ class QCCArchive(nn.Module):
                     output=output,
                     content_threshold=self.content_threshold,
                     prepared_mix=self._prepared_triton_mix(key.device),
+                    global_normalization=self.global_normalization,
                 )
                 combined = (
                     self._combine_landmark(query, result)
@@ -1297,7 +1297,6 @@ class QCCArchive(nn.Module):
             and not torch.is_grad_enabled()
             and query.is_cuda
             and not self.kernel_features
-            and not self.global_normalization
             and self.query_correction_rank == 0
         ):
             from .triton_kernels import TRITON_AVAILABLE, triton_read_archive
@@ -1310,6 +1309,7 @@ class QCCArchive(nn.Module):
                     self.codes,
                     self.mix_logits,
                     prepared_mix=self._prepared_triton_mix(query.device),
+                    global_normalization=self.global_normalization,
                 )
                 return self._combine_landmark(query, result)
 
