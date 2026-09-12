@@ -527,7 +527,7 @@ Read all available `config.json` files beneath
 The largest declared limit there is 262,144 (Qwen3-VL 4B/8B); the active Phi
 declares 131,072. This local inventory does not rule out other checkpoints
 elsewhere, but none in this model directory supplies the required 1M baseline.
-No model limits were edited or models downloaded. Session 46491 remains live.
+No model limits were edited or models downloaded. Session 46491 completed.
 
 ### Matched current-code control completed
 
@@ -563,7 +563,7 @@ change has not yet been measured.
 
 Row21 Full-KV emitted the correct UUID but reached the 128-token output limit;
 the benchmark therefore reports answer_recall=1 and score=0/correct=false.
-Candidate is running. Do not treat this baseline as a clean matched quality
+The candidate completed. Do not treat this baseline as a clean matched quality
 denominator; retain both raw recall and output-limit information.
 
 Row21 completed: both generations reached 128 tokens. Full-KV contains the
@@ -586,3 +586,25 @@ Row21 answer crosses a block boundary: tokens 2277–2303 encode the UUID
 prefix, tokens 2304–2309 encode `7343daf`. Several layers retain the prefix
 but omit suffix KV across all heads. This suggests testing block geometry at
 fixed capacity after the active sequence, not increasing capacity blindly.
+
+Row41 completed: Full-KV and exact-prefill QCC both emit the correct number
+4080114 (raw recall 1), and both hit the 128-token output limit (score 0).
+QCC state remains 5,605,839,360 bytes; peak allocation 15,276,427,264 bytes.
+This is retrieval success under truncation, not a valid score-ratio result.
+Session 98854 has advanced to row61. Row61 starts after the GitHub main merge
+and therefore includes the remote cache-compatibility and Triton-read changes;
+this run still has use_triton=False. Preserve this code provenance distinction.
+
+Row61 completed: Full-KV emitted all five expected variables in its raw output
+but reached the 128-token output limit (score 0). Exact-prefill QCC emitted a
+finite 65-token response with 4/5 variables, answer_recall=0.8 and score=0.8;
+it omitted or corrupted one variable. QCC state is 5,605,839,360 bytes, with
+peak allocation 15,333,390,336 bytes. This is the first cross-task sample where
+the intervention gives a non-truncated, partially correct score, but it still
+fails the task and cannot support a high aggregate-quality claim.
+
+Across the 4 diagnostic rows, exact-prefill QCC has one exact full-score result
+(row6), one partial result (row61), one raw-recall failure under truncation
+(row21), and one correct answer under truncation (row41). These rows are
+diagnostics only: they are approximately 16K-token examples from a 65K maximum
+subset, not the requested 128K aggregate.
