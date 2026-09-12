@@ -63,6 +63,9 @@ def _ensure_remote_code_compat() -> None:
             return self.get_seq_length(layer_idx)
 
         DynamicCache.get_usable_length = get_usable_length
+    if not hasattr(DynamicCache, "seen_tokens"):
+        # Phi-3 remote code still reads the pre-4.36 cache counter directly.
+        DynamicCache.seen_tokens = property(lambda self: self.get_seq_length())
 
 
 def load_hf_causal_lm(
