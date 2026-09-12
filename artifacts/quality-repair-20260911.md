@@ -667,3 +667,15 @@ parameters/state. A focused test confirms a matching decode key/query is stored
 with score 1.0; all 103 existing associative/hybrid/retrofit/archive/benchmark
 tests pass. Real-model quality is not yet measured because the GPU has a stale
 hidden allocation of roughly 16.4 GiB.
+
+### Paired experiment scheduling note
+
+After the GPU allocation cleared, a single-process 2×2 run for rows 6 and 21
+was started with one model load and in-memory group switching. The existing
+per-token exact-bank Python update path made it impractical: after about
+80 minutes of CPU time it had produced only the first ordinary-QCC row6
+record, while row21 was still running. The process was interrupted before
+writing its aggregate JSON, so it is not evidence and no partial result is
+claimed. The prescribed comparison remains pending; future runs should write
+each group immediately or use a bounded diagnostic subset before committing
+to multiple 16K–32K records.
