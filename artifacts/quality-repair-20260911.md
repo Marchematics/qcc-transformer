@@ -608,3 +608,14 @@ Across the 4 diagnostic rows, exact-prefill QCC has one exact full-score result
 (row21), and one correct answer under truncation (row41). These rows are
 diagnostics only: they are approximately 16K-token examples from a 65K maximum
 subset, not the requested 128K aggregate.
+
+### Fixed-capacity block-geometry control
+
+Ran row21 with the same 384 foreground plus 128 background slots and exact
+prefill, changing retention from 12×32 blocks to 24×16 blocks. Full-KV again
+returned the complete UUID; QCC returned a different UUID suffix with raw
+answer recall 0 after 88 generated tokens. State was 5,593,190,912 bytes and
+peak allocation 15,293,140,992 bytes. The failure persists when block boundaries
+change, so the row21 loss is not explained by the 32-token block boundary.
+The artifact is `exact-prefill-intervention-row21-block16.json`. This is a
+single-row diagnostic; it does not justify changing the production geometry.
