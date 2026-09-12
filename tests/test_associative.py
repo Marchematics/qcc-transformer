@@ -1,8 +1,139 @@
+import math
 import pytest
 import torch
 
 from qcc_transformer import SetAssociativeLandmarkBank
 from qcc_transformer import triton_kernels
+
+
+@pytest.mark.parametrize('device', ['cpu', pytest.param('cuda', marks=pytest.mark.skipif(not torch.cuda.is_available(), reason='CUDA unavailable'))])
+def test_attention_partition_combines_with_local_softmax(device):
+    torch.manual_seed(92)
+    bank = SetAssociativeLandmarkBank(2, 4, num_sets=1, ways=3, probe_sets=1)
+    bank.reset_state(2, device=torch.device(device))
+    keys = torch.randn(2, 2, 3, 4, device=device)
+    values = torch.randn_like(keys)
+    for i in range(3):
+        bank.update(keys[:, :, i], values[:, :, i])
+    bank._scores[1, 1].fill_(-torch.inf)
+    query = torch.randn(2, 2, 129, 4, device=device)
+    local_keys = torch.randn(2, 2, 5, 4, device=device)
+    local_values = torch.randn_like(local_keys)
+    remote, remote_z = bank.read_attention(query)
+    local_logits = query @ local_keys.transpose(-1, -2) / 2
+    local_z = local_logits.logsumexp(-1)
+    local = local_logits.softmax(-1) @ local_values
+    remote_weight = torch.sigmoid(remote_z - local_z).unsqueeze(-1)
+    combined = local * (1 - remote_weight) + remote * remote_weight
+    all_keys = torch.cat((bank._keys.flatten(2, 3), local_keys), 2)
+    all_values = torch.cat((bank._values.flatten(2, 3), local_values), 2)
+    valid = torch.cat((torch.isfinite(bank._scores.flatten(2, 3)), torch.ones(2, 2, 5, device=device, dtype=torch.bool)), -1)
+    expected = torch.nn.functional.scaled_dot_product_attention(query, all_keys, all_values, attn_mask=valid.unsqueeze(2))
+    torch.testing.assert_close(combined, expected, atol=1e-6, rtol=1e-5)
+    assert torch.isneginf(remote_z[1, 1]).all()
+    assert torch.count_nonzero(remote[1, 1]) == 0
+    single, single_z = bank.read_attention(query[:, :, 0])
+    torch.testing.assert_close(single, remote[:, :, 0])
+    torch.testing.assert_close(single_z, remote_z[:, :, 0])
+
+
+@pytest.mark.parametrize('device', ['cpu', pytest.param('cuda', marks=pytest.mark.skipif(not torch.cuda.is_available(), reason='CUDA unavailable'))])
+def test_background_reservoir_is_disjoint_bounded_and_mass_correct(device):
+    torch.manual_seed(39)
+    bank = SetAssociativeLandmarkBank(1, 4, num_sets=1, ways=2, probe_sets=1,
+        background_size=4, diversity_weight=0)
+    bank.reset_state(1, device=torch.device(device))
+    state_bytes = bank.state_bytes()
+    keys = torch.randn(1, 1, 6, 4, device=device)
+    values = torch.arange(6., device=device).view(1, 1, 6, 1).expand_as(keys)
+    for i, score in enumerate((10., 1., 20., -1., 30., 2.)):
+        bank.update(keys[:, :, i], values[:, :, i], admission_bias=torch.tensor([[score]], device=device))
+    stored = torch.cat((bank._values.flatten(2, 3), bank._background_values), 2)
+    assert sorted(stored[0, 0, :, 0].tolist()) == list(range(6))
+    assert int(bank._background_count.item()) == 4
+    query = torch.randn(1, 1, 3, 4, device=device)
+    actual, log_z = bank.read_attention(query)
+    logits = query @ keys.transpose(-1, -2) / 2
+    torch.testing.assert_close(actual, logits.softmax(-1) @ values, atol=1e-6, rtol=1e-5)
+    torch.testing.assert_close(log_z, logits.logsumexp(-1), atol=1e-6, rtol=1e-5)
+    bank.reset_state(1, device=torch.device(device))
+    for _ in range(50):
+        bank.update(torch.zeros(1, 1, 4, device=device), torch.ones(1, 1, 4, device=device),
+                    write_mask=torch.zeros(1, 1, device=device, dtype=torch.bool))
+    actual, log_z = bank.read_attention(query)
+    torch.testing.assert_close(actual, torch.ones_like(actual))
+    torch.testing.assert_close(log_z, torch.full_like(log_z, math.log(50)))
+    assert bank.state_bytes() == state_bytes
+    assert int(bank._background_count.item()) == 50
+
+
+def test_background_reservoir_sampling_is_independent_per_batch_request():
+    def make_bank():
+        return SetAssociativeLandmarkBank(
+            1, 2, num_sets=1, ways=2, probe_sets=1,
+            diversity_weight=0, background_size=3,
+        )
+
+    batched = make_bank()
+    independent = [make_bank(), make_bank()]
+    keys = torch.arange(40, dtype=torch.float32).reshape(2, 1, 10, 2)
+    values = keys + 100
+    writes = torch.tensor(
+        [[[True], [False], [False], [True], [False], [False], [True], [False], [False], [False]],
+         [[False], [True], [False], [False], [True], [False], [False], [True], [False], [False]]],
+        dtype=torch.bool,
+    ).reshape(2, 10, 1)
+    with torch.no_grad():
+        for index in range(keys.shape[2]):
+            score = torch.full((2, 1), 1.0)
+            batched.update(
+                keys[:, :, index], values[:, :, index],
+                admission_bias=score, write_mask=writes[:, index],
+            )
+            for batch_index, bank in enumerate(independent):
+                bank.update(
+                    keys[batch_index:batch_index + 1, :, index],
+                    values[batch_index:batch_index + 1, :, index],
+                    admission_bias=score[batch_index:batch_index + 1],
+                    write_mask=writes[batch_index:batch_index + 1, index],
+                )
+    for batch_index, bank in enumerate(independent):
+        torch.testing.assert_close(
+            batched._background_keys[batch_index:batch_index + 1],
+            bank._background_keys,
+        )
+        torch.testing.assert_close(
+            batched._background_values[batch_index:batch_index + 1],
+            bank._background_values,
+        )
+        torch.testing.assert_close(
+            batched._keys[batch_index:batch_index + 1], bank._keys,
+        )
+
+
+def test_block_retention_keeps_pending_tokens_causal_and_bounds_state():
+    torch.manual_seed(115)
+    bank = SetAssociativeLandmarkBank(1, 4, num_sets=1, ways=4, probe_sets=1,
+        block_size=4, background_size=4, diversity_weight=0)
+    initial_bytes = bank.state_bytes()
+    keys = torch.randn(1, 1, 11, 4)
+    values = torch.arange(11.).view(1, 1, 11, 1).expand_as(keys)
+    query = torch.randn(1, 1, 4)
+    for i in range(11):
+        bank.update(keys[:, :, i], values[:, :, i], admission_bias=torch.tensor([[float(i)]]))
+        actual, log_z = bank.read_attention(query)
+        scores = query.unsqueeze(2) @ keys[:, :, :i+1].transpose(-1, -2) / 2
+        expected = (scores.softmax(-1) @ values[:, :, :i+1]).squeeze(2)
+        torch.testing.assert_close(actual, expected)
+        torch.testing.assert_close(log_z, scores.logsumexp(-1).squeeze(2))
+    assert bank._pending_count == 3
+    assert bank._values[0, 0, 0, :, 0].tolist() == [4., 5., 6., 7.]
+    for i in range(11, 50):
+        bank.update(torch.zeros(1, 1, 4), torch.ones(1, 1, 4), admission_bias=torch.tensor([[float(i)]]))
+    assert bank.state_bytes() == initial_bytes
+    bank.reset_state(1)
+    assert bank._pending_count == 0
+    assert bank._background_count.item() == 0
 
 
 def test_set_associative_bank_retains_multiple_records_in_same_set() -> None:

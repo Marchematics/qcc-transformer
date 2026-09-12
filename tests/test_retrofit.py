@@ -11,6 +11,7 @@ from qcc_transformer.retrofit import (
     retrofit_adapter_state,
     save_retrofit_adapter,
     reset_hf_qcc_cache,
+    qcc_runtime_state_bytes,
 )
 from qcc_transformer.hybrid_archive import patch_hf_model_hybrid
 from benchmarks.calibrate_hf_admission import _load_initial_adapter
@@ -84,6 +85,18 @@ class _ModernCache:
     def get_usable_length(self, new_seq_length, layer_idx=0):
         del new_seq_length, layer_idx
         return self.length
+
+
+def test_runtime_state_counts_backing_storage_once():
+    model = _Model()
+    patch_hf_model(model, window_size=4, num_codes=4, use_triton=False)
+    before = qcc_runtime_state_bytes(model)['total_bytes']
+    backing = torch.zeros(1024)
+    model.attn.qcc._archive_read_cache = backing[:1]
+    model.attn.qcc._archive_query_cache = backing[1:2]
+    model.attn.qcc._fused_projection_weight = torch.zeros(2000)
+    after = qcc_runtime_state_bytes(model)['total_bytes']
+    assert after - before == backing.untyped_storage().nbytes()
 
 
 def test_patch_hf_reads_transformers5_rope_parameters():
@@ -240,34 +253,57 @@ def test_hf_prefill_is_chunked_when_prompt_exceeds_bound():
     assert model.attn.qcc._chunk_key_scratch.shape[2] <= 3 + 4
 
 
-def test_quality_first_prefill_keeps_future_queries_visible():
+@pytest.mark.parametrize('tail, expected_length, expected_start', [(None, 6, 0), (2, 2, 4)])
+@pytest.mark.parametrize('external_rope', [False, True])
+def test_quality_first_prefill_keeps_future_queries_visible(tail, expected_length, expected_start, external_rope):
     model = _Model()
     patch_hf_model_hybrid(
         model,
         window_size=4,
         num_codes=4,
         use_triton=False,
-        hybrid_kwargs={"exact_num_sets": 2, "exact_ways": 2, "quality_first": True},
+        hybrid_kwargs={"exact_num_sets": 2, "exact_ways": 2, "quality_first": True, "quality_query_tail": tail},
     )
     qcc = model.attn.qcc
     calls = []
     quality_queries = []
+    query_starts = []
+    projection_lengths = []
+    project = qcc._project_qkv_gate
+    def observed_project(hidden):
+        projection_lengths.append(hidden.shape[1])
+        return project(hidden)
+    qcc._project_qkv_gate = observed_project
     original = qcc.step_chunk
 
     def counted(hidden, **kwargs):
         calls.append(int(hidden.shape[1]))
         quality_queries.append(kwargs.get("quality_query"))
+        query_starts.append(kwargs.get("quality_query_start"))
         return original(hidden, **kwargs)
 
     qcc.step_chunk = counted
     hidden = torch.randn(1, 10, 16)
-    output, _, cache = model.attn(hidden, use_cache=True)
+    positions = torch.arange(10).unsqueeze(0)
+    angles = torch.randn(1, 10, qcc.head_dim)
+    embeddings = (angles.cos(), angles.sin()) if external_rope else None
+    output, _, cache = model.attn(hidden, use_cache=True, position_ids=positions,
+                                 position_embeddings=embeddings)
     assert output.shape == hidden.shape
     assert cache is not None and cache.get_seq_length() == hidden.shape[1]
     # The quality-first path keeps normal chunks but exposes the complete
     # future query stream to every salience decision.
     assert calls == [4, 4, 2]
-    assert [query.shape[2] for query in quality_queries] == [6, 6, 6]
+    assert [query.shape[2] for query in quality_queries] == [expected_length] * 3
+    # Offsets use archive-query events, not absolute token positions.
+    assert query_starts == [expected_start] * 3
+    assert projection_lengths[0] == expected_length
+    assert max(projection_lengths[1:]) <= 4
+    # Compare the sliced projection against the previous full-prompt equation.
+    full_query = qcc._split_heads(project(hidden)[0])
+    full_query, _ = qcc._apply_rope(full_query, full_query, positions, embeddings)
+    for query in quality_queries:
+        torch.testing.assert_close(query, full_query[:, :, -expected_length:])
 
 
 def test_patch_hf_supports_modern_shared_cache_call():

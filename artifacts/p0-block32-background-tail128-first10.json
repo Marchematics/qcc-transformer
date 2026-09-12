@@ -1,0 +1,505 @@
+{
+  "schema": "qcc-ruler-v1",
+  "pretrained_parameters": 3821079552,
+  "trainable_parameters": 6589440,
+  "trainable_fraction_of_pretrained": 0.0017244969413293177,
+  "benchmark": "ruler",
+  "model": "/datasets/ComfyUI/models/LLM/Phi-3.5-mini-instruct",
+  "model_id": "/datasets/ComfyUI/models/LLM/Phi-3.5-mini-instruct",
+  "run_id": "p0-block32-background-tail128-first10",
+  "matched_full_kv": true,
+  "offload_full_kv": true,
+  "full_kv_resident_layers": 8,
+  "scoring": "mean case-insensitive answer recall; output-limit and generation errors score zero",
+  "attention_sink_size": 32,
+  "archive_mix_override": null,
+  "real_model": true,
+  "synthetic": false,
+  "official": true,
+  "attn_implementation": "sdpa",
+  "use_triton": false,
+  "local_attention_backend": "sdpa",
+  "prefill_chunk_size": 512,
+  "quality_first": true,
+  "exact_attention": true,
+  "background_size": 128,
+  "retention_block_size": 32,
+  "quality_query_tail": 128,
+  "exact_num_sets": 12,
+  "exact_ways": 32,
+  "full_suite": false,
+  "qcc_only": false,
+  "qcc_score": 0.4,
+  "full_kv_score": 1.0,
+  "quality_retention": 0.4,
+  "generation_errors": {
+    "full_kv": 0,
+    "qcc": 0
+  },
+  "task_ratios": {
+    "task:niah_multikey_2": 0.4,
+    "length:8-32K": 0.4
+  },
+  "quality_score": 0.4,
+  "native_context_tokens": 131072,
+  "records": 10,
+  "patched_layers": [
+    "model.layers.0.self_attn",
+    "model.layers.1.self_attn",
+    "model.layers.2.self_attn",
+    "model.layers.3.self_attn",
+    "model.layers.4.self_attn",
+    "model.layers.5.self_attn",
+    "model.layers.6.self_attn",
+    "model.layers.7.self_attn",
+    "model.layers.8.self_attn",
+    "model.layers.9.self_attn",
+    "model.layers.10.self_attn",
+    "model.layers.11.self_attn",
+    "model.layers.12.self_attn",
+    "model.layers.13.self_attn",
+    "model.layers.14.self_attn",
+    "model.layers.15.self_attn",
+    "model.layers.16.self_attn",
+    "model.layers.17.self_attn",
+    "model.layers.18.self_attn",
+    "model.layers.19.self_attn",
+    "model.layers.20.self_attn",
+    "model.layers.21.self_attn",
+    "model.layers.22.self_attn",
+    "model.layers.23.self_attn",
+    "model.layers.24.self_attn",
+    "model.layers.25.self_attn",
+    "model.layers.26.self_attn",
+    "model.layers.27.self_attn",
+    "model.layers.28.self_attn",
+    "model.layers.29.self_attn",
+    "model.layers.30.self_attn",
+    "model.layers.31.self_attn"
+  ],
+  "baseline_full_kv": {
+    "correct": 10,
+    "score_sum": 10.0,
+    "accuracy": 1.0,
+    "records": [
+      {
+        "line": 1,
+        "answers": [
+          "7549132"
+        ],
+        "length_chars": 43831,
+        "tokens": 16120,
+        "task": "niah_multikey_2",
+        "length_bucket": "8-32K",
+        "prediction": "\nThe special magic number for ruthless-hierarchy mentioned in the provided text is: 7549132.\n\n",
+        "generated_tokens": 32,
+        "reached_output_limit": false,
+        "answer_recall": 1.0,
+        "score": 1.0,
+        "correct": true,
+        "peak_cuda_allocated_bytes": 10696181248
+      },
+      {
+        "line": 2,
+        "answers": [
+          "5528843"
+        ],
+        "length_chars": 43796,
+        "tokens": 16138,
+        "task": "niah_multikey_2",
+        "length_bucket": "8-32K",
+        "prediction": "\nThe special magic number for wonderful-convection mentioned in the provided text is 5528843.\n\n",
+        "generated_tokens": 29,
+        "reached_output_limit": false,
+        "answer_recall": 1.0,
+        "score": 1.0,
+        "correct": true,
+        "peak_cuda_allocated_bytes": 10700766720
+      },
+      {
+        "line": 3,
+        "answers": [
+          "3539476"
+        ],
+        "length_chars": 43963,
+        "tokens": 16181,
+        "task": "niah_multikey_2",
+        "length_bucket": "8-32K",
+        "prediction": "\n\nThe special magic number for exclusive-main mentioned in the provided text is: 3539476.\n\n",
+        "generated_tokens": 29,
+        "reached_output_limit": false,
+        "answer_recall": 1.0,
+        "score": 1.0,
+        "correct": true,
+        "peak_cuda_allocated_bytes": 10707451392
+      },
+      {
+        "line": 4,
+        "answers": [
+          "2326271"
+        ],
+        "length_chars": 43915,
+        "tokens": 16183,
+        "task": "niah_multikey_2",
+        "length_bucket": "8-32K",
+        "prediction": "\n\nThe special magic number for lowly-jar mentioned in the provided text is: 2326271.\n\n",
+        "generated_tokens": 30,
+        "reached_output_limit": false,
+        "answer_recall": 1.0,
+        "score": 1.0,
+        "correct": true,
+        "peak_cuda_allocated_bytes": 10707739648
+      },
+      {
+        "line": 5,
+        "answers": [
+          "4291815"
+        ],
+        "length_chars": 43954,
+        "tokens": 16198,
+        "task": "niah_multikey_2",
+        "length_bucket": "8-32K",
+        "prediction": "\n\nThe special magic number for calm-clasp mentioned in the provided text is: 4291815.\n\n",
+        "generated_tokens": 30,
+        "reached_output_limit": false,
+        "answer_recall": 1.0,
+        "score": 1.0,
+        "correct": true,
+        "peak_cuda_allocated_bytes": 10711045632
+      },
+      {
+        "line": 6,
+        "answers": [
+          "8650260"
+        ],
+        "length_chars": 86964,
+        "tokens": 32030,
+        "task": "niah_multikey_2",
+        "length_bucket": "8-32K",
+        "prediction": "\nThe special magic number for fast-clapboard mentioned in the text is 8650260.\n",
+        "generated_tokens": 27,
+        "reached_output_limit": false,
+        "answer_recall": 1.0,
+        "score": 1.0,
+        "correct": true,
+        "peak_cuda_allocated_bytes": 13701943296
+      },
+      {
+        "line": 7,
+        "answers": [
+          "9116227"
+        ],
+        "length_chars": 87001,
+        "tokens": 32078,
+        "task": "niah_multikey_2",
+        "length_bucket": "8-32K",
+        "prediction": "\n\nThe special magic number for salty-pecan mentioned in the provided text is: 9116227.\n\n",
+        "generated_tokens": 31,
+        "reached_output_limit": false,
+        "answer_recall": 1.0,
+        "score": 1.0,
+        "correct": true,
+        "peak_cuda_allocated_bytes": 13710166016
+      },
+      {
+        "line": 8,
+        "answers": [
+          "2773213"
+        ],
+        "length_chars": 86827,
+        "tokens": 32024,
+        "task": "niah_multikey_2",
+        "length_bucket": "8-32K",
+        "prediction": "\n\nThe special magic number for tangible-brassiere mentioned in the provided text is: 2773213.\n\n",
+        "generated_tokens": 32,
+        "reached_output_limit": false,
+        "answer_recall": 1.0,
+        "score": 1.0,
+        "correct": true,
+        "peak_cuda_allocated_bytes": 13701160960
+      },
+      {
+        "line": 9,
+        "answers": [
+          "8498015"
+        ],
+        "length_chars": 88607,
+        "tokens": 32594,
+        "task": "niah_multikey_2",
+        "length_bucket": "8-32K",
+        "prediction": "\n\nThe special magic number for oafish-comment mentioned in the provided text is: 8498015.\n\n",
+        "generated_tokens": 31,
+        "reached_output_limit": false,
+        "answer_recall": 1.0,
+        "score": 1.0,
+        "correct": true,
+        "peak_cuda_allocated_bytes": 13807114240
+      },
+      {
+        "line": 10,
+        "answers": [
+          "4002205"
+        ],
+        "length_chars": 86937,
+        "tokens": 32047,
+        "task": "niah_multikey_2",
+        "length_bucket": "8-32K",
+        "prediction": "\n\nThe special magic number for heavy-lead mentioned in the provided text is: 4002205.\n",
+        "generated_tokens": 29,
+        "reached_output_limit": false,
+        "answer_recall": 1.0,
+        "score": 1.0,
+        "correct": true,
+        "peak_cuda_allocated_bytes": 13705207808
+      }
+    ]
+  },
+  "qcc_retrofit": {
+    "correct": 4,
+    "score_sum": 4.0,
+    "accuracy": 0.4,
+    "records": [
+      {
+        "line": 1,
+        "answers": [
+          "7549132"
+        ],
+        "length_chars": 43831,
+        "tokens": 16120,
+        "task": "niah_multikey_2",
+        "length_bucket": "8-32K",
+        "prediction": "The special magic number for ruthless-hierarchy mentioned in the text is 7549132.\n\n",
+        "generated_tokens": 29,
+        "reached_output_limit": false,
+        "answer_recall": 1.0,
+        "score": 1.0,
+        "correct": true,
+        "qcc_runtime_state": {
+          "tensor_storage_by_device": {
+            "cuda:0": 5605838848
+          },
+          "rng_state_bytes": 512,
+          "total_bytes": 5605839360
+        },
+        "peak_cuda_allocated_bytes": 15735310848
+      },
+      {
+        "line": 2,
+        "answers": [
+          "5528843"
+        ],
+        "length_chars": 43796,
+        "tokens": 16138,
+        "task": "niah_multikey_2",
+        "length_bucket": "8-32K",
+        "prediction": "\nThe special magic number for wonderful-convection mentioned in the provided text is 5528843.\n\n",
+        "generated_tokens": 29,
+        "reached_output_limit": false,
+        "answer_recall": 1.0,
+        "score": 1.0,
+        "correct": true,
+        "qcc_runtime_state": {
+          "tensor_storage_by_device": {
+            "cuda:0": 5605838848
+          },
+          "rng_state_bytes": 512,
+          "total_bytes": 5605839360
+        },
+        "peak_cuda_allocated_bytes": 15738853888
+      },
+      {
+        "line": 3,
+        "answers": [
+          "3539476"
+        ],
+        "length_chars": 43963,
+        "tokens": 16181,
+        "task": "niah_multikey_2",
+        "length_bucket": "8-32K",
+        "prediction": "\n\nThe special magic number for exclusive-main mentioned in the provided text is: discreet-boutique\n\n",
+        "generated_tokens": 27,
+        "reached_output_limit": false,
+        "answer_recall": 0.0,
+        "score": 0.0,
+        "correct": false,
+        "qcc_runtime_state": {
+          "tensor_storage_by_device": {
+            "cuda:0": 5605838848
+          },
+          "rng_state_bytes": 512,
+          "total_bytes": 5605839360
+        },
+        "peak_cuda_allocated_bytes": 15741477888
+      },
+      {
+        "line": 4,
+        "answers": [
+          "2326271"
+        ],
+        "length_chars": 43915,
+        "tokens": 16183,
+        "task": "niah_multikey_2",
+        "length_bucket": "8-32K",
+        "prediction": "\n\nThe special magic number for lowly-jar mentioned in the provided text is 2326271.\n\n",
+        "generated_tokens": 29,
+        "reached_output_limit": false,
+        "answer_recall": 1.0,
+        "score": 1.0,
+        "correct": true,
+        "qcc_runtime_state": {
+          "tensor_storage_by_device": {
+            "cuda:0": 5605838848
+          },
+          "rng_state_bytes": 512,
+          "total_bytes": 5605839360
+        },
+        "peak_cuda_allocated_bytes": 15744193024
+      },
+      {
+        "line": 5,
+        "answers": [
+          "4291815"
+        ],
+        "length_chars": 43954,
+        "tokens": 16198,
+        "task": "niah_multikey_2",
+        "length_bucket": "8-32K",
+        "prediction": "\nThe special magic number for calm-clasp mentioned in the provided text is: 4291815.\n",
+        "generated_tokens": 28,
+        "reached_output_limit": false,
+        "answer_recall": 1.0,
+        "score": 1.0,
+        "correct": true,
+        "qcc_runtime_state": {
+          "tensor_storage_by_device": {
+            "cuda:0": 5605838848
+          },
+          "rng_state_bytes": 512,
+          "total_bytes": 5605839360
+        },
+        "peak_cuda_allocated_bytes": 15741962240
+      },
+      {
+        "line": 6,
+        "answers": [
+          "8650260"
+        ],
+        "length_chars": 86964,
+        "tokens": 32030,
+        "task": "niah_multikey_2",
+        "length_bucket": "8-32K",
+        "prediction": "\nThe special magic number for fast-clapboard mentioned in the provided text is 9132055.\n",
+        "generated_tokens": 28,
+        "reached_output_limit": false,
+        "answer_recall": 0.0,
+        "score": 0.0,
+        "correct": false,
+        "qcc_runtime_state": {
+          "tensor_storage_by_device": {
+            "cuda:0": 5605838848
+          },
+          "rng_state_bytes": 512,
+          "total_bytes": 5605839360
+        },
+        "peak_cuda_allocated_bytes": 16627911168
+      },
+      {
+        "line": 7,
+        "answers": [
+          "9116227"
+        ],
+        "length_chars": 87001,
+        "tokens": 32078,
+        "task": "niah_multikey_2",
+        "length_bucket": "8-32K",
+        "prediction": "The special magic number for salty-pecan mentioned in the provided text is 5927833.\n\n",
+        "generated_tokens": 28,
+        "reached_output_limit": false,
+        "answer_recall": 0.0,
+        "score": 0.0,
+        "correct": false,
+        "qcc_runtime_state": {
+          "tensor_storage_by_device": {
+            "cuda:0": 5605838848
+          },
+          "rng_state_bytes": 512,
+          "total_bytes": 5605839360
+        },
+        "peak_cuda_allocated_bytes": 16627062784
+      },
+      {
+        "line": 8,
+        "answers": [
+          "2773213"
+        ],
+        "length_chars": 86827,
+        "tokens": 32024,
+        "task": "niah_multikey_2",
+        "length_bucket": "8-32K",
+        "prediction": "\n\nThe special magic number for tangible-brassiere mentioned in the provided text is 7823091.\n\n",
+        "generated_tokens": 31,
+        "reached_output_limit": false,
+        "answer_recall": 0.0,
+        "score": 0.0,
+        "correct": false,
+        "qcc_runtime_state": {
+          "tensor_storage_by_device": {
+            "cuda:0": 5605838848
+          },
+          "rng_state_bytes": 512,
+          "total_bytes": 5605839360
+        },
+        "peak_cuda_allocated_bytes": 16626319872
+      },
+      {
+        "line": 9,
+        "answers": [
+          "8498015"
+        ],
+        "length_chars": 88607,
+        "tokens": 32594,
+        "task": "niah_multikey_2",
+        "length_bucket": "8-32K",
+        "prediction": "\n\nThe special magic number for oafish-comment mentioned in the provided text is: 2237931.\n",
+        "generated_tokens": 30,
+        "reached_output_limit": false,
+        "answer_recall": 0.0,
+        "score": 0.0,
+        "correct": false,
+        "qcc_runtime_state": {
+          "tensor_storage_by_device": {
+            "cuda:0": 5605838848
+          },
+          "rng_state_bytes": 512,
+          "total_bytes": 5605839360
+        },
+        "peak_cuda_allocated_bytes": 16657575424
+      },
+      {
+        "line": 10,
+        "answers": [
+          "4002205"
+        ],
+        "length_chars": 86937,
+        "tokens": 32047,
+        "task": "niah_multikey_2",
+        "length_bucket": "8-32K",
+        "prediction": "\nThe special magic number for heavy-lead mentioned in the provided text is: 9881329\n\n",
+        "generated_tokens": 28,
+        "reached_output_limit": false,
+        "answer_recall": 0.0,
+        "score": 0.0,
+        "correct": false,
+        "qcc_runtime_state": {
+          "tensor_storage_by_device": {
+            "cuda:0": 5605838848
+          },
+          "rng_state_bytes": 512,
+          "total_bytes": 5605839360
+        },
+        "peak_cuda_allocated_bytes": 16623397376
+      }
+    ]
+  },
+  "note": "Official RULER record scoring; generation failures count as incorrect and no quality claim is made beyond this split."
+}

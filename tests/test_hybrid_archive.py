@@ -1,6 +1,7 @@
 import copy
 
 import torch
+import pytest
 
 from qcc_transformer import (
     HybridQCCArchive,
@@ -9,6 +10,77 @@ from qcc_transformer import (
     QCCSelfAttention,
     upgrade_qcc_attention,
 )
+
+
+def test_rotary_exact_tier_matches_chunk_and_token_decode() -> None:
+    torch.manual_seed(7)
+    attention = QCCSelfAttention(
+        16, 2, window_size=4, num_codes=3, use_triton=False,
+        rope_theta=10000, archive_position_invariant=True,
+    ).eval()
+    upgrade_qcc_attention(
+        attention, exact_num_sets=2, exact_ways=8,
+        admission_bias_init=1, max_inserts_per_chunk=16,
+    )
+    tokenwise = copy.deepcopy(attention)
+    hidden = torch.randn(1, 13, 16)
+    with torch.no_grad():
+        expected = attention.step_chunk(hidden)
+        actual = torch.stack([tokenwise.step(hidden[:, i]) for i in range(13)], 1)
+    torch.testing.assert_close(actual, expected, atol=1e-6, rtol=1e-5)
+    torch.testing.assert_close(
+        tokenwise.archive.exact_bank._keys, attention.archive.exact_bank._keys,
+        atol=1e-6, rtol=1e-5,
+    )
+
+
+def test_weighted_exact_archive_matches_full_kv_while_all_keys_fit() -> None:
+    torch.manual_seed(113)
+    attention = QCCSelfAttention(
+        16, 2, window_size=4, attention_sink_size=2, num_codes=3,
+        use_triton=False, rope_theta=10000, archive_position_invariant=True,
+    ).eval()
+    reference = copy.deepcopy(attention)
+    reference.use_archive = False
+    reference.window_size = 32
+    upgrade_qcc_attention(
+        attention, exact_num_sets=1, exact_ways=32, exact_attention=True,
+        admission_bias_init=1, max_inserts_per_chunk=32,
+    )
+    tokenwise = copy.deepcopy(attention)
+    x = torch.randn(1, 13, 16)
+    assert not attention.archive.exact_bank.set_codes.requires_grad
+    with torch.no_grad():
+        expected = reference.step_chunk(x)
+        actual = torch.cat([attention.step_chunk(x[:, :3]), attention.step_chunk(x[:, 3:7]), attention.step_chunk(x[:, 7:])], 1)
+        single = torch.stack([tokenwise.step(x[:, i]) for i in range(13)], 1)
+        torch.testing.assert_close(actual, expected, atol=1e-6, rtol=1e-5)
+        torch.testing.assert_close(single, expected, atol=1e-6, rtol=1e-5)
+        torch.testing.assert_close(attention(x), expected, atol=1e-6, rtol=1e-5)
+    attention.reset_cache(1, device=x.device)
+    differentiable = attention(x)
+    torch.testing.assert_close(differentiable, expected, atol=1e-6, rtol=1e-5)
+    differentiable.sum().backward()
+
+
+@pytest.mark.parametrize('block_size', [1, 2])
+def test_background_streaming_matches_chunks_after_reservoir_fills(block_size):
+    torch.manual_seed(83)
+    attention = QCCSelfAttention(16, 2, window_size=4, attention_sink_size=2,
+                                use_triton=False, rope_theta=10000, archive_position_invariant=True).eval()
+    upgrade_qcc_attention(attention, exact_num_sets=1, exact_ways=2,
+                          exact_attention=True, background_size=3, admission_bias_init=1,
+                          block_size=block_size,
+                          max_inserts_per_chunk=32)
+    reference = copy.deepcopy(attention)
+    x = torch.randn(1, 18, 16)
+    with torch.no_grad():
+        chunks = torch.cat([attention.step_chunk(x[:, i:i+3]) for i in range(0, 18, 3)], 1)
+        tokens = torch.stack([reference.step(x[:, i]) for i in range(18)], 1)
+        torch.testing.assert_close(chunks, tokens, atol=1e-6, rtol=1e-5)
+        assert torch.equal(attention.archive.exact_bank._background_count, torch.full((1, 2), 10))
+        attention.reset_cache(1, device=x.device)
+        torch.testing.assert_close(attention.step_chunk(x), tokens, atol=1e-6, rtol=1e-5)
 
 
 def test_admission_predictor_is_fail_safe_before_calibration() -> None:
@@ -188,6 +260,109 @@ def test_quality_first_uses_bounded_score_hard_exact_shadow():
     assert int(torch.isfinite(hybrid.exact_bank.state.scores).sum()) == 4
 
 
+def test_quality_first_batched_prefill_matches_independent_requests():
+    torch.manual_seed(217)
+
+    def make_archive():
+        base = QCCArchive(
+            num_heads=1,
+            head_dim=4,
+            num_codes=2,
+            decay_rates=(0.9,),
+            window_size=2,
+            use_triton=False,
+            scan_block_size=8,
+        )
+        return HybridQCCArchive.from_archive(
+            base,
+            exact_num_sets=1,
+            exact_ways=2,
+            quality_first=True,
+            exact_attention=True,
+            background_size=3,
+            block_size=2,
+            admission_threshold=-1.0,
+            max_inserts_per_chunk=2,
+        )
+
+    batched = make_archive()
+    independent = [copy.deepcopy(batched), copy.deepcopy(batched)]
+    fresh = copy.deepcopy(batched)
+    key = torch.randn(2, 1, 11, 4)
+    value = torch.randn_like(key)
+    query = torch.randn_like(key)
+    with torch.no_grad():
+        batched_output = batched.update_read_chunk(key, value, query)
+        independent_outputs = [
+            archive.update_read_chunk(key[i:i + 1], value[i:i + 1], query[i:i + 1])
+            for i, archive in enumerate(independent)
+        ]
+    torch.testing.assert_close(
+        batched_output,
+        torch.cat(independent_outputs, dim=0),
+        atol=1e-6,
+        rtol=1e-5,
+    )
+    for batch_index, archive in enumerate(independent):
+        torch.testing.assert_close(
+            batched.exact_bank._keys[batch_index:batch_index + 1],
+            archive.exact_bank._keys,
+            atol=1e-6,
+            rtol=1e-5,
+        )
+        torch.testing.assert_close(
+            batched.exact_bank._scores[batch_index:batch_index + 1],
+            archive.exact_bank._scores,
+            atol=1e-6,
+            rtol=1e-5,
+        )
+        torch.testing.assert_close(
+            batched.exact_bank._background_keys[batch_index:batch_index + 1],
+            archive.exact_bank._background_keys,
+            atol=1e-6,
+            rtol=1e-5,
+        )
+
+    # Continue past partially filled blocks and reservoir replacement in decode.
+    with torch.no_grad():
+        for _ in range(7):
+            next_key = torch.randn(2, 1, 4)
+            next_value = torch.randn_like(next_key)
+            next_query = torch.randn_like(next_key)
+            batched.update(next_key, next_value)
+            expected = []
+            for i, archive in enumerate(independent):
+                archive.update(next_key[i:i + 1], next_value[i:i + 1])
+                expected.append(archive.read(next_query[i:i + 1]))
+            torch.testing.assert_close(
+                batched.read(next_query), torch.cat(expected), atol=1e-6, rtol=1e-5,
+            )
+
+        # Reusing the archive must reproduce a new request, including RNG state.
+        batched.reset_state(2, device=key.device)
+        torch.testing.assert_close(
+            batched.update_read_chunk(key, value, query),
+            fresh.update_read_chunk(key, value, query),
+            atol=1e-6, rtol=1e-5,
+        )
+        torch.testing.assert_close(
+            batched.exact_bank._background_keys, fresh.exact_bank._background_keys,
+        )
+
+
+def test_quality_first_salience_is_independent_of_key_tile_boundaries():
+    torch.manual_seed(220)
+    archive = HybridQCCArchive(1, 4, window_size=2, use_triton=False, quality_first=True)
+    key = torch.randn(1, 1, 8, 4)
+    query = torch.randn(1, 1, 128, 4)
+    whole = archive._quality_first_salience(key, query, key_start=0)
+    split = torch.cat([
+        archive._quality_first_salience(key[:, :, :3], query, key_start=0),
+        archive._quality_first_salience(key[:, :, 3:], query, key_start=3),
+    ], dim=2)
+    torch.testing.assert_close(whole, split)
+
+
 def test_quality_first_salience_respects_sliced_query_origin():
     base = QCCArchive(
         num_heads=1,
@@ -219,6 +394,16 @@ def test_quality_first_salience_respects_sliced_query_origin():
         sample_queries=3,
     )
     assert float(score.item()) > 0.99
+
+
+def test_salience_excludes_queries_before_key_eviction():
+    archive = HybridQCCArchive(1, 2, window_size=4, use_triton=False, quality_first=True)
+    key = torch.tensor([[[[1., 0.]]]])
+    queries = torch.tensor([[[[1., 0.], [0., 1.], [0., 1.]]]])
+    # Event 6 is absolute query token 10. Events 4–5 occur before key 6
+    # leaves the local window, so their strong match must not count.
+    score = archive._quality_first_salience(key, queries, key_start=6, query_start=4)
+    torch.testing.assert_close(score, torch.zeros_like(score))
 
 
 def test_quality_first_exposes_exact_confidence_for_outer_gate():

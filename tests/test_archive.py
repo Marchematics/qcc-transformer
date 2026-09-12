@@ -15,6 +15,54 @@ from qcc_transformer.triton_kernels import (
 )
 
 
+def test_scan_state_owns_only_final_recurrence_storage() -> None:
+    archive = QCCArchive(2, 8, num_codes=3, use_triton=False, scan_block_size=16)
+    key = torch.randn(1, 2, 13, 8)
+    archive.update_read_chunk(key, key, key)
+    for state in (archive._numerator, archive._denominator):
+        assert state.untyped_storage().nbytes() == state.numel() * state.element_size()
+
+
+def test_attention_sinks_match_prefix_union_window_and_reset() -> None:
+    import copy
+    torch.manual_seed(91)
+    attention = QCCSelfAttention(
+        16, 2, window_size=4, attention_sink_size=2, num_codes=3,
+        use_triton=False, gate_bias_init=30,
+    ).eval()
+    hidden = torch.randn(1, 13, 16)
+    other = copy.deepcopy(attention)
+    with torch.no_grad():
+        q, k, v, _ = attention._project_qkv_gate(hidden)
+        q, k, v = (attention._split_heads(x) for x in (q, k, v))
+        positions = torch.arange(hidden.shape[1])
+        allowed = (positions[None, :] <= positions[:, None]) & (
+            (positions[None, :] < 2) | (positions[None, :] >= positions[:, None] - 3)
+        )
+        expected = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=allowed)
+        expected = attention.out_proj(expected.transpose(1, 2).reshape_as(hidden))
+        actual = torch.cat([attention.step_chunk(hidden[:, :7]), attention.step_chunk(hidden[:, 7:])], 1)
+        tokenwise = torch.stack([other.step(hidden[:, i]) for i in range(13)], 1)
+        torch.testing.assert_close(actual, expected, atol=1e-6, rtol=1e-5)
+        torch.testing.assert_close(tokenwise, expected, atol=1e-6, rtol=1e-5)
+        attention.reset_cache(1, device=hidden.device)
+        assert attention._sink_keys is None
+        torch.testing.assert_close(attention.step_chunk(hidden), expected, atol=1e-6, rtol=1e-5)
+
+    # Exercise the archive too: retained prefix tokens must not be archived again.
+    with torch.no_grad():
+        attention.gate.bias.zero_()
+    reference = copy.deepcopy(attention)
+    reference.reset_cache(1, device=hidden.device)
+    reference_out = reference(hidden)
+    reference_out.sum().backward()
+    with torch.no_grad():
+        attention.reset_cache(1, device=hidden.device)
+        streamed = torch.cat([attention.step_chunk(hidden[:, i:i+3]) for i in range(0, 13, 3)], 1)
+        torch.testing.assert_close(streamed, reference_out, atol=1e-6, rtol=1e-5)
+        torch.testing.assert_close(attention.archive._numerator, reference.archive._numerator)
+
+
 def test_local_attention_promotes_large_qk_logits_before_softmax() -> None:
     """Large projected activations must not turn the fp16 softmax into NaN."""
 
@@ -609,10 +657,10 @@ def test_query_stability_can_suppress_repeated_archive_reads() -> None:
     calls = 0
     original_read = attention.archive.read
 
-    def counted_read(query: torch.Tensor) -> torch.Tensor:
+    def counted_read(query: torch.Tensor, **kwargs) -> torch.Tensor:
         nonlocal calls
         calls += 1
-        return original_read(query)
+        return original_read(query, **kwargs)
 
     hidden = torch.zeros(1, 16)
     with patch.object(attention.archive, "read", counted_read):

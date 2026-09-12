@@ -1,0 +1,176 @@
+{
+  "record": 3,
+  "model": "/datasets/ComfyUI/models/LLM/Phi-3.5-mini-instruct",
+  "window_size": 4096,
+  "sink_size": 32,
+  "query_sampling": "tail",
+  "selection_block_size": 32,
+  "scope": "teacher last-prompt-query diagnostic; oracle top-k and offline retention are not serving implementations",
+  "layers": [
+    {
+      "layer": 0,
+      "tokens": 16181,
+      "remote_attention_mass_mean": 0.5030670166015625,
+      "remote_attention_mass_max": 0.7480955719947815,
+      "archive_relative_squared_error": 0.372685045003891,
+      "archive_cosine_mean": 0.7542084455490112,
+      "oracle_top1_relative_squared_error": 3.9005703926086426,
+      "oracle_top16_relative_squared_error": 1.4461160898208618,
+      "oracle_top128_relative_squared_error": 1.2156226634979248,
+      "retained512_cosine_softmax_relative_squared_error": 0.008624383248388767,
+      "important384_background128_cosine_errors": [
+        0.02495523728430271,
+        0.06348710507154465,
+        0.022028395906090736
+      ],
+      "important384_centered_background128_cosine_errors": [
+        0.015952859073877335,
+        0.02255362458527088,
+        0.022315340116620064
+      ],
+      "retained512_dot_softmax_relative_squared_error": 0.01673053577542305,
+      "important384_background128_dot_errors": [
+        0.023904668167233467,
+        0.046422701328992844,
+        0.02222154475748539
+      ],
+      "important384_centered_background128_dot_errors": [
+        0.012960073538124561,
+        0.016572246327996254,
+        0.021429352462291718
+      ]
+    },
+    {
+      "layer": 7,
+      "tokens": 16181,
+      "remote_attention_mass_mean": 0.04336624965071678,
+      "remote_attention_mass_max": 0.21216607093811035,
+      "archive_relative_squared_error": 0.3660834729671478,
+      "archive_cosine_mean": 0.7726255655288696,
+      "oracle_top1_relative_squared_error": 2.718327045440674,
+      "oracle_top16_relative_squared_error": 0.4938480854034424,
+      "oracle_top128_relative_squared_error": 0.1892419457435608,
+      "retained512_cosine_softmax_relative_squared_error": 0.08082180470228195,
+      "important384_background128_cosine_errors": [
+        0.13250882923603058,
+        0.21363039314746857,
+        0.14953401684761047
+      ],
+      "important384_centered_background128_cosine_errors": [
+        0.11910189688205719,
+        0.20528191328048706,
+        0.1278834491968155
+      ],
+      "retained512_dot_softmax_relative_squared_error": 0.08040095120668411,
+      "important384_background128_dot_errors": [
+        0.1331493854522705,
+        0.20998428761959076,
+        0.14813074469566345
+      ],
+      "important384_centered_background128_dot_errors": [
+        0.12205388396978378,
+        0.20121334493160248,
+        0.12592770159244537
+      ]
+    },
+    {
+      "layer": 15,
+      "tokens": 16181,
+      "remote_attention_mass_mean": 0.31577372550964355,
+      "remote_attention_mass_max": 0.9489984512329102,
+      "archive_relative_squared_error": 0.5432652831077576,
+      "archive_cosine_mean": 0.591856062412262,
+      "oracle_top1_relative_squared_error": 0.7928549647331238,
+      "oracle_top16_relative_squared_error": 0.19078168272972107,
+      "oracle_top128_relative_squared_error": 0.05460486188530922,
+      "retained512_cosine_softmax_relative_squared_error": 0.14526695013046265,
+      "important384_background128_cosine_errors": [
+        0.18280668556690216,
+        0.11579807847738266,
+        0.1212390586733818
+      ],
+      "important384_centered_background128_cosine_errors": [
+        0.1749538779258728,
+        0.11879395693540573,
+        0.11960175633430481
+      ],
+      "retained512_dot_softmax_relative_squared_error": 0.16178303956985474,
+      "important384_background128_dot_errors": [
+        0.17085623741149902,
+        0.08823997527360916,
+        0.14650170505046844
+      ],
+      "important384_centered_background128_dot_errors": [
+        0.16078297793865204,
+        0.08904537558555603,
+        0.14308235049247742
+      ]
+    },
+    {
+      "layer": 23,
+      "tokens": 16181,
+      "remote_attention_mass_mean": 0.22167937457561493,
+      "remote_attention_mass_max": 0.6383102536201477,
+      "archive_relative_squared_error": 1.5566060543060303,
+      "archive_cosine_mean": 0.4296322464942932,
+      "oracle_top1_relative_squared_error": 2.0513858795166016,
+      "oracle_top16_relative_squared_error": 0.22974103689193726,
+      "oracle_top128_relative_squared_error": 0.046370599418878555,
+      "retained512_cosine_softmax_relative_squared_error": 0.5345734357833862,
+      "important384_background128_cosine_errors": [
+        0.8253653049468994,
+        0.754869282245636,
+        0.6371742486953735
+      ],
+      "important384_centered_background128_cosine_errors": [
+        0.8647047281265259,
+        0.7487241625785828,
+        0.6387460827827454
+      ],
+      "retained512_dot_softmax_relative_squared_error": 0.4155387878417969,
+      "important384_background128_dot_errors": [
+        0.7330670952796936,
+        0.5792977809906006,
+        0.4773613214492798
+      ],
+      "important384_centered_background128_dot_errors": [
+        0.7667235732078552,
+        0.5703579783439636,
+        0.48024818301200867
+      ]
+    },
+    {
+      "layer": 31,
+      "tokens": 16181,
+      "remote_attention_mass_mean": 0.334200918674469,
+      "remote_attention_mass_max": 0.5097523927688599,
+      "archive_relative_squared_error": 3.873837947845459,
+      "archive_cosine_mean": 0.37598076462745667,
+      "oracle_top1_relative_squared_error": 0.5716540217399597,
+      "oracle_top16_relative_squared_error": 0.2717854976654053,
+      "oracle_top128_relative_squared_error": 0.09580963850021362,
+      "retained512_cosine_softmax_relative_squared_error": 0.31149354577064514,
+      "important384_background128_cosine_errors": [
+        0.984465479850769,
+        0.16343382000923157,
+        0.37826916575431824
+      ],
+      "important384_centered_background128_cosine_errors": [
+        0.9818778038024902,
+        0.16276602447032928,
+        0.3633398711681366
+      ],
+      "retained512_dot_softmax_relative_squared_error": 0.4121295213699341,
+      "important384_background128_dot_errors": [
+        1.021485447883606,
+        0.24467529356479645,
+        0.4439219832420349
+      ],
+      "important384_centered_background128_dot_errors": [
+        1.023146152496338,
+        0.23773790895938873,
+        0.42201727628707886
+      ]
+    }
+  ]
+}

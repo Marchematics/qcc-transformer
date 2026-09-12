@@ -1,0 +1,588 @@
+# Quality repair, 2026-09-11
+
+Source workspace: `/root/qcc/repo/qcc-transformer`, branch `main`.
+Runtime copy: `/home/waas/qcc-quality-sep10`.
+
+## Current user targets
+
+These targets replace the earlier 98% quality target. Quality percentages
+are provisionally interpreted as retention relative to matched Full-KV.
+
+| Metric | Target | Current evidence |
+|---|---|---|
+| Aggregate task quality | ≥99% | Current first-five diagnostic: QCC 2/5, Full-KV 5/5; aggregate unproven |
+| Worst task quality | ≥97% | Full task coverage missing |
+| 1M retrieval | ≥99.5% | No validated 1M checkpoint/run |
+| Historical state | O(1), bounded | Bounded archive, recent window, and optional prefix |
+| State growth, 128K→1M | ≤1.25×, preferably ≈1× | End-to-end measurement missing |
+| 128K TPOT speedup | ≥5× Full-KV | Matched serving measurement missing |
+| 1M TPOT speedup | ≥5× Full-KV | Missing |
+| Throughput speedup | ≥3× | Missing |
+| Fixed-SLA concurrency increase | ≥8× | SLA and workload need specification |
+| Trainable parameter fraction | ≤0.5%, preferably ≤0.2% | Regular adapter adds 6,390,784 / 3,821,079,552 = 0.16725%; backbone is frozen before patching in evaluation |
+| Retrofit | Existing pretrained LM, no retraining | Current runs use the pretrained Phi-3.5 weights |
+
+Current hardware is one A10G. The 128K-native Phi checkpoint establishes no
+1M claim. Offloaded Full-KV here is a quality reference, not a measured
+serving-performance baseline. All targets remain active; a local retrieval
+improvement does not establish the complete objective.
+
+## Confirmed implementation defects
+
+The hybrid prefill path writes rotary keys into the exact bank. Its token
+decode path previously wrote raw keys and queried the same bank with raw
+queries when position-invariant recurrent addressing was enabled. Decode now
+passes rotary keys/queries separately, as prefill already does. Recurrent
+addressing remains unchanged. A deterministic chunk-versus-token comparison
+failed before the fix and passes after it.
+
+The non-Triton scan retained its final state as a view of the entire scan
+block. Persistent storage therefore included all intermediate states. The
+fix copies only the final numerator and denominator. At 32 heads, 16 codes,
+four scales, dimension 96, and a 512-event block, one numerator held 384 MiB
+instead of 0.75 MiB per layer. The storage regression fails before the fix
+and passes afterwards. This fixes retained scan storage, not all temporary
+prefill memory.
+
+## Validation and remaining work
+
+The two existing archive test files now have 51 passing tests; the two RULER
+conversion tests also pass (53 total). Two original
+accelerator failures were reproduced against the unmodified source and fixed:
+the per-token archive fallback returned results without writing the supplied
+output buffer, so attention consumed zeros; sparse legacy kernels were also
+selected for global normalization, which they do not implement. The fallback
+now writes the output buffer, and sparse kernels are selected only for their
+supported normalization and query-correction configuration.
+
+`regular-state-storage-fix.json` is a matched real Phi-3.5 first-record run
+with bf16, SDPA, a 4096-token window, 16 codes, 512-token prefill chunks,
+and a 64-token output budget. Full-KV scores 1; regular QCC scores 0 and
+generates a refusal in 29 tokens. No generation exception occurred.
+The implementation fixes do not establish recovered task quality.
+
+`regular-window8192-state-fixed.json` repeats the first two records with an
+8192-token window and otherwise the same settings. Full-KV scores 2/2,
+QCC 0/2; both QCC responses exhaust 64 output tokens. No generation
+exception occurred. Increasing this window alone did not recover retrieval.
+
+Previous raw-address, dot-product/sigmoid-confidence, threshold, and capacity
+experiments in the runtime copy all scored zero. Their speculative changes
+were removed, including the automatic low-precision exact-bank reset and
+the changed default capacity. Original result JSON files remain as evidence.
+An unrotated first-layer key ranking does not prove which keys the full
+model needs, and cannot establish a necessary exact-bank capacity.
+
+No new test files, branches, or pull requests were created. One A10G was used.
+Further work must establish retrieval quality on matched records before
+making broader quality claims. The real-model results above used non-Triton
+execution and are not evidence that these accelerator fixes recover retrieval.
+
+## Prefix retention implementation
+
+`attention_sink_size` is an optional, default-zero argument on the core
+attention and HF retrofit. It retains a bounded prefix of rotary K/V and
+normalizes it together with the recent window. Prefix entries are masked
+until they leave that window, and never enter the recurrent archive. Reset
+clears the prefix. Streaming and differentiable reference forward agree;
+sink-enabled training currently uses the sequential reference path.
+
+A regression also exposed stale fused projections after a bias-only update.
+The projection cache now tracks bias versions as well as weight versions.
+
+The RULER benchmark in this checkout incorporates the runtime copy's matched
+offloaded baseline and record selection, and exposes `--attention-sink-size`
+and `--archive-mix`. Reports include both settings. Answer recall is retained
+separately; a response exhausting the output budget without EOS scores zero.
+EOS at the final allowed token counts as normal completion.
+
+The local-only control without prefix retention failed row 2. The experimental
+32-token-prefix control retrieved the answer but exhausted 64 tokens, so its
+old recall-based score of one is not a completed quality pass. The implemented
+path (`prefix32-implemented-row2.json`) used prefix 32, window 4096, archive
+mix zero, bf16 SDPA, and 128 output tokens. It reproduced the Full-KV answer
+exactly and ended normally after 29 tokens. This establishes a local retrieval
+improvement on one record; it does not establish long-range archive quality.
+
+Use this main checkout for further runs. The runtime copy contains the earlier
+repairs but does not contain the new prefix-retention implementation.
+
+`prefix32-default-archive-first2.json` restores the default archive mixture
+and evaluates rows 1–2 with the implemented prefix cache. Both Full-KV and
+QCC score 2/2, with QCC stopping normally after 33 and 29 tokens. Both
+answers occur within the recent window; this does not establish retrieval
+from the compressed archive.
+
+`prefix32-default-archive-rows3to5.json` evaluates three records whose answers
+lie outside the recent window. Full-KV scores 3/3 and QCC 0/3. Row 3 returns
+an incorrect number; rows 4–5 exhaust the 128-token budget. Together with
+the first-two diagnostic this gives QCC 2/5 versus Full-KV 5/5, not a suite
+aggregate. Prefix retention fixes the near-window failure but does not
+recover arbitrary associations from the recurrent archive. This remains the
+primary quality problem under the updated user targets.
+
+## Teacher archive diagnosis
+
+`benchmarks/diagnose_hf_archive.py` compares the final prompt query of the
+unmodified Phi teacher with reconstructed recurrent statistics and exact-KV
+references. `teacher-archive-row3.json` records five layers of RULER row 3.
+The experiment uses real hidden states and no answer labels in selection.
+For layer 23 the remote-mass-weighted relative squared error is 1.557 for
+the recurrent archive, 2.051 for full-history top-1, and 0.046 for top-128.
+Using 512 keys selected by 32 earlier prompt queries raises the error to
+0.591 (cosine retention) or 0.659 (dot retention). Layer 0 has a diffuse
+response and top-k selection can be worse than the recurrent archive.
+
+These are isolated attention-output diagnostics, not end-to-end quality
+scores. Full-history top-k and offline selection are not deployed bounded
+serving algorithms. The results motivate testing retention and weighted
+readout together; they do not justify a global switch to dot-product top-1
+or prove the new quality targets achievable.
+
+Parameter accounting used the actual CPU-loaded pretrained model and the
+regular retrofit with 16 codes, window 4096, and prefix 32. Unique introduced
+parameters are counted by object identity, excluding shared pretrained
+projections: 6,390,784 versus 3,821,079,552 pretrained parameters (0.16725%).
+Prefix retention adds no learned parameters. The benchmark now freezes the
+backbone before patching and reports the actual trainable count and fraction.
+No training or optimizer step was performed.
+
+## Weighted bounded-KV readout
+
+`SetAssociativeLandmarkBank.read_attention` now computes scaled-dot-product
+softmax over the fixed retained table and returns both response and log
+partition. Queries are tiled in blocks of 128, and no persistent state or
+learned parameters are added. The optional `--exact-attention` experiment now
+connects it to hybrid streaming and merges retained and local KV by their
+softmax masses. In this experiment the recurrent response is not used in
+the output; the recurrent state is still maintained. The teacher diagnostic uses the actual method for its
+retained-table comparisons and checks agreement with a direct tensor read.
+
+The existing associative test file passes all 10 tests, including CPU and
+CUDA checks that merging local and retained-table outputs by partition mass
+equals a single attention call over their union. Tests cover empty heads,
+single-query reads, and the query-tile boundary.
+
+`teacher-archive-row4.json` repeats the real-teacher diagnostic on another
+failed remote record. Layer 23 has relative squared error 0.886 for the
+recurrent archive, 0.024 for the full-history top-128 reference, 0.328 for
+512 cosine-selected slots, and 0.867 for 512 dot-selected slots. Selection
+uses earlier prompt queries and excludes the probe query. This again shows
+that a global cosine-to-dot switch is insufficient. The retained-table
+selection remains offline and has not demonstrated end-to-end task quality.
+The verified task score remains 2/5 versus Full-KV 5/5.
+
+The weighted readout integration passes the full-history equivalence check
+when all evicted keys fit in the retained table. Chunking, single-token
+decode, reference forward, and backward are covered. Snapshotting retained
+K/V during differentiable reads prevents later admissions from invalidating
+backward. There are 62 passing archive/associative/hybrid tests and 27
+passing HF retrofit tests. The real weighted-readout generation experiment
+is tracked separately from the earlier task scores.
+
+`weighted-exact-prefix32-row3` has completed. Full-KV scores 1/1; the weighted
+candidate scores 0/1 and exhausts 128 tokens. Its report also records
+19,172,352 trainable parameters (0.50175% of the backbone), slightly above
+the user's 0.5% ceiling. The regular adapter's 0.16725% figure must not be
+applied to this larger hybrid configuration.
+
+The weighted global-table mode now freezes its unused set-routing codebook:
+neither global writes nor full-table weighted reads consult that parameter.
+An actual CPU-loaded Phi retrofit recount gives 6,589,440 trainable parameters
+(0.17245%) with the backbone frozen. Total added parameters remain 19,270,656;
+freezing is not a storage reduction. The full-KV-equivalence test still passes.
+The active generation process was constructed before this trainability-only
+change, so its report will retain the older parameter count. Numerical
+generation does not depend on the frozen routing codebook.
+
+Two salience-index defects were then fixed: query event j means token
+j + window_size, so key i is eligible only when j >= i; the HF side channel
+now supplies event zero for its stream beginning at token window_size.
+Chunk-local query streams use their own event offset. The new eviction-boundary
+regression failed before the fix, and 41 hybrid/retrofit tests pass afterwards.
+
+Completed run: `weighted-exact-eviction-index-row3` (former Python PID 76165,
+tool session 57198). Output:
+`artifacts/weighted-exact-eviction-index-row3.json`. It evaluates row 3, prefix 32, window 4096,
+16 recurrent codes, 128 exact sets × 4 ways, quality-first retention,
+weighted exact attention, bf16 SDPA, 512-token prefill chunks, and a
+128-token generation budget. Full-KV returned the correct answer. The
+Python launch suppresses the incompatible optional `kernels` import only
+for this process (`sys.modules['kernels'] = None`); installed packages are
+unchanged. Candidate prefill is slow due to per-token exact-bank admission.
+Process-local hooks report every four completed prefill layers; they are
+not installed in the source code. The prior weighted result used the old
+salience indices and does not evaluate this correction.
+All 32 layers completed and the process exited. Full-KV scores 1/1; the
+candidate scores 0/1, returning a refusal in 21 tokens with normal EOS.
+The event-index correction did not recover the missing answer. Weighted
+readout and timing correctness are insufficient with this retention policy.
+No quality-repair GPU job remains active from this run.
+
+## Retention and background diagnostics
+
+`teacher-archive-centered-row3.json` and `teacher-archive-centered-row4.json`
+contain the complete tail-query, background-sampling, and centered-background
+comparisons. Retention uses the last 32 prompt queries before the probe query;
+the probe query and answer labels are excluded from selection. Each background
+comparison keeps 384 selected keys plus 128 uniform keys from the complement,
+weighted by complement size / sample size, with seeds 11, 29, and 47.
+
+Tail selection alone improves some late layers but worsens layer 0. On row 3,
+the layer-0 relative squared error of dot-based top-512 is 3.365. Adding the
+weighted background sample reduces it to 0.016–0.025; using the exact background
+value mean as a control variate reduces it further to 0.0097–0.0140. On row 4,
+the corresponding centered-background error is 0.0068–0.0105. The centered
+estimator uses the known population mean plus the sampled weighted-minus-
+unweighted value difference, with the finite-sample covariance correction.
+That mean could be maintained online with fixed-size sums and counts.
+
+This does not eliminate selection and sampling error: layer 23's centered
+dot-based error still ranges from 0.098 to 0.441 on row 3 and 0.087 to 0.372 on
+row 4. The tail/background experiments are offline teacher-input diagnostics,
+not an online reservoir implementation and not task-accuracy measurements.
+They justify preserving diffuse background mass while investigating retention;
+they do not establish the user quality or performance targets.
+
+Three intermediate tail/background reports were removed only after checking
+that every JSON field and value was exactly preserved in these two combined
+reports. Original uniform-query diagnostics and generation results remain.
+
+## Online background reservoir
+
+`background_size` enables a fixed-capacity reservoir in the global score-based
+bank. Every foreground rejection or demotion enters the background exactly
+once. Background entries never re-enter the foreground. Algorithm-R reservoir
+sampling, reset with seed 11 per request, therefore samples the foreground
+complement without duplicate counting. Weighted reads add
+`log(background population / valid sample count)` to background logits.
+Persistent storage includes the reservoir tensors, count, and RNG state.
+
+This implementation uses ordinary importance weighting; the centered estimator
+from the offline diagnostics is not implemented in serving. With background
+sampling enabled, foreground priority uses salience alone (diversity weight
+zero), matching the diagnostic selection rather than adding a separate bonus.
+The optional `quality_query_tail` selects a suffix of the prompt-query stream
+using archive-event offsets. Defaults remain unchanged.
+
+CPU and CUDA tests cover disjointness, rejection and demotion, exact Full-KV
+agreement before the reservoir fills, background-only softmax mass after
+overflow, fixed storage, reset, and chunk/token parity. The full run before the
+last selection change passed 93 tests; the subsequent 55 associative/hybrid/HF
+tests and the two tail-offset cases pass after the relevant changes.
+
+Completed run: `weighted-background-tail32-row3` (former Python PID 89957,
+tool session 91518). Output: `artifacts/weighted-background-tail32-row3.json`.
+Configuration: row 3, bf16 SDPA, window 4096, prefix 32, 512-token prefill chunks,
+384 foreground slots (96 sets × 4 ways), 128 background slots, tail 32 queries,
+quality-first admission, weighted attention, and 128 output tokens. Total KV
+slots remain 512, excluding the recent window and prefix. Full-KV answered
+correctly; the candidate returned 3581221 instead of 3539476, stopped normally
+after 29 tokens, and scored 0/1. The returned number does not occur in the
+input record. The run reported a trainable fraction of 0.17245%. It has exited;
+no quality-repair GPU job remains active from this run.
+This is an end-to-end experiment of the combined retention/background method,
+not an isolated single-factor comparison with the previous failed variant.
+
+The benchmark now records `qcc_runtime_state` using backing-storage sizes,
+deduplicating aliased views and including background tensors, counters, RNG
+state, prefix/recent KV, and request scratch. Model parameters, registered
+constant buffers, and fused projection-weight copies are excluded. It also
+records per-request PyTorch peak CUDA allocation. The storage-alias regression
+passes. This is QCC-owned state accounting, not whole-server memory accounting
+and not a measured 128K-to-1M result. The active background run was launched
+before this instrumentation, so its JSON will not contain these new fields.
+
+## Passive retention trace
+
+Completed run: `retention-trace-background-row3` (former Python PID 99753,
+tool session 45961). Output: `artifacts/retention-trace-background-row3.json`.
+It repeats the same 384+128 background/tail32 configuration and a fresh
+matched Full-KV reference. The reference answered correctly. The candidate
+reproduced exactly the prior erroneous prediction 3581221, including normal
+termination after 29 tokens. All 32 layers and generation have completed.
+
+`--trace-candidate` in the existing diagnostic records answer-neighbour keys
+as they enter the bank. Labels determine only what is observed; callbacks
+forward identical inputs to the original update and do not consume random
+numbers or influence selection, attention, or generation. Foreground token
+identities use insertion ages; background observations require exact matches
+of both stored K and V. It reports head membership after prefill and after
+generation. Only evicted-token bank entries are traced; prefix/window tokens
+are not interpreted as lost bank entries.
+
+The observer keeps small additional KV copies outside the model. Peak CUDA
+allocation therefore includes diagnostic overhead, while QCC-owned state
+accounting excludes those callback-owned copies. This run is not a speed or
+whole-server memory benchmark. Hooks and method overrides are removed at exit.
+
+The answer occupies input token positions 9644–9650. Of the 224 answer-token
+and layer combinations, 60 have no matching retained K/V in any head after
+prefill. None of the tracked answer-neighbour membership entries changes
+between prefill and completion. The failure is therefore not explained by
+decode-time replacement within this tracked region. Remaining matches alone
+do not establish that the relevant teacher retrieval heads retain the needed
+information; later-token values may also encode earlier answer information.
+
+Measured QCC-owned state after generation is 5,580,542,464 bytes, including
+request scratch and RNG state, excluding model parameters and observer KV
+copies. Peak CUDA allocation is 15,779,754,496 bytes and includes observer
+overhead. These measurements cover this 16K record only and do not establish
+the required 128K-to-1M growth bound or serving concurrency.
+
+## Teacher retrieval-head alignment
+
+`teacher-head-alignment-row3.json` observes the native teacher's actual rotary
+Q/K during generation without changing the SDPA output. The reference again
+generates the correct answer. At output indices 18–24 (the seven answer digits),
+only 31.173% of teacher attention mass directed to the answer-token KV is
+covered by candidate prefill membership. This is a descriptive coverage measure,
+not an intervention proving causal head importance. Some heads place almost
+all their attention on missing answer KV. Layer 13/head 26, for example, keeps
+the name/punctuation near the answer but omits most answer-digit KV.
+
+`teacher-head-block-alignment-row3.json` additionally compares offline selection
+from the same teacher prefill: 384 individual foreground tokens versus twelve
+32-token foreground blocks, each with 128 complementary background samples.
+Foreground plus background capacity is 512 in both cases. Selection uses prompt
+queries only; generated answer labels are used afterwards for coverage scoring.
+Coverage of teacher answer attention is 34.942% for individual selection and
+89.128% for block selection. Neither is a candidate generation accuracy result.
+
+`teacher-archive-block32-row3.json` and `teacher-archive-block32-row4.json`
+also show that fixed blocks improve early-layer last-prompt-query error but
+can worsen later-layer error. Last-prompt-query reconstruction alone therefore
+does not decide whether a policy supports future answer generation. The next
+implementation to evaluate is bounded, causal block retention; it is not yet
+implemented in the serving path. Current end-to-end scores remain unchanged.
+
+## 2026-09-12 quality run and path-parity fixes
+
+The completed run `p0-block32-background-tail128-first10` evaluates the first
+10 supplied RULER records, all `niah_multikey_2`, with 16K and 32K prompts. It
+uses Phi-3.5-mini, bf16 SDPA, window 4096, sink 32, 384 foreground exact slots,
+128 background slots, block size 32, a 128-query prefill tail, and a 128-token
+generation limit. The matched Full-KV reference scores 10/10; QCC scores 4/10
+(rows 1, 2, 4, 5 correct; rows 3, 6-10 incorrect). All QCC generations ended
+normally and none hit the output limit. The measured retention is 40% for this
+single task and this 16K-32K subset. It is not the 128K aggregate or a worst-task
+measurement. Result JSON: `p0-block32-background-tail128-first10.json`.
+
+QCC-owned state is 5,605,839,360 bytes per request in this run, including
+request scratch and RNG state; the maximum observed request peak CUDA allocation
+is 16,657,575,424 bytes. Neither number establishes 128K-to-1M state growth.
+The same configuration reports 6,589,440 trainable parameters out of
+3,821,079,552 pretrained parameters (0.17245%). The pretrained model was not
+trained. TPOT, throughput, fixed-SLA concurrency, and 1M retrieval were not
+measured.
+
+The earlier statement that bounded causal block retention was not implemented
+described the state at the time of that entry. Block32 pending-state retention
+is now implemented, but its admission score still uses the prompt query
+side-channel and is not a causal online policy. Offline teacher attention
+coverage is not end-to-end evidence; the completed 4/10 run is the current
+end-to-end evidence for this candidate.
+
+The quality-first chunk path previously used different admission behavior for
+batch size one and larger batches. A new regression reproduces the mismatch;
+`HybridQCCArchive._exact_chunk` now applies the same per-request salience and
+top-k selection in batched prefill. Background reservoir RNG state is now
+per-request, so batch rows consume independent state and batched execution
+matches separate requests under the fixed seed. Related associative and hybrid
+tests pass.
+
+`benchmark_hf_ruler.py` now creates a run progress JSONL beside the final JSON
+and appends the resolved command configuration plus every completed Full-KV
+and QCC row. Partial runs remain inspectable if the process exits before the
+aggregate JSON is written. This completed run predates the progress ledger.
+
+## 2026-09-12 resumed path checks
+
+Extended the existing quality-first batched-prefill regression with seven
+single-token update/read steps and request reset/replay against an untouched
+archive. This exercises partial block completion and background reservoir
+replacement without a GPU. The focused test passes; `git diff --check` passes.
+This verifies batch versus independent request decode output and reset replay
+for the synthetic fixture, not equivalence between full-prefill and tokenwise
+admission, suffix independence, or HF serving semantics.
+
+The inherited tool session 63684 is unavailable in the resumed session, but
+PID 69630 remains live and its CPU time advanced from 20:26 to 21:17 during
+inspection. The row6 output JSON is still absent. No competing GPU job was
+started. Continue monitoring this process before reading its completed trace.
+
+The updated objective additionally requires 1M TPOT >=5x matched Full-KV,
+alongside the existing 128K TPOT target. Neither has been measured; the quality
+evidence remains 4/10 on the supplied 16K–32K subset.
+
+### Key-tile sampling fix and completed row6 trace
+
+A CPU reproduction with seed 220 found that splitting eight keys at position
+three, while keeping the same 128 queries, changed salience by up to 0.19296765.
+Sampling started at the key tile boundary, so scheduling changed admission
+scores. Query samples now anchor to the supplied query interval; the existing
+per-key eligibility mask remains. The new regression failed before the change
+and passed afterwards; all 18 hybrid tests and diff whitespace checks pass.
+This fixes key-tile dependence under a shared query interval. Prompt suffix
+dependence and the prefill/decode admission-policy difference remain unresolved.
+
+PID 69630 completed and wrote `retention-trace-block32-tail128-row6.json`.
+Full-KV returned 8650260 correctly; QCC returned 9132055. All 32 prefill layers
+captured seven answer tokens. Retained answer-token/head memberships range
+from 1 to 49 per layer, showing incomplete coverage but not causal importance.
+This run loaded code before the sampling fix and is evidence for that earlier
+candidate. A single-GPU teacher-head alignment run was launched against this
+trace, output `teacher-head-alignment-row6.json`. Its offline comparison uses
+the diagnostic's fixed tail32 queries and is not a matched tail128 comparison;
+the candidate membership alignment uses the actual completed trace.
+
+The teacher alignment completed successfully: seven answer generation steps,
+197.3634 total attention mass toward answer tokens summed over steps/layers/heads,
+54.3209 on retained answer KV, giving 27.523% coverage. Largest missing masses
+occur in layers 17, 19, 15, and 20. This is descriptive attention coverage,
+not a controlled intervention on the candidate.
+
+The diagnostic now reads foreground/background capacity and query tail from
+the candidate trace, using the current fixed query-interval sampling rule.
+The old tail32 result remains intact. Session 43024 writes the corrected
+offline comparison to `teacher-head-alignment-tail128-row6.json`. Compilation
+and diff whitespace checks pass. Offline background sampling still differs
+from streaming retention, so a difference cannot be assigned solely to hidden
+state drift. Removed generated pytest and test bytecode caches; retained the
+experiment artifacts as evidence. Updated the external handoff's stale active
+process instructions.
+
+### Teacher KV retention replay
+
+Matched tail128 offline comparison completed: individual selection covers
+39.567% and block32 selection 74.706% of teacher answer attention, versus
+27.523% for candidate membership. Background algorithm and hidden states still
+differ, so this gap does not by itself identify drift.
+
+Added an admission-only teacher-KV replay option to the existing diagnostic,
+restricted to layers 15, 17, 19, and 20 (largest missing answer attention).
+It calls the actual salience and admission methods with candidate capacity,
+block size, query interval, and streaming reservoir; the teacher output stays
+unmodified. A CPU comparison against `update_read_chunk` verifies identical
+foreground keys/values/scores/ages and background keys/values across different
+tile boundaries. Compilation and diff checks pass. The replay uses the current
+query-sampling fix; the candidate trace predates that fix, a remaining comparison
+limitation. Output will be `teacher-retention-replay-row6.json`.
+
+Replay completed: over layers 15/17/19/20, teacher answer mass is 106.5545;
+the teacher-KV replay retains 78.7408 (73.897%), whereas the actual candidate
+retains 10.9020 (10.231%). This supports testing prefill hidden-state drift
+before capacity changes, subject to the noted sampling-version difference.
+
+Added a diagnostic-only exact-prefill intervention to the existing script.
+Each QCC wrapper populates its bounded state, then a forward hook substitutes
+the original attention's exact prefill output without retaining a Full-KV
+cache. Single-token decode remains QCC. A tiny two-layer Phi CPU experiment
+matches original prefill logits and verifies populated QCC token counts.
+This is not an online bounded-prefill implementation or performance evidence.
+The real row6 experiment is running on one GPU, output
+`exact-prefill-intervention-row6.json`; capacity remains 384+128, block32,
+tail128. No result is available yet.
+
+The intervention's decode isolation was checked with a two-layer Phi CPU
+model: after identical intervened prefill, retaining versus removing the hook
+produces bit-identical next-token logits, and both QCC states advance from 19
+to 20 tokens. This confirms the hook does not substitute exact decode.
+The real run's matched Full-KV row6 has completed correctly; candidate prefill
+is still running in tool session 78282. No competing GPU process was launched.
+
+### Exact-prefill intervention outcome
+
+`exact-prefill-intervention-row6.json` completed: matched Full-KV correct,
+intervened QCC correct (8650260), 30 generated tokens, no output-limit case.
+QCC state is 5,605,839,360 bytes, unchanged from the earlier candidate;
+peak CUDA allocation is 16,654,749,184 bytes. All 64 prefill/completion layer
+traces are present. This establishes a successful single-row diagnostic,
+not aggregate quality or bounded online prefill.
+
+The earlier failed row6 used the old query-sampling rule. To separate that
+change from the prefill intervention, session 46491 now runs the current
+code without intervention at identical capacity/settings, writing
+`retention-trace-fixed-sampling-row6.json`. Do not attribute the improvement
+solely to exact prefill until this control completes. Only one GPU job runs.
+
+### Available next-stage data
+
+Inspected the actual RULER subset: 80 rows, 20 each for niah_multikey_2,
+niah_multikey_3, niah_single_1, and vt; maximum declared length 65,523.
+It contains no 128K examples and cannot establish the requested 128K aggregate
+or full-suite worst-task quality. Local generation source is available at
+`/home/waas/ruler_src/scripts/data/prepare.py` with task definitions in
+`/home/waas/ruler_src/scripts/synthetic.yaml`.
+
+Before looking at additional candidate outcomes, select rows 21, 41, and 61
+(the first approximately 16K records of the other three supplied tasks) for
+the next cross-task diagnostic if the current intervention survives its
+matched control. These are candidate-unseen within this repair sequence,
+not a claim that no historical experiment has used them. They are a cheap
+cross-task check, not a substitute for the fixed 128K evaluation.
+
+Read all available `config.json` files beneath
+`/datasets/ComfyUI/models/LLM`: no text configuration declares a 1M context.
+The largest declared limit there is 262,144 (Qwen3-VL 4B/8B); the active Phi
+declares 131,072. This local inventory does not rule out other checkpoints
+elsewhere, but none in this model directory supplies the required 1M baseline.
+No model limits were edited or models downloaded. Session 46491 remains live.
+
+### Matched current-code control completed
+
+`retention-trace-fixed-sampling-row6.json` completed: Full-KV correct,
+ordinary QCC wrong (9132055), same answer as the earlier failed candidate.
+Compared the saved config dictionaries against the successful exact-prefill
+intervention: identical, as are the QCC state bytes (5,605,839,360).
+Thus the query-sampling fix does not explain the row6 success; exact prefill
+rescues this sample at fixed capacity. This is a causal intervention on the
+prefill computation, not proof of task-wide quality or online bounded prefill.
+
+Started the three preselected cross-task rows 21/41/61 sequentially, each in
+a separate process on the same GPU, using the identical exact-prefill
+intervention and matched Full-KV reference. Outputs are
+`exact-prefill-intervention-row21.json`, `...-row41.json`, and `...-row61.json`.
+The sequence stops if a process fails. No concurrent GPU jobs are launched.
+
+### Fixed-tail projection allocation
+
+Inspection found `_bounded_prefill` projected full-prompt QKV before slicing
+the quality query tail. It now slices hidden states, positions, and supplied
+rotary embeddings before projection. Thus the side-channel projection is
+bounded by the configured tail (the no-tail option remains length-dependent).
+Extended the existing query-visibility test to check projected token counts;
+all 29 retrofit tests pass, as does diff whitespace validation. This does not
+make exact prefill or the full HF forward bounded-memory.
+
+Row21 in session 98854 loaded before this allocation change; the subsequent
+row41/61 subprocesses will load it. Account for this code difference when
+comparing across rows; within each row the reference and candidate still use
+the same checkpoint/dtype. Real-model numerical parity of this allocation
+change has not yet been measured.
+
+Row21 Full-KV emitted the correct UUID but reached the 128-token output limit;
+the benchmark therefore reports answer_recall=1 and score=0/correct=false.
+Candidate is running. Do not treat this baseline as a clean matched quality
+denominator; retain both raw recall and output-limit information.
+
+Row21 completed: both generations reached 128 tokens. Full-KV contains the
+complete correct UUID (raw answer recall 1); exact-prefill QCC corrupts the
+UUID suffix and has raw answer recall 0. Both have benchmark score 0 due to
+the output limit. Thus exact prefill is insufficient for this cross-task
+sample; the raw outputs establish a retrieval difference even though the
+score ratio is undefined. Session 98854 has advanced to row41; row61 follows.
+
+Extended the existing tail-query test to compare against full-prompt projection
+with and without external rotary embeddings (four cases, all pass). A short
+prompt below the local window also returns finite output. This provides CPU
+equation parity; real-model bf16 parity remains unmeasured.
+
+## GitHub synchronization snapshot
+
+User requested synchronization to main for analysis. The five affected test
+suites pass (103 tests). Row41/61 sequence remains active in session 98854.
+Row21 answer crosses a block boundary: tokens 2277–2303 encode the UUID
+prefix, tokens 2304–2309 encode `7343daf`. Several layers retain the prefix
+but omit suffix KV across all heads. This suggests testing block geometry at
+fixed capacity after the active sequence, not increasing capacity blindly.

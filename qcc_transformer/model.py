@@ -576,6 +576,7 @@ class QCCArchive(nn.Module):
         value: Tensor,
         *,
         _include_landmarks: bool = True,
+        exact_key: Optional[Tensor] = None,
     ) -> None:
         """Insert one evicted token per batch/head into the archive.
 
@@ -859,7 +860,11 @@ class QCCArchive(nn.Module):
         if _include_landmarks:
             self._update_landmark_chunk(key, value)
 
-        if self.lazy_decay and self.use_triton and key.is_cuda and not self.kernel_features:
+        if (
+            self.lazy_decay and self.use_triton and key.is_cuda
+            and not self.kernel_features and not self.global_normalization
+            and self.query_correction_rank == 0
+        ):
             if self.active_codes is None:
                 raise RuntimeError("lazy_decay requires active_codes")
             if self.active_codes & (self.active_codes - 1) == 0:
@@ -980,7 +985,11 @@ class QCCArchive(nn.Module):
                             include_landmarks=False,
                         )
                     )
-            return torch.stack(outputs, dim=2)
+            result = torch.stack(outputs, dim=2)
+            if output is not None:
+                output.copy_(result)
+                return output
+            return result
 
         state_dtype = self._numerator.dtype
         rates = self.decay_rates.to(device=key.device, dtype=state_dtype)
@@ -1032,8 +1041,9 @@ class QCCArchive(nn.Module):
                     include_landmarks=_include_landmarks,
                 )
             )
-        self._denominator = state_den
-        self._numerator = state_num
+        # Final scan slices otherwise retain the whole event block on every layer.
+        self._denominator = state_den.clone()
+        self._numerator = state_num.clone()
         result = torch.cat(outputs, dim=2)
         if output is not None:
             output.copy_(result)
@@ -1139,6 +1149,7 @@ class QCCArchive(nn.Module):
             and query.is_cuda
             and self.active_codes & (self.active_codes - 1) == 0
             and self.query_correction_rank == 0
+            and not self.global_normalization
         ):
             from .triton_kernels import TRITON_AVAILABLE, triton_sparse_read_archive
 
@@ -1277,7 +1288,7 @@ class QCCArchive(nn.Module):
             query, response, include_landmarks=include_landmarks
         )
 
-    def read(self, query: Tensor) -> Tensor:
+    def read(self, query: Tensor, *, exact_query: Optional[Tensor] = None) -> Tensor:
         """Read archive response for queries of shape ``[batch, heads, head_dim]``."""
 
         if query.ndim != 3 or query.shape[1:] != (self.num_heads, self.head_dim):
@@ -1327,6 +1338,7 @@ class QCCSelfAttention(nn.Module):
         num_codes: int = 16,
         num_scales: int = 4,
         window_size: int = 128,
+        attention_sink_size: int = 0,
         use_archive: bool = True,
         use_triton: bool = True,
         active_codes: Optional[int] = None,
@@ -1385,6 +1397,11 @@ class QCCSelfAttention(nn.Module):
         if rotary_dim is not None and rotary_dim > self.head_dim:
             raise ValueError("rotary_dim must be no larger than head_dim")
         self.window_size = window_size
+        self.attention_sink_size = attention_sink_size
+        if not 0 <= attention_sink_size <= window_size:
+            raise ValueError("attention_sink_size must be between zero and window_size")
+        self._sink_keys: Optional[Tensor] = None
+        self._sink_values: Optional[Tensor] = None
         self.use_archive = use_archive
         # Retain the dispatch policy on the attention module so optional
         # accelerator kernels can be selected at serving time without
@@ -1497,9 +1514,10 @@ class QCCSelfAttention(nn.Module):
         self._archive_query_cache: Optional[Tensor] = None
         self._fused_projection_weight: Optional[Tensor] = None
         self._fused_projection_bias: Optional[Tensor] = None
-        self._fused_projection_versions: Optional[tuple[int, int, int, int]] = None
+        self._fused_projection_versions: Optional[tuple[int, ...]] = None
 
-    def _mix_local_archive(self, local: Tensor, archive: Tensor, gate: Tensor) -> Tensor:
+    def _mix_local_archive(self, local: Tensor, archive: Tensor, gate: Tensor,
+                           local_log_partition: Optional[Tensor] = None) -> Tensor:
         """Mix local and archived responses, optionally suppressing bad scales.
 
         Archive statistics can have a very different norm from the exact local
@@ -1508,6 +1526,12 @@ class QCCSelfAttention(nn.Module):
         remote contribution; this is causal and keeps the bounded state/API
         unchanged.  The default is disabled for exact historical behavior.
         """
+        if bool(getattr(self.archive, "exact_attention", False)):
+            remote_partition = self.archive._last_exact_log_partition
+            if remote_partition is None:
+                return local
+            weight = torch.sigmoid(remote_partition - local_log_partition).unsqueeze(-1).to(local.dtype)
+            return (1 - weight) * local + weight * archive
         if not self.archive_norm_gating:
             return gate * local + (1.0 - gate) * archive
         local_norm = local.float().square().mean(dim=-1, keepdim=True).sqrt()
@@ -1611,11 +1635,10 @@ class QCCSelfAttention(nn.Module):
                 )
             return q, k, v, gate
 
-        versions = (
-            self.q_proj.weight._version,
-            raw_k_proj.weight._version,
-            raw_v_proj.weight._version,
-            self.gate.weight._version,
+        versions = tuple(
+            parameter._version if parameter is not None else -1
+            for source in projection_sources
+            for parameter in (source.weight, source.bias)
         )
         use_cache = not torch.is_grad_enabled() and not self.training
         if (
@@ -1953,6 +1976,8 @@ class QCCSelfAttention(nn.Module):
         """Reset the persistent state used by :meth:`step`."""
 
         self.archive.reset_state(batch_size, device=device)
+        self._sink_keys = None
+        self._sink_values = None
         self._local_keys = []
         self._local_values = []
         self._local_key_cache = None
@@ -1972,6 +1997,48 @@ class QCCSelfAttention(nn.Module):
         self._seen_tokens = 0
         self._archive_read_cache = None
         self._archive_query_cache = None
+
+    def _retain_attention_sinks(self, key: Tensor, value: Tensor) -> None:
+        if not self.use_archive or self._seen_tokens >= self.attention_sink_size:
+            return
+        if key.ndim == 3:
+            key, value = key.unsqueeze(2), value.unsqueeze(2)
+        if self._sink_keys is None:
+            shape = (*key.shape[:2], self.attention_sink_size, self.head_dim)
+            self._sink_keys = key.new_empty(shape)
+            self._sink_values = value.new_empty(shape)
+        count = min(key.shape[2], self.attention_sink_size - self._seen_tokens)
+        self._sink_keys[:, :, self._seen_tokens:self._seen_tokens + count] = key[:, :, :count]
+        self._sink_values[:, :, self._seen_tokens:self._seen_tokens + count] = value[:, :, :count]
+
+    def _local_attention_with_sinks(
+        self, query: Tensor, keys: Tensor, values: Tensor, mask: Optional[Tensor] = None,
+    ) -> Tensor:
+        """Normalize retained prefix and recent KV together, without duplicates."""
+        count = min(self.attention_sink_size, self._seen_tokens + query.shape[2])
+        positions = self._seen_tokens + torch.arange(query.shape[2], device=query.device)
+        prefix_positions = torch.arange(count, device=query.device)
+        prefix_mask = positions[:, None] >= self.window_size + prefix_positions[None, :]
+        if mask is None:
+            mask = torch.ones(query.shape[2], keys.shape[2], dtype=torch.bool, device=query.device)
+        mask = torch.cat((prefix_mask, mask), dim=-1)
+        keys = torch.cat((self._sink_keys[:, :, :count], keys), dim=2)
+        values = torch.cat((self._sink_values[:, :, :count], values), dim=2)
+        if self.local_attention_backend == "eager":
+            return self._local_eager_attention(query, keys, values, mask)
+        return _scaled_dot_product_attention(query, keys, values, attn_mask=mask, dropout_p=0.0)
+
+    def _local_partition(self, query: Tensor, keys: Tensor, mask: Optional[Tensor] = None) -> Tensor:
+        if mask is None:
+            mask = torch.ones(query.shape[2], keys.shape[2], device=query.device, dtype=torch.bool)
+        if self.attention_sink_size:
+            count = min(self.attention_sink_size, self._seen_tokens + query.shape[2])
+            positions = self._seen_tokens + torch.arange(query.shape[2], device=query.device)
+            prefix_mask = positions[:, None] >= self.window_size + torch.arange(count, device=query.device)[None, :]
+            keys = torch.cat((self._sink_keys[:, :, :count], keys), 2)
+            mask = torch.cat((prefix_mask, mask), -1)
+        logits = torch.matmul(query.float(), keys.float().transpose(-1, -2)) / math.sqrt(self.head_dim)
+        return logits.masked_fill(~mask, -torch.inf).logsumexp(-1)
 
     def _ordered_ring(self) -> tuple[Tensor, Tensor]:
         """Return valid ring contents in chronological order."""
@@ -2165,6 +2232,7 @@ class QCCSelfAttention(nn.Module):
                 (bsz,), self._seen_tokens, device=hidden.device, dtype=torch.long
             )
         q, key = self._apply_rope(q_raw, key_raw, position_ids, position_embeddings)
+        self._retain_attention_sinks(key, value)
         archive_query = q_raw if self.archive_position_invariant else q
         archive_key_current = key_raw if self.archive_position_invariant else key
         if self.use_archive:
@@ -2198,7 +2266,11 @@ class QCCSelfAttention(nn.Module):
                 elif self.archive_position_invariant:
                     assert self._archive_key_cache is not None
                     archive_key = self._archive_key_cache[:, :, write_index]
-                self.archive.update(archive_key, archive_value)
+                if self._seen_tokens >= self.window_size + self.attention_sink_size:
+                    self.archive.update(
+                        archive_key, archive_value,
+                        exact_key=self._local_key_cache[:, :, write_index],
+                    )
                 # A token eviction changes the recurrent archive state.  Any
                 # read cached from an earlier state is therefore invalid even
                 # when the optional read stride would otherwise reuse it.  An
@@ -2235,7 +2307,11 @@ class QCCSelfAttention(nn.Module):
             local_keys = self._full_key_cache[:, :, : self._seen_tokens + 1]
             local_values = self._full_value_cache[:, :, : self._seen_tokens + 1]
         if self.use_archive:
-            if self.local_attention_backend == "eager":
+            if self.attention_sink_size and self._seen_tokens >= self.window_size:
+                local_out = self._local_attention_with_sinks(
+                    q.unsqueeze(2), local_keys, local_values,
+                ).squeeze(2)
+            elif self.local_attention_backend == "eager":
                 valid = torch.ones(
                     (1, local_keys.shape[2]), device=hidden.device, dtype=torch.bool
                 )
@@ -2274,7 +2350,7 @@ class QCCSelfAttention(nn.Module):
                 attn_mask=valid,
                 dropout_p=0.0,
             ).squeeze(2)
-        if self.use_archive and self._seen_tokens >= self.window_size:
+        if self.use_archive and self._seen_tokens >= self.window_size + self.attention_sink_size:
             refresh = (
                 self._archive_read_cache is None
                 or self.archive_read_stride == 1
@@ -2294,7 +2370,7 @@ class QCCSelfAttention(nn.Module):
                 )
             if refresh:
                 read_query = archive_query if lexical_q is None else lexical_q
-                self._archive_read_cache = self.archive.read(read_query)
+                self._archive_read_cache = self.archive.read(read_query, exact_query=q)
                 self._archive_query_cache = read_query.detach()
             assert self._archive_read_cache is not None
             archive_out = self._archive_read_cache
@@ -2315,7 +2391,11 @@ class QCCSelfAttention(nn.Module):
                 and exact_gate.shape == gate.shape[:-1]
             ):
                 gate = gate * (1.0 - exact_gate.unsqueeze(-1).to(gate.dtype))
-            head_out = self._mix_local_archive(local_out, archive_out, gate)
+            local_partition = (
+                self._local_partition(q.unsqueeze(2), local_keys).squeeze(2)
+                if bool(getattr(self.archive, "exact_attention", False)) else None
+            )
+            head_out = self._mix_local_archive(local_out, archive_out, gate, local_partition)
         else:
             head_out = local_out
         self._seen_tokens += 1
@@ -2363,6 +2443,7 @@ class QCCSelfAttention(nn.Module):
                 length, device=hidden.device, dtype=torch.long
             )
         q, k = self._apply_rope(q_raw, k_raw, position_ids, position_embeddings)
+        self._retain_attention_sinks(k, v)
         if not self.archive_position_invariant:
             archive_q = q
             archive_k_current = k
@@ -2435,7 +2516,9 @@ class QCCSelfAttention(nn.Module):
         valid = (key_positions[None, :] <= positions[:, None]) & (
             key_positions[None, :] >= positions[:, None] - self.window_size + 1
         )
-        if hidden.is_cuda:
+        if self.attention_sink_size and self._seen_tokens + length > self.window_size:
+            local_out = self._local_attention_with_sinks(q, combined_k, combined_v, valid)
+        elif hidden.is_cuda:
             # Prefer the one-launch Triton sliding-window kernel.  It computes
             # the exact lower *and* upper causal bounds directly, avoiding the
             # large unfolded [time, window, dim] temporary used by the
@@ -2486,18 +2569,21 @@ class QCCSelfAttention(nn.Module):
             archive_event_offset = max(0, self._seen_tokens - self.window_size)
             archive_out = torch.zeros_like(local_out)
             event_start = max(0, self.window_size - old_length)
+            prefix_skip = max(0, self.attention_sink_size - archive_event_offset)
+            event_start += prefix_skip
+            archive_event_offset += prefix_skip
             event_count = length - event_start
             if event_count > 0:
-                evicted_k = combined_k[:, :, :event_count]
-                evicted_v = combined_v[:, :, :event_count]
+                evicted_k = combined_k[:, :, prefix_skip:prefix_skip + event_count]
+                evicted_v = combined_v[:, :, prefix_skip:prefix_skip + event_count]
                 # Keep the rotary local keys for the optional exact shadow;
                 # the recurrent archive may intentionally receive raw keys.
                 exact_evicted_k = evicted_k
                 if combined_archive_k is not None:
-                    evicted_k = combined_archive_k[:, :, :event_count]
+                    evicted_k = combined_archive_k[:, :, prefix_skip:prefix_skip + event_count]
                 if combined_lexical_k is not None:
-                    evicted_k = combined_lexical_k[:, :, :event_count]
-                    evicted_v = combined_lexical_v[:, :, :event_count]
+                    evicted_k = combined_lexical_k[:, :, prefix_skip:prefix_skip + event_count]
+                    evicted_v = combined_lexical_v[:, :, prefix_skip:prefix_skip + event_count]
                     exact_evicted_k = evicted_k
                 self.archive.update_read_chunk(
                     evicted_k,
@@ -2527,10 +2613,17 @@ class QCCSelfAttention(nn.Module):
                 and exact_gate.shape == gate.shape[:-1]
             ):
                 gate = gate * (1.0 - exact_gate.unsqueeze(-1).to(gate.dtype))
-            mixed_out = self._mix_local_archive(local_out, archive_out, gate)
+            local_partition = None
+            if bool(getattr(self.archive, "exact_attention", False)):
+                local_partition = self._local_partition(q, combined_k, valid)
+                log_z = torch.full_like(local_partition, -torch.inf)
+                if event_count > 0:
+                    log_z[:, :, event_start:] = self.archive._last_exact_log_partition
+                self.archive._last_exact_log_partition = log_z
+            mixed_out = self._mix_local_archive(local_out, archive_out, gate, local_partition)
             active = (
                 self._seen_tokens + torch.arange(length, device=hidden.device)
-                >= self.window_size
+                >= self.window_size + self.attention_sink_size
             ).view(1, 1, length, 1)
             head_out = torch.where(active, mixed_out, local_out)
             keep = min(self.window_size, total_length)
@@ -3000,6 +3093,12 @@ class QCCSelfAttention(nn.Module):
     ) -> Tensor:
         if hidden.ndim != 3 or hidden.shape[-1] != self.d_model:
             raise ValueError("hidden must have shape [batch, sequence, d_model]")
+        exact_attention = bool(getattr(self.archive, "exact_attention", False))
+        if (self.attention_sink_size or exact_attention) and not torch.is_grad_enabled():
+            return self.step_chunk(
+                hidden, reset_cache=reset_state, position_ids=position_ids,
+                archive_hint=archive_hint, position_embeddings=position_embeddings,
+            )
         bsz, length, _ = hidden.shape
         q_proj, k_proj, v_proj, gate_proj = self._project_qkv_gate(hidden)
         q_raw = self._split_heads(q_proj)
@@ -3021,7 +3120,7 @@ class QCCSelfAttention(nn.Module):
                 archive_query_source=archive_q_source,
                 archive_key_source=archive_k_source,
             )
-        if hidden.is_cuda and length > self.window_size:
+        if hidden.is_cuda and length > self.window_size and not self.attention_sink_size and not exact_attention:
             # CUDA training uses the same bounded block equations as
             # inference, but keeps the scan differentiable.  This avoids the
             # O(sequence-length) Python/autograd loop for long retrieval
@@ -3063,26 +3162,35 @@ class QCCSelfAttention(nn.Module):
                 evicted_local_key = local_keys.pop(0)
                 evicted_archive_key = archive_keys.pop(0)
                 evicted_value = local_values.pop(0)
-                self.archive.update(
-                    evicted_archive_key if self.archive_position_invariant else evicted_local_key,
-                    evicted_value,
-                )
+                if t >= self.window_size + self.attention_sink_size:
+                    self.archive.update(
+                        evicted_archive_key if self.archive_position_invariant else evicted_local_key,
+                        evicted_value,
+                        exact_key=evicted_local_key,
+                    )
 
             lk = torch.stack(local_keys, dim=2)
             lv = torch.stack(local_values, dim=2)
+            prefix_count = min(self.attention_sink_size, max(0, t - self.window_size + 1))
+            if prefix_count:
+                lk = torch.cat((k[:, :, :prefix_count], lk), dim=2)
+                lv = torch.cat((v[:, :, :prefix_count], lv), dim=2)
             local_logits = torch.einsum(
                 "bhd,bhld->bhl", q[:, :, t].float(), lk.float()
             ) * scale
             local_prob = F.softmax(local_logits, dim=-1).to(lv.dtype)
             local_out = torch.einsum("bhl,bhld->bhd", local_prob, lv)
-            if self.use_archive and t >= self.window_size:
-                archive_out = self.archive.read(archive_q_source[:, :, t])
+            if self.use_archive and t >= self.window_size + self.attention_sink_size:
+                archive_out = self.archive.read(archive_q_source[:, :, t], exact_query=q[:, :, t])
                 gate_input = hidden[:, t]
                 gate_weight = getattr(self.gate, "weight", None)
                 if isinstance(gate_weight, Tensor) and gate_weight.dtype != gate_input.dtype:
                     gate_input = gate_input.to(dtype=gate_weight.dtype)
                 gate = torch.sigmoid(self.gate(gate_input)).to(hidden.dtype).unsqueeze(-1)
-                head_out = self._mix_local_archive(local_out, archive_out, gate)
+                head_out = self._mix_local_archive(
+                    local_out, archive_out, gate,
+                    local_logits.logsumexp(-1) if exact_attention else None,
+                )
             else:
                 head_out = local_out
             # Concatenate heads in head-major order, matching the vectorized

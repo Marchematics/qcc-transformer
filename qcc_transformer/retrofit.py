@@ -224,6 +224,7 @@ class HFQCCAttention(nn.Module):
         *,
         num_heads: int,
         window_size: int = 128,
+        attention_sink_size: int = 0,
         num_codes: int = 16,
         max_position_embeddings: int = 131_072,
         rope_theta: Optional[float] = None,
@@ -301,6 +302,7 @@ class HFQCCAttention(nn.Module):
             d_model,
             num_heads,
             window_size=window_size,
+            attention_sink_size=attention_sink_size,
             num_codes=num_codes,
             max_position_embeddings=max_position_embeddings,
             rope_theta=rope_theta,
@@ -467,16 +469,26 @@ class HFQCCAttention(nn.Module):
             # Build the rotary query side-channel once, then pass only this
             # bounded-size feature tensor into each chunk. The recurrent path
             # and local attention still process the request in normal chunks.
-            q_proj, _, _, _ = self.qcc._project_qkv_gate(hidden_states)
+            # Token window_size is archive-query event zero. Slice before
+            # projection so a fixed tail does not keep full-prompt QKV alive.
+            query_token_start = min(self.qcc.window_size, length)
+            tail = getattr(self.qcc.archive, "quality_query_tail", None)
+            if tail is not None:
+                query_token_start = max(query_token_start, length - tail)
+            query_embeddings = None if position_embeddings is None else tuple(
+                angle.narrow(-2, query_token_start, length-query_token_start)
+                for angle in position_embeddings
+            )
+            q_proj, _, _, _ = self.qcc._project_qkv_gate(hidden_states[:, query_token_start:])
             q_raw = self.qcc._split_heads(q_proj)
             q_rotary, _ = self.qcc._apply_rope(
                 q_raw,
                 q_raw,
-                positions,
-                position_embeddings,
+                positions[:, query_token_start:],
+                query_embeddings,
             )
-            quality_query_start = min(self.qcc.window_size, length)
-            quality_query = q_rotary[:, :, quality_query_start:]
+            quality_query = q_rotary
+            quality_query_start = max(0, query_token_start - self.qcc.window_size)
         if length <= chunk_size:
             return self.qcc.step_chunk(
                 hidden_states,
@@ -643,6 +655,7 @@ def patch_hf_model(
     model: nn.Module,
     *,
     window_size: int = 128,
+    attention_sink_size: int = 0,
     num_codes: int = 16,
     max_position_embeddings: Optional[int] = None,
     rope_theta: Optional[float] = None,
@@ -740,6 +753,7 @@ def patch_hf_model(
             module,
             num_heads=q_heads,
             window_size=window_size,
+            attention_sink_size=attention_sink_size,
             num_codes=num_codes,
             max_position_embeddings=max_position_embeddings,
             rope_theta=rope_theta,
@@ -838,6 +852,44 @@ def reset_hf_qcc_cache(model: nn.Module, *, batch_size: int = 1) -> int:
     return count
 
 
+def qcc_runtime_state_bytes(model: nn.Module) -> dict[str, Any]:
+    """Count owned tensor storage, including request scratch and RNG state.
+
+    Shared tensor views count once at their full backing-storage size. Model
+    parameters, immutable registered buffers, and fused weight copies are excluded.
+    """
+    storages = set()
+    generators = set()
+    by_device: dict[str, int] = {}
+    rng_bytes = 0
+
+    def collect(value):
+        nonlocal rng_bytes
+        if isinstance(value, Tensor) and not isinstance(value, nn.Parameter):
+            storage = value.untyped_storage()
+            key = (str(value.device), storage.data_ptr())
+            if key not in storages:
+                storages.add(key)
+                by_device[key[0]] = by_device.get(key[0], 0) + storage.nbytes()
+        elif isinstance(value, torch.Generator):
+            if id(value) not in generators:
+                generators.add(id(value))
+                state = value.get_state()
+                rng_bytes += state.numel() * state.element_size()
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                collect(item)
+
+    for attention in model.modules():
+        if isinstance(attention, QCCSelfAttention):
+            for module in attention.modules():
+                for name, value in vars(module).items():
+                    if not name.startswith('_fused_projection'):
+                        collect(value)
+    return {'tensor_storage_by_device': by_device, 'rng_state_bytes': rng_bytes,
+            'total_bytes': sum(by_device.values()) + rng_bytes}
+
+
 def load_retrofit_adapter(
     model: nn.Module,
     checkpoint: str | Path,
@@ -878,4 +930,5 @@ __all__ = [
     "save_retrofit_adapter",
     "compare_logits",
     "reset_hf_qcc_cache",
+    "qcc_runtime_state_bytes",
 ]

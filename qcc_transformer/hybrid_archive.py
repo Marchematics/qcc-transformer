@@ -112,7 +112,18 @@ class HybridQCCArchive(QCCArchive):
         exact_confidence_temperature: float = 20.0,
         exact_mix_bias_init: float = -4.0,
         quality_first: bool = False,
+        exact_attention: bool = False,
+        background_size: int = 0,
+        block_size: int = 1,
+        quality_query_tail: int | None = None,
     ) -> None:
+        if background_size and not exact_attention:
+            raise ValueError("background sampling requires exact_attention")
+        if block_size > 1 and not background_size:
+            raise ValueError('hybrid block retention requires background sampling to process every eviction')
+        if quality_query_tail is not None and quality_query_tail <= 0:
+            raise ValueError("quality_query_tail must be positive")
+        self.quality_query_tail = quality_query_tail
         if active_codes is not None or lazy_decay:
             raise ValueError(
                 "HybridQCCArchive currently requires the dense base archive; "
@@ -180,8 +191,10 @@ class HybridQCCArchive(QCCArchive):
             num_sets=exact_num_sets,
             ways=exact_ways,
             probe_sets=probes,
-            diversity_weight=0.10,
+            diversity_weight=0.0 if background_size else 0.10,
             replacement_policy=exact_replacement_policy,
+            background_size=background_size,
+            block_size=block_size,
         )
         # Hybrid admission is supplied by the teacher-trained predictor below.
         # Keep the bank's legacy internal score neutral and frozen.
@@ -199,6 +212,10 @@ class HybridQCCArchive(QCCArchive):
         self.exact_confidence_threshold = float(exact_confidence_threshold)
         self.exact_confidence_temperature = float(exact_confidence_temperature)
         self.quality_first = bool(quality_first)
+        self.exact_attention = bool(exact_attention)
+        # Global-table writes and weighted reads never consult set routing.
+        if self.exact_attention and probes == exact_num_sets:
+            self.exact_bank.set_codes.requires_grad_(False)
         self.exact_hard_read = exact_hard_read
         # Per-read confidence gate consumed by QCCSelfAttention.  Keeping it
         # separate from the blended response lets quality-first mode promote
@@ -274,6 +291,7 @@ class HybridQCCArchive(QCCArchive):
     ) -> None:
         super().reset_state(batch_size, device=device, dtype=dtype)
         self._last_exact_gate = None
+        self._last_exact_log_partition = None
         if hasattr(self, "exact_bank"):
             self.exact_bank.reset_state(
                 batch_size,
@@ -306,6 +324,9 @@ class HybridQCCArchive(QCCArchive):
         exact: Tensor,
         confidence: Tensor,
     ) -> Tensor:
+        if self.exact_attention:
+            self._last_exact_log_partition = confidence
+            return exact
         gate_bias = self.exact_mix_logits.to(
             device=recurrent.device, dtype=torch.float32
         )
@@ -346,7 +367,7 @@ class HybridQCCArchive(QCCArchive):
             if write_mask.shape != mask.shape:
                 raise ValueError("write_mask must match [batch, heads]")
             mask = mask & write_mask.to(device=mask.device, dtype=torch.bool)
-        if bool(mask.any()):
+        if bool(mask.any()) or self.exact_bank.background_size:
             self.exact_bank.update(
                 key,
                 value,
@@ -385,15 +406,17 @@ class HybridQCCArchive(QCCArchive):
         if query_count <= 0:
             return key.new_full((key.shape[0], key.shape[1], tile), -1.0, dtype=torch.float32)
 
-        # A key at absolute event index ``i`` can first be retrieved by the
-        # query whose event index is ``i - window + 1``.  Include that causal
-        # boundary in the sampled positions and mask earlier queries per key.
+        # Query event j is token j + window_size. Key i first leaves the
+        # local window at that token when j == i. All offsets use event units.
         query_start = int(query_start)
         if query_start < 0:
             raise ValueError("query_start must be non-negative")
-        first_query = max(query_start, int(key_start) - self.window_size + 1)
+        # Anchor sampling to the query interval so splitting a key tile does
+        # not change a token's admission score. The per-key mask below excludes
+        # queries that precede its archive admission event.
+        first_query = query_start
         last_query = query_start + query.shape[2] - 1
-        if first_query > last_query:
+        if int(key_start) > last_query:
             return key.new_full(
                 (key.shape[0], key.shape[1], tile), -1.0, dtype=torch.float32
             )
@@ -417,21 +440,28 @@ class HybridQCCArchive(QCCArchive):
             int(key_start), int(key_start) + tile, device=query.device
         )
         # Query event j corresponds to an absolute token at j + window_size.
-        # Therefore j >= i - window_size + 1 is the causal eligibility test.
-        minimum_query = (absolute_key - self.window_size + 1).clamp_min(0)
+        # Only queries with event j >= i can read key i from the archive.
+        minimum_query = absolute_key
         valid = positions_abs.view(1, 1, 1, -1) >= minimum_query.view(1, 1, -1, 1)
         similarity = similarity.masked_fill(~valid, -1.0)
         return similarity.max(dim=-1).values
 
-    def update(self, key: Tensor, value: Tensor) -> None:
+    def update(self, key: Tensor, value: Tensor, *, exact_key: Tensor | None = None) -> None:
         super().update(key, value)
         with torch.no_grad():
             score = self.admission(key, value)
-            self._admit_one(key, value, score)
+            self._admit_one(key if exact_key is None else exact_key, value, score)
 
-    def read(self, query: Tensor) -> Tensor:
+    def _read_exact(self, query: Tensor) -> tuple[Tensor, Tensor]:
+        if self.exact_attention:
+            return self.exact_bank.read_attention(query)
+        if query.ndim == 4:
+            return self.exact_bank.read_chunk(query, hard=self.exact_hard_read)
+        return self.exact_bank.read(query, hard=self.exact_hard_read)
+
+    def read(self, query: Tensor, *, exact_query: Tensor | None = None) -> Tensor:
         recurrent = super().read(query)
-        exact, confidence = self.exact_bank.read(query, hard=self.exact_hard_read)
+        exact, confidence = self._read_exact(query if exact_query is None else exact_query)
         return self._blend_exact(recurrent, exact, confidence)
 
     @torch.no_grad()
@@ -454,7 +484,7 @@ class HybridQCCArchive(QCCArchive):
             query.shape[:-1], -1.0, device=query.device, dtype=torch.float32
         )
         tile_size = max(1, int(self.scan_block_size))
-        if batch != 1:
+        if batch != 1 and not self.quality_first:
             # Calibration can use larger batches. Keep each tile causal while
             # allowing the bank to update all request rows in one tensor call.
             # A tile boundary is only a scheduling boundary; the bank itself
@@ -465,9 +495,7 @@ class HybridQCCArchive(QCCArchive):
                     self._admit_one(
                         key[:, :, index], value[:, :, index], score[:, :, index]
                     )
-                    result, conf = self.exact_bank.read(
-                        query[:, :, index], hard=self.exact_hard_read
-                    )
+                    result, conf = self._read_exact(query[:, :, index])
                     exact[:, :, index] = result
                     confidence[:, :, index] = conf
             return exact, confidence
@@ -497,7 +525,7 @@ class HybridQCCArchive(QCCArchive):
                     key[:, :, tile_start:tile_end],
                     query if quality_query is None else quality_query,
                     key_start=quality_key_start + tile_start,
-                    query_start=quality_query_start,
+                    query_start=quality_key_start if quality_query is None else quality_query_start,
                 )
             admission_score = tile_score if self.quality_first else score[:, :, tile_start:tile_end]
             eligible = tile_score >= self.admission_threshold
@@ -505,38 +533,42 @@ class HybridQCCArchive(QCCArchive):
                 eligible,
                 tile_score,
                 torch.full_like(tile_score, -torch.inf),
-            ).max(dim=1).values[0]
-            candidates = torch.nonzero(
-                torch.isfinite(position_score), as_tuple=False
-            ).flatten()
-            if candidates.numel() > self.max_inserts_per_chunk:
-                keep = position_score[candidates].topk(
-                    self.max_inserts_per_chunk
-                ).indices
-                candidates = candidates[keep]
-                candidates = torch.sort(candidates).values
-            selected = eligible[0]
+            ).max(dim=1).values
+            selected_positions = torch.isfinite(position_score)
+            if tile_end - tile_start > self.max_inserts_per_chunk:
+                top_scores, top_positions = position_score.topk(
+                    self.max_inserts_per_chunk, dim=-1
+                )
+                selected_positions = torch.zeros_like(selected_positions)
+                selected_positions.scatter_(
+                    1, top_positions, torch.isfinite(top_scores)
+                )
+            if self.exact_bank.background_size:
+                candidates = torch.arange(tile_end - tile_start, device=key.device)
+            else:
+                candidates = torch.nonzero(
+                    selected_positions.any(dim=0), as_tuple=False
+                ).flatten()
 
             cursor = tile_start
             for position_tensor in candidates:
                 position = tile_start + int(position_tensor.item())
                 if position > cursor:
-                    result, conf = self.exact_bank.read_chunk(
-                        query[:, :, cursor:position], hard=self.exact_hard_read
-                    )
+                    result, conf = self._read_exact(query[:, :, cursor:position])
                     exact[:, :, cursor:position] = result
                     confidence[:, :, cursor:position] = conf
                 self._admit_one(
                     key[:, :, position],
                     value[:, :, position],
                     admission_score[:, :, position - tile_start],
-                    write_mask=selected[:, position - tile_start].unsqueeze(0),
+                    write_mask=(
+                        eligible[:, :, position - tile_start]
+                        & selected_positions[:, position - tile_start, None]
+                    ),
                 )
                 cursor = position
             if cursor < tile_end:
-                result, conf = self.exact_bank.read_chunk(
-                    query[:, :, cursor:tile_end], hard=self.exact_hard_read
-                )
+                result, conf = self._read_exact(query[:, :, cursor:tile_end])
                 exact[:, :, cursor:tile_end] = result
                 confidence[:, :, cursor:tile_end] = conf
         return exact, confidence

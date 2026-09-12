@@ -49,6 +49,8 @@ class SetAssociativeLandmarkBank(nn.Module):
         recency_weight: float = 0.0,
         temperature: float = 8.0,
         replacement_policy: str = "score",
+        background_size: int = 0,
+        block_size: int = 1,
     ) -> None:
         super().__init__()
         if min(num_heads, head_dim, num_sets, ways, probe_sets) <= 0:
@@ -69,6 +71,12 @@ class SetAssociativeLandmarkBank(nn.Module):
         self.recency_weight = recency_weight
         self.temperature = temperature
         self.replacement_policy = replacement_policy
+        if background_size < 0 or (background_size and (replacement_policy != 'score' or probe_sets != num_sets)):
+            raise ValueError("background sampling requires a nonnegative capacity and global score replacement")
+        self.background_size = background_size
+        if block_size < 1 or (block_size > 1 and (ways != block_size or probe_sets != num_sets or replacement_policy != 'score')):
+            raise ValueError('block retention requires ways=block_size and global score replacement')
+        self.block_size = block_size
 
         scale = 1.0 / math.sqrt(head_dim)
         self.set_codes = nn.Parameter(torch.randn(num_heads, num_sets, head_dim) * scale)
@@ -95,6 +103,19 @@ class SetAssociativeLandmarkBank(nn.Module):
             batch_size, self.num_heads, device=device, dtype=torch.long
         )
         self._step = 0
+        self._pending_count = 0
+        if self.block_size > 1:
+            self._pending_keys = torch.zeros(batch_size, self.num_heads, self.block_size, self.head_dim, device=device, dtype=dtype)
+            self._pending_values = torch.zeros_like(self._pending_keys)
+            self._pending_scores = torch.full((batch_size, self.num_heads, self.block_size), -torch.inf, device=device, dtype=dtype)
+        if self.background_size:
+            self._background_keys = torch.zeros(batch_size, self.num_heads, self.background_size, self.head_dim, device=device, dtype=dtype)
+            self._background_values = torch.zeros_like(self._background_keys)
+            self._background_count = torch.zeros(batch_size, self.num_heads, device=device, dtype=torch.long)
+            self._background_rngs = [
+                torch.Generator(device=device).manual_seed(11)
+                for _ in range(batch_size)
+            ]
 
     @property
     def state(self) -> AssociativeLandmarkState:
@@ -105,10 +126,75 @@ class SetAssociativeLandmarkBank(nn.Module):
     def state_bytes(self) -> int:
         """Return mutable serving-state bytes, excluding trainable parameters."""
 
-        return sum(
+        total = sum(
             tensor.numel() * tensor.element_size()
             for tensor in (self._keys, self._values, self._scores, self._ages)
         )
+        if self.background_size:
+            total += sum(t.numel() * t.element_size() for t in (
+                self._background_keys, self._background_values, self._background_count,
+                *(rng.get_state() for rng in self._background_rngs),
+            ))
+        if self.block_size > 1:
+            total += sum(t.numel()*t.element_size() for t in (self._pending_keys, self._pending_values, self._pending_scores))
+        return total
+
+    @torch.no_grad()
+    def _update_block(self, key, value, admission_bias, write_mask):
+        slot = self._pending_count
+        self._pending_keys[:, :, slot] = key
+        self._pending_values[:, :, slot] = value
+        score = torch.zeros_like(self._scores[:, :, 0, 0]) if admission_bias is None else admission_bias
+        if write_mask is not None:
+            if write_mask.ndim == 1:
+                write_mask = write_mask[:, None]
+            score = torch.where(write_mask, score, -torch.inf)
+        self._pending_scores[:, :, slot] = score
+        self._pending_count += 1
+        if self._pending_count < self.block_size:
+            return
+        score = self._pending_scores.amax(-1)
+        previous = self._scores[:, :, :, 0]
+        empty = ~torch.isfinite(previous)
+        has_empty = empty.any(-1)
+        index = torch.where(has_empty, empty.long().argmax(-1), previous.argmin(-1))
+        weakest = previous.gather(-1, index[..., None]).squeeze(-1)
+        write = torch.isfinite(score) & (has_empty | (score > weakest))
+        batch = torch.arange(key.shape[0], device=key.device)[:, None]
+        head = torch.arange(self.num_heads, device=key.device)[None, :]
+        old_keys = self._keys[batch, head, index]
+        old_values = self._values[batch, head, index]
+        demoted = write & ~has_empty
+        if self.background_size:
+            event = ~write | demoted
+            for offset in range(self.block_size):
+                self._sample_background(
+                    torch.where(demoted[..., None], old_keys[:, :, offset], self._pending_keys[:, :, offset]),
+                    torch.where(demoted[..., None], old_values[:, :, offset], self._pending_values[:, :, offset]), event)
+        wb, wh = torch.where(write)
+        selected = index[write]
+        self._keys[wb, wh, selected] = self._pending_keys[write]
+        self._values[wb, wh, selected] = self._pending_values[write]
+        self._scores[wb, wh, selected] = score[write].unsqueeze(-1)
+        ages = self._step-self.block_size+1+torch.arange(self.block_size, device=key.device)
+        self._ages[wb, wh, selected] = ages
+        self._pending_count = 0
+
+    @torch.no_grad()
+    def _sample_background(self, key: Tensor, value: Tensor, event: Tensor) -> None:
+        """Reservoir-sample the stream of rejected or demoted foreground entries."""
+        self._background_count.add_(event.to(torch.long))
+        count = self._background_count
+        draw = torch.stack([
+            torch.rand(count.shape[1:], device=key.device, generator=rng)
+            for rng in self._background_rngs
+        ])
+        slot = torch.where(count <= self.background_size, count - 1, (draw * count).long())
+        keep = event & (slot < self.background_size)
+        batch, head = torch.where(keep)
+        selected = slot[keep]
+        self._background_keys[batch, head, selected] = key.to(self._background_keys.dtype)[keep]
+        self._background_values[batch, head, selected] = value.to(self._background_values.dtype)[keep]
 
     def _ensure_state(self, key: Tensor) -> None:
         if self._keys.shape[0] != key.shape[0] or self._keys.device != key.device:
@@ -155,6 +241,9 @@ class SetAssociativeLandmarkBank(nn.Module):
             raise ValueError("key shape does not match bank configuration")
         self._ensure_state(key)
         self._step += 1
+        if self.block_size > 1:
+            self._update_block(key, value, admission_bias, write_mask)
+            return
 
         # FIFO is a deliberately simple bounded-quality mode.  It avoids
         # making replacement depend on an uncalibrated salience score while
@@ -216,13 +305,15 @@ class SetAssociativeLandmarkBank(nn.Module):
             slots_score = self._scores[batch_index, head_index, set_index]
         valid = torch.isfinite(slots_score)
 
-        normalized_key = F.normalize(key.to(self._keys.dtype), dim=-1)
-        normalized_slots = F.normalize(slots_key, dim=-1)
-        similarity = torch.einsum("bhd,bhwd->bhw", normalized_key, normalized_slots)
-        max_similarity = torch.where(
-            valid, similarity, torch.full_like(similarity, -1.0)
-        ).max(-1).values
-        diversity = 1.0 - max_similarity
+        diversity = 0.0
+        if self.diversity_weight:
+            normalized_key = F.normalize(key.to(self._keys.dtype), dim=-1)
+            normalized_slots = F.normalize(slots_key, dim=-1)
+            similarity = torch.einsum("bhd,bhwd->bhw", normalized_key, normalized_slots)
+            max_similarity = torch.where(
+                valid, similarity, torch.full_like(similarity, -1.0)
+            ).max(-1).values
+            diversity = 1.0 - max_similarity
 
         admission = torch.einsum(
             "bhd,hd->bh",
@@ -264,6 +355,16 @@ class SetAssociativeLandmarkBank(nn.Module):
                 device=key.device, dtype=torch.bool
             )
 
+        if self.background_size:
+            demoted = should_write & ~has_empty
+            gather = slot_index[..., None, None].expand(-1, -1, 1, self.head_dim)
+            old_key = slots_key.gather(2, gather).squeeze(2)
+            old_value = self._values.flatten(2, 3).gather(2, gather).squeeze(2)
+            self._sample_background(
+                torch.where(demoted[..., None], old_key, key),
+                torch.where(demoted[..., None], old_value, value),
+                ~should_write | demoted,
+            )
         write_batch = batch_index.expand_as(slot_index)[should_write]
         write_head = head_index.expand_as(slot_index)[should_write]
         if global_bank:
@@ -282,6 +383,93 @@ class SetAssociativeLandmarkBank(nn.Module):
             should_write
         ]
         self._ages[write_batch, write_head, write_set, write_way] = self._step
+
+    def read_attention(
+        self,
+        query: Tensor,
+        *,
+        extra_keys: Tensor | None = None,
+        extra_values: Tensor | None = None,
+    ) -> tuple[Tensor, Tensor]:
+        """Attend over all retained slots; return response and log partition.
+
+        The log partition lets callers combine disjoint exact KV partitions
+        with softmax mass, without a cosine-confidence heuristic. Query tiles
+        bound temporary score storage; persistent bank contents are unchanged.
+        """
+        single = query.ndim == 3
+        block = query.unsqueeze(2) if single else query
+        if block.ndim != 4 or block.shape[1] != self.num_heads or block.shape[-1] != self.head_dim:
+            raise ValueError("query must have shape [batch, heads, (tokens,) head_dim]")
+        batch, heads, tokens, dim = block.shape
+        if block.shape[0] != self._keys.shape[0] or block.device != self._keys.device:
+            raise ValueError("query batch and device must match bank state")
+        if (extra_keys is None) != (extra_values is None):
+            raise ValueError("extra_keys and extra_values must be provided together")
+        if extra_keys is not None:
+            if extra_keys.ndim != 4 or extra_values.shape != extra_keys.shape:
+                raise ValueError("extra keys and values must have shape [batch, heads, tokens, dim]")
+            if extra_keys.shape[:2] != block.shape[:2] or extra_keys.shape[2] != block.shape[2] or extra_keys.shape[3] != dim:
+                raise ValueError("extra keys and values must match query batch, head, token, and dim")
+        keys = self._keys.reshape(batch, heads, -1, dim).float()
+        values = self._values.reshape(batch, heads, -1, dim).float()
+        if torch.is_grad_enabled():
+            # Later admissions mutate serving state; backward needs this read's snapshot.
+            keys, values = keys.clone(), values.clone()
+        valid = torch.isfinite(self._scores.reshape(batch, heads, -1))
+        log_multiplicity = None
+        if self.background_size:
+            population = self._background_count
+            sample_count = population.clamp(max=self.background_size)
+            bg_valid = torch.arange(self.background_size, device=query.device)[None, None, :] < sample_count[..., None]
+            log_scale = (population.clamp_min(1).float() / sample_count.clamp_min(1)).log()
+            log_multiplicity = torch.cat((torch.zeros_like(valid, dtype=torch.float32), log_scale[..., None].expand_as(bg_valid)), -1)
+            keys = torch.cat((keys, self._background_keys.float()), 2)
+            values = torch.cat((values, self._background_values.float()), 2)
+            valid = torch.cat((valid, bg_valid), -1)
+        if self.block_size > 1 and self._pending_count:
+            count = self._pending_count
+            keys = torch.cat((keys, self._pending_keys[:, :, :count].float()), 2)
+            values = torch.cat((values, self._pending_values[:, :, :count].float()), 2)
+            pending_valid = torch.ones(batch, heads, count, device=query.device, dtype=torch.bool)
+            valid = torch.cat((valid, pending_valid), -1)
+            if log_multiplicity is not None:
+                log_multiplicity = torch.cat((log_multiplicity, torch.zeros_like(pending_valid, dtype=torch.float32)), -1)
+        extra_valid = None
+        if extra_keys is not None:
+            extra_count = extra_keys.shape[2]
+            keys = torch.cat((keys, extra_keys.float()), 2)
+            values = torch.cat((values, extra_values.float()), 2)
+            extra_valid = torch.tril(
+                torch.ones(tokens, extra_count, device=query.device, dtype=torch.bool)
+            )
+            if log_multiplicity is not None:
+                log_multiplicity = torch.cat(
+                    (log_multiplicity, torch.zeros(batch, heads, extra_count, device=query.device)), -1
+                )
+        any_valid = valid.any(-1)
+        response = torch.empty_like(block)
+        partition = torch.empty((batch, heads, tokens), device=block.device, dtype=torch.float32)
+        for start in range(0, tokens, 128):
+            end = min(start + 128, tokens)
+            logits = torch.matmul(block[:, :, start:end].float(), keys.transpose(-1, -2)) / math.sqrt(dim)
+            if log_multiplicity is not None:
+                logits = logits + log_multiplicity.unsqueeze(2)
+            valid_mask = valid.unsqueeze(2).expand(-1, -1, end - start, -1)
+            if extra_valid is not None:
+                valid_mask = torch.cat(
+                    (valid_mask, extra_valid[start:end].view(1, 1, end - start, -1).expand(batch, heads, -1, -1)),
+                    dim=-1,
+                )
+            logits = logits.masked_fill(~valid_mask, -torch.inf)
+            log_z = torch.logsumexp(logits, -1)
+            safe_z = torch.where(any_valid.unsqueeze(-1), log_z, torch.zeros_like(log_z))
+            weights = torch.exp(logits - safe_z.unsqueeze(-1))
+            response[:, :, start:end] = torch.matmul(weights, values).to(block.dtype)
+            partition[:, :, start:end] = log_z
+        if single:
+            return response.squeeze(2), partition.squeeze(2)
+        return response, partition
 
     def read(self, query: Tensor, *, hard: bool = False) -> tuple[Tensor, Tensor]:
         """Read top routed sets; return response and best cosine confidence."""

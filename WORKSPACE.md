@@ -1,5 +1,11 @@
 # Remote experiment workspace
 
+Current working checkout (2026-09-11): `/root/qcc/repo/qcc-transformer`,
+branch `main`. Current quality runs execute from this checkout on one A10G.
+Evidence and current targets are recorded in `artifacts/quality-repair-20260911.md`.
+`/home/waas/qcc-quality-sep10` is the earlier runtime copy; it does not contain
+the latest prefix-retention changes. The remote location below is historical.
+
 The shared GPU host keeps the active QCC workspace at:
 
 ```text
