@@ -251,6 +251,11 @@ def main() -> None:
         help="use the fixed-capacity exact shadow and full-prefill salience path",
     )
     parser.add_argument(
+        "--quality-block-propagation",
+        action="store_true",
+        help="propagate each raw block score to its immediate successor (diagnostic)",
+    )
+    parser.add_argument(
         "--archive-position-invariant",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -359,6 +364,7 @@ def main() -> None:
                     "exact_ways": args.exact_ways,
                     "exact_probe_sets": args.exact_probe_sets,
                     "quality_first": True,
+                    "quality_block_propagation": args.quality_block_propagation,
                     "exact_attention": args.exact_attention,
                     "background_size": args.background_size,
                     "block_size": args.retention_block_size,
@@ -388,6 +394,7 @@ def main() -> None:
                 "exact_ways": args.exact_ways,
                 "exact_probe_sets": args.exact_probe_sets,
                 "quality_first": args.quality_first,
+                "quality_block_propagation": args.quality_block_propagation,
                 "exact_attention": args.exact_attention,
                 "background_size": args.background_size,
                 "block_size": args.retention_block_size,
@@ -472,6 +479,7 @@ def main() -> None:
         "local_attention_backend": args.local_attention_backend,
         "prefill_chunk_size": args.prefill_chunk_size,
         "quality_first": args.quality_first,
+        "quality_block_propagation": args.quality_block_propagation,
         "exact_attention": args.exact_attention,
         "background_size": args.background_size,
         "retention_block_size": args.retention_block_size,

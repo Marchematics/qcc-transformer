@@ -619,3 +619,37 @@ peak allocation 15,293,140,992 bytes. The failure persists when block boundaries
 change, so the row21 loss is not explained by the 32-token block boundary.
 The artifact is `exact-prefill-intervention-row21-block16.json`. This is a
 single-row diagnostic; it does not justify changing the production geometry.
+
+### Capacity and successor-score experiments
+
+The next preselected capacity point, 768 foreground plus 128 background with
+32-token blocks, succeeded on row21 under exact prefill:
+`exact-prefill-intervention-row21-cap768.json` reports the complete UUID,
+`answer_recall=1.0`, `score=1.0`, and 85 generated tokens. State is
+5,912,547,840 bytes (5.50 GiB), peak allocation 16,123,708,416 bytes. The
+384+128 exact-prefill control failed, so capacity is a demonstrated factor on
+this row. The run is still a selection diagnostic; it does not establish the
+minimum capacity, aggregate quality, or production speed trade-off.
+
+An attempted ordinary-QCC cap768 benchmark was invalid: a stale external CUDA
+context consumed about 16.4 GiB while `nvidia-smi` showed no visible process,
+and both Full-KV and QCC generation hit OOM before producing predictions. The
+failed JSON/progress files were retained as an explicit environment failure,
+not quality evidence. No reset or privileged command was used.
+
+Read the supplied CPU preexperiment package at
+`/root/qcc/RULER/QCC_quality_preexperiments_20260912.zip`. Its successor
+prototype propagates only the previous raw block score one step, adding one
+float32 per batch/head and no trainable parameters; it improves a constructed
+27/33 to 33/33 case but reduces independent short-fact retention (12 to 6).
+This trade-off is mechanism evidence only.
+
+Implemented the successor policy behind the opt-in
+`quality_block_propagation` flag in `HybridQCCArchive`, the benchmark, and the
+diagnostic. Raw block maxima are stored separately from propagated write scores,
+and all three runtime score tensors are included in `total_state_bytes`.
+An existing hybrid test verifies that the immediate successor can replace a
+weaker old block while the same sequence without propagation cannot. The
+focused hybrid/retrofit/benchmark tests pass (51 tests); no default behavior
+changed. This is ready for the prescribed paired A/B experiment once the GPU
+context is clear.

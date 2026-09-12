@@ -112,6 +112,7 @@ class HybridQCCArchive(QCCArchive):
         exact_confidence_temperature: float = 20.0,
         exact_mix_bias_init: float = -4.0,
         quality_first: bool = False,
+        quality_block_propagation: bool = False,
         exact_attention: bool = False,
         background_size: int = 0,
         block_size: int = 1,
@@ -212,6 +213,7 @@ class HybridQCCArchive(QCCArchive):
         self.exact_confidence_threshold = float(exact_confidence_threshold)
         self.exact_confidence_temperature = float(exact_confidence_temperature)
         self.quality_first = bool(quality_first)
+        self.quality_block_propagation = bool(quality_block_propagation)
         self.exact_attention = bool(exact_attention)
         # Global-table writes and weighted reads never consult set routing.
         if self.exact_attention and probes == exact_num_sets:
@@ -222,6 +224,9 @@ class HybridQCCArchive(QCCArchive):
         # a true exact hit without changing the conservative recurrent/local
         # mix for unrelated queries.
         self._last_exact_gate: Tensor | None = None
+        self._quality_previous_raw_score: Tensor | None = None
+        self._quality_current_raw_score: Tensor | None = None
+        self._quality_current_write_score: Tensor | None = None
         # The exact tier admits a whole bounded tile in quality-first mode;
         # matching the tile to its capacity lets the global score table see
         # every candidate while retaining only the strongest fixed-capacity
@@ -292,6 +297,9 @@ class HybridQCCArchive(QCCArchive):
         super().reset_state(batch_size, device=device, dtype=dtype)
         self._last_exact_gate = None
         self._last_exact_log_partition = None
+        self._quality_previous_raw_score = None
+        self._quality_current_raw_score = None
+        self._quality_current_write_score = None
         if hasattr(self, "exact_bank"):
             self.exact_bank.reset_state(
                 batch_size,
@@ -316,7 +324,15 @@ class HybridQCCArchive(QCCArchive):
                     self._landmark_score,
                 )
             )
-        return recurrent + self.exact_state_bytes()
+        quality_state = 0
+        for tensor in (
+            self._quality_previous_raw_score,
+            self._quality_current_raw_score,
+            self._quality_current_write_score,
+        ):
+            if tensor is not None:
+                quality_state += tensor.numel() * tensor.element_size()
+        return recurrent + self.exact_state_bytes() + quality_state
 
     def _blend_exact(
         self,
@@ -360,6 +376,23 @@ class HybridQCCArchive(QCCArchive):
         *,
         write_mask: Tensor | None = None,
     ) -> None:
+        if self.quality_first and self.quality_block_propagation and self.exact_bank.block_size > 1:
+            # Preserve the raw score of the completed block separately. The
+            # one-step propagation applies only to the block being written;
+            # carrying the propagated value forward would turn one salient
+            # block into an unbounded score wave across the stream.
+            if self.exact_bank._pending_count == 0:
+                self._quality_current_raw_score = score.detach().clone()
+                previous = self._quality_previous_raw_score
+                if previous is None:
+                    previous = torch.full_like(score, -torch.inf)
+                self._quality_current_write_score = torch.maximum(score, previous)
+            else:
+                assert self._quality_current_raw_score is not None
+                self._quality_current_raw_score = torch.maximum(
+                    self._quality_current_raw_score, score
+                )
+            score = self._quality_current_write_score
         mask = score >= self.admission_threshold
         if write_mask is not None:
             if write_mask.shape == (key.shape[0],):
@@ -374,6 +407,16 @@ class HybridQCCArchive(QCCArchive):
                 admission_bias=score,
                 write_mask=mask,
             )
+            if (
+                self.quality_first
+                and self.quality_block_propagation
+                and self.exact_bank.block_size > 1
+                and self.exact_bank._pending_count == 0
+            ):
+                assert self._quality_current_raw_score is not None
+                self._quality_previous_raw_score = self._quality_current_raw_score
+                self._quality_current_raw_score = None
+                self._quality_current_write_score = None
 
     @torch.no_grad()
     def _quality_first_salience(

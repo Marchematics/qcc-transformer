@@ -468,6 +468,39 @@ def test_quality_first_retains_future_salient_token_across_tiles():
     assert bool((similarity > 0.99).any())
 
 
+def test_quality_first_successor_score_propagates_one_block_only():
+    def make_archive(propagate):
+        return HybridQCCArchive(
+            num_heads=1,
+            head_dim=2,
+            num_codes=1,
+            window_size=2,
+            use_triton=False,
+            exact_num_sets=2,
+            exact_ways=2,
+            quality_first=True,
+            quality_block_propagation=propagate,
+            exact_attention=True,
+            background_size=1,
+            block_size=2,
+        )
+
+    keys = [torch.tensor([[[float(i), 0.0]]]) for i in range(8)]
+    values = [key.clone() for key in keys]
+
+    def run(archive):
+        with torch.no_grad():
+            for block, raw_score in enumerate((0.1, 0.7, 0.8, 0.2)):
+                for offset in range(2):
+                    score = torch.tensor([[raw_score]])
+                    archive._admit_one(keys[block * 2 + offset], values[block * 2 + offset], score)
+        stored = archive.exact_bank._keys.reshape(1, 1, -1, 2)
+        return bool((stored == keys[6].reshape(1, 1, 1, 2)).all(-1).any())
+
+    assert not run(make_archive(False))
+    assert run(make_archive(True))
+
+
 def test_hybrid_exact_shadow_uses_rotary_side_channel():
     base = QCCArchive(
         num_heads=1,

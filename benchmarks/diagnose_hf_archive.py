@@ -59,7 +59,9 @@ def trace_candidate(model, tokenizer, record, args):
                       background_size=args.background_size,
                       block_size=args.block_size,
                       quality_query_tail=args.quality_query_tail,
-                      quality_first=True, exact_attention=True))
+                      quality_first=True,
+                      quality_block_propagation=args.quality_block_propagation,
+                      exact_attention=True))
     names = patch_hf_model_hybrid(model, **config)
     captures = {}
     traces = []
@@ -298,6 +300,8 @@ def main():
     parser.add_argument('--trace-candidate', action='store_true')
     parser.add_argument('--exact-prefill-intervention', action='store_true',
                         help='diagnostic only: exact prefill outputs followed by bounded QCC decode')
+    parser.add_argument('--quality-block-propagation', action='store_true',
+                        help='propagate raw block score to one immediate successor')
     parser.add_argument('--trace-teacher-heads', type=Path)
     parser.add_argument('--replay-teacher-retention', action='store_true',
                         help='replay actual bounded admission on teacher KV at layers 15,17,19,20')
