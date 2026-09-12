@@ -501,6 +501,34 @@ def test_quality_first_successor_score_propagates_one_block_only():
     assert run(make_archive(True))
 
 
+def test_quality_first_decode_uses_rotary_cosine_score():
+    archive = HybridQCCArchive(
+        num_heads=1,
+        head_dim=2,
+        num_codes=1,
+        window_size=2,
+        use_triton=False,
+        exact_num_sets=1,
+        exact_ways=2,
+        quality_first=True,
+        exact_attention=True,
+        background_size=1,
+        block_size=2,
+    )
+    key = torch.tensor([[[1.0, 0.0]]])
+    value = torch.tensor([[[3.0, 4.0]]])
+    with torch.no_grad():
+        archive.update(
+            key, value, exact_key=key, exact_query=key,
+        )
+        archive.update(
+            key, value, exact_key=key, exact_query=key,
+        )
+    stored_scores = archive.exact_bank._scores[0, 0]
+    assert bool(torch.isfinite(stored_scores).any())
+    assert float(stored_scores[torch.isfinite(stored_scores)][0]) == pytest.approx(1.0)
+
+
 def test_hybrid_exact_shadow_uses_rotary_side_channel():
     base = QCCArchive(
         num_heads=1,

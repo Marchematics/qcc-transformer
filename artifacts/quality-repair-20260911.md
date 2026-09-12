@@ -653,3 +653,17 @@ weaker old block while the same sequence without propagation cannot. The
 focused hybrid/retrofit/benchmark tests pass (51 tests); no default behavior
 changed. This is ready for the prescribed paired A/B experiment once the GPU
 context is clear.
+
+### Prefill/decode score unification
+
+The existing quality-first prefill scores rotary K against a fixed future-query
+tail, while token eviction called the untrained admission predictor (initial
+bias -4). Quality-first token eviction now accepts the current rotary query and
+uses the same normalized cosine score definition; the base `QCCArchive.update`
+accepts and ignores the optional query for API compatibility. Both tokenwise
+attention paths pass the current query with the exact rotary key. This removes
+the known score-scale mismatch without changing non-hybrid behavior or adding
+parameters/state. A focused test confirms a matching decode key/query is stored
+with score 1.0; all 103 existing associative/hybrid/retrofit/archive/benchmark
+tests pass. Real-model quality is not yet measured because the GPU has a stale
+hidden allocation of roughly 16.4 GiB.

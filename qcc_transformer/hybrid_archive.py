@@ -489,10 +489,22 @@ class HybridQCCArchive(QCCArchive):
         similarity = similarity.masked_fill(~valid, -1.0)
         return similarity.max(dim=-1).values
 
-    def update(self, key: Tensor, value: Tensor, *, exact_key: Tensor | None = None) -> None:
+    def update(
+        self,
+        key: Tensor,
+        value: Tensor,
+        *,
+        exact_key: Tensor | None = None,
+        exact_query: Tensor | None = None,
+    ) -> None:
         super().update(key, value)
         with torch.no_grad():
-            score = self.admission(key, value)
+            if self.quality_first and exact_key is not None and exact_query is not None:
+                score = F.cosine_similarity(
+                    exact_key.float(), exact_query.float(), dim=-1
+                )
+            else:
+                score = self.admission(key, value)
             self._admit_one(key if exact_key is None else exact_key, value, score)
 
     def _read_exact(self, query: Tensor) -> tuple[Tensor, Tensor]:

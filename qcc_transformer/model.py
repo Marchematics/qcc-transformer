@@ -577,6 +577,7 @@ class QCCArchive(nn.Module):
         *,
         _include_landmarks: bool = True,
         exact_key: Optional[Tensor] = None,
+        exact_query: Optional[Tensor] = None,
     ) -> None:
         """Insert one evicted token per batch/head into the archive.
 
@@ -585,6 +586,7 @@ class QCCArchive(nn.Module):
         local-window length.
         """
 
+        del exact_key, exact_query
         if key.shape != value.shape or key.ndim != 3:
             raise ValueError("key and value must both have shape [batch, heads, head_dim]")
         bsz, heads, dim = key.shape
@@ -2270,6 +2272,7 @@ class QCCSelfAttention(nn.Module):
                     self.archive.update(
                         archive_key, archive_value,
                         exact_key=self._local_key_cache[:, :, write_index],
+                        exact_query=q,
                     )
                 # A token eviction changes the recurrent archive state.  Any
                 # read cached from an earlier state is therefore invalid even
@@ -3167,6 +3170,7 @@ class QCCSelfAttention(nn.Module):
                         evicted_archive_key if self.archive_position_invariant else evicted_local_key,
                         evicted_value,
                         exact_key=evicted_local_key,
+                        exact_query=q[:, :, t],
                     )
 
             lk = torch.stack(local_keys, dim=2)
