@@ -738,3 +738,13 @@ precision, and reads still perform the same FP32 arithmetic. A CPU test with
 BF16 source K/V confirms bit-identical FP32/BF16 read outputs and log partitions
 with lower bank state bytes. This is a storage-only change and is not a quality
 or speed claim. A real row21 FP32/BF16 paired run is the next measurement.
+
+The real fixed-capacity storage pair completed on row21 with ordinary prefill,
+original scoring, and otherwise identical settings. FP32 state was
+5,912,547,840 bytes; BF16 state was 5,546,004,992 bytes, a reduction of
+366,542,848 bytes (6.20%). Both Full-KV references reached the output limit
+with raw UUID recall 1; both QCC candidates returned a corrupted UUID with
+raw answer recall 0 and score 0. Exact storage dtype changed state size
+without recovering this task. The BF16 artifact is
+`benchmark-ordinary-cap768-bf16-row21.json`; this is one row, not a quality or
+speed claim.
