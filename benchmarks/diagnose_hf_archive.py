@@ -62,6 +62,7 @@ def trace_candidate(model, tokenizer, record, args):
                       quality_first=True,
                       quality_block_propagation=args.quality_block_propagation,
                       quality_prefill_shadow_only=args.quality_prefill_shadow_only,
+                      exact_storage_dtype=(torch.bfloat16 if args.exact_storage_dtype == 'bfloat16' else torch.float32),
                       exact_attention=True))
     names = patch_hf_model_hybrid(model, **config)
     captures = {}
@@ -305,6 +306,7 @@ def main():
                         help='propagate raw block score to one immediate successor')
     parser.add_argument('--quality-prefill-shadow-only', action='store_true',
                         help='populate exact tier without feeding it into prefill outputs')
+    parser.add_argument('--exact-storage-dtype', choices=('float32', 'bfloat16'), default='float32')
     parser.add_argument('--trace-teacher-heads', type=Path)
     parser.add_argument('--replay-teacher-retention', action='store_true',
                         help='replay actual bounded admission on teacher KV at layers 15,17,19,20')

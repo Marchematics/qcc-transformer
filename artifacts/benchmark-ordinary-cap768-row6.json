@@ -1,0 +1,139 @@
+{
+  "schema": "qcc-ruler-v1",
+  "pretrained_parameters": 3821079552,
+  "trainable_parameters": 6589440,
+  "trainable_fraction_of_pretrained": 0.0017244969413293177,
+  "benchmark": "ruler",
+  "model": "/datasets/ComfyUI/models/LLM/Phi-3.5-mini-instruct",
+  "model_id": "/datasets/ComfyUI/models/LLM/Phi-3.5-mini-instruct",
+  "run_id": null,
+  "progress_jsonl": "artifacts/benchmark-ordinary-cap768-row6.progress.jsonl",
+  "matched_full_kv": true,
+  "offload_full_kv": true,
+  "full_kv_resident_layers": 8,
+  "scoring": "mean case-insensitive answer recall; output-limit and generation errors score zero",
+  "attention_sink_size": 32,
+  "archive_mix_override": null,
+  "real_model": true,
+  "synthetic": false,
+  "official": true,
+  "attn_implementation": "sdpa",
+  "use_triton": false,
+  "local_attention_backend": "sdpa",
+  "prefill_chunk_size": 512,
+  "quality_first": true,
+  "quality_block_propagation": false,
+  "quality_prefill_shadow_only": false,
+  "exact_attention": true,
+  "background_size": 128,
+  "retention_block_size": 32,
+  "quality_query_tail": 128,
+  "exact_num_sets": 24,
+  "exact_ways": 32,
+  "full_suite": false,
+  "qcc_only": false,
+  "qcc_score": 0.0,
+  "full_kv_score": 1.0,
+  "quality_retention": 0.0,
+  "generation_errors": {
+    "full_kv": 0,
+    "qcc": 0
+  },
+  "task_ratios": {
+    "task:niah_multikey_2": 0.0,
+    "length:8-32K": 0.0
+  },
+  "quality_score": 0.0,
+  "native_context_tokens": 131072,
+  "records": 1,
+  "patched_layers": [
+    "model.layers.0.self_attn",
+    "model.layers.1.self_attn",
+    "model.layers.2.self_attn",
+    "model.layers.3.self_attn",
+    "model.layers.4.self_attn",
+    "model.layers.5.self_attn",
+    "model.layers.6.self_attn",
+    "model.layers.7.self_attn",
+    "model.layers.8.self_attn",
+    "model.layers.9.self_attn",
+    "model.layers.10.self_attn",
+    "model.layers.11.self_attn",
+    "model.layers.12.self_attn",
+    "model.layers.13.self_attn",
+    "model.layers.14.self_attn",
+    "model.layers.15.self_attn",
+    "model.layers.16.self_attn",
+    "model.layers.17.self_attn",
+    "model.layers.18.self_attn",
+    "model.layers.19.self_attn",
+    "model.layers.20.self_attn",
+    "model.layers.21.self_attn",
+    "model.layers.22.self_attn",
+    "model.layers.23.self_attn",
+    "model.layers.24.self_attn",
+    "model.layers.25.self_attn",
+    "model.layers.26.self_attn",
+    "model.layers.27.self_attn",
+    "model.layers.28.self_attn",
+    "model.layers.29.self_attn",
+    "model.layers.30.self_attn",
+    "model.layers.31.self_attn"
+  ],
+  "baseline_full_kv": {
+    "correct": 1,
+    "score_sum": 1.0,
+    "accuracy": 1.0,
+    "records": [
+      {
+        "line": 6,
+        "answers": [
+          "8650260"
+        ],
+        "length_chars": 86964,
+        "tokens": 32030,
+        "task": "niah_multikey_2",
+        "length_bucket": "8-32K",
+        "prediction": "\nThe special magic number for fast-clapboard mentioned in the text is 8650260.\n",
+        "generated_tokens": 27,
+        "reached_output_limit": false,
+        "answer_recall": 1.0,
+        "score": 1.0,
+        "correct": true,
+        "peak_cuda_allocated_bytes": 13701682176
+      }
+    ]
+  },
+  "qcc_retrofit": {
+    "correct": 0,
+    "score_sum": 0.0,
+    "accuracy": 0.0,
+    "records": [
+      {
+        "line": 6,
+        "answers": [
+          "8650260"
+        ],
+        "length_chars": 86964,
+        "tokens": 32030,
+        "task": "niah_multikey_2",
+        "length_bucket": "8-32K",
+        "prediction": "\nThe special magic number for fast-clapboard mentioned in the provided text is 3894566.\n\n",
+        "generated_tokens": 29,
+        "reached_output_limit": false,
+        "answer_recall": 0.0,
+        "score": 0.0,
+        "correct": false,
+        "qcc_runtime_state": {
+          "tensor_storage_by_device": {
+            "cuda:0": 5912547328
+          },
+          "rng_state_bytes": 512,
+          "total_bytes": 5912547840
+        },
+        "peak_cuda_allocated_bytes": 16513731584
+      }
+    ]
+  },
+  "note": "Official RULER record scoring; generation failures count as incorrect and no quality claim is made beyond this split."
+}

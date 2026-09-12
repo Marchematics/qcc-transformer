@@ -177,6 +177,35 @@ def test_set_associative_bank_state_is_context_length_independent() -> None:
     assert bank.state.keys.shape == (1, 2, 8, 2, 8)
 
 
+def test_bfloat16_exact_storage_round_trips_bfloat16_sources() -> None:
+    torch.manual_seed(228)
+    fp32 = SetAssociativeLandmarkBank(
+        1, 8, num_sets=1, ways=8, probe_sets=1, storage_dtype=torch.float32,
+    )
+    bf16 = SetAssociativeLandmarkBank(
+        1, 8, num_sets=1, ways=8, probe_sets=1, storage_dtype=torch.bfloat16,
+    )
+    with torch.no_grad():
+        bf16.set_codes.copy_(fp32.set_codes)
+        bf16.admission_vector.copy_(fp32.admission_vector)
+    keys = torch.randn(1, 1, 6, 8, dtype=torch.bfloat16)
+    values = torch.randn_like(keys)
+    scores = torch.arange(6, dtype=torch.float32)
+    with torch.no_grad():
+        for index in range(6):
+            score = scores[index].view(1, 1)
+            fp32.update(keys[:, :, index], values[:, :, index], admission_bias=score)
+            bf16.update(keys[:, :, index], values[:, :, index], admission_bias=score)
+        query = torch.randn(1, 1, 5, 8, dtype=torch.bfloat16)
+        fp32_out, fp32_z = fp32.read_attention(query)
+        bf16_out, bf16_z = bf16.read_attention(query)
+    assert bf16._keys.dtype == torch.bfloat16
+    assert bf16._values.dtype == torch.bfloat16
+    torch.testing.assert_close(bf16_out, fp32_out, atol=0, rtol=0)
+    torch.testing.assert_close(bf16_z, fp32_z, atol=0, rtol=0)
+    assert bf16.state_bytes() < fp32.state_bytes()
+
+
 def test_admission_bias_protects_salient_record_from_distractors() -> None:
     torch.manual_seed(9)
     bank = SetAssociativeLandmarkBank(

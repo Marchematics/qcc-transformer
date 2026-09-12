@@ -261,6 +261,10 @@ def main() -> None:
         help="populate exact tier during prefill without feeding it into prompt outputs",
     )
     parser.add_argument(
+        "--exact-storage-dtype", choices=("float32", "bfloat16"), default="float32",
+        help="dtype for exact K/V storage; arithmetic remains float32",
+    )
+    parser.add_argument(
         "--archive-position-invariant",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -279,6 +283,9 @@ def main() -> None:
         raise ValueError('retention-block-size requires --background-size')
     if args.quality_query_tail is not None and not args.quality_first:
         raise ValueError("quality-query-tail requires --quality-first")
+    exact_storage_dtype = (
+        torch.bfloat16 if args.exact_storage_dtype == "bfloat16" else torch.float32
+    )
     mix_kwargs = {}
     if args.archive_mix is not None:
         if not 0 <= args.archive_mix <= 1:
@@ -371,6 +378,7 @@ def main() -> None:
                     "quality_first": True,
                     "quality_block_propagation": args.quality_block_propagation,
                     "quality_prefill_shadow_only": args.quality_prefill_shadow_only,
+                    "exact_storage_dtype": exact_storage_dtype,
                     "exact_attention": args.exact_attention,
                     "background_size": args.background_size,
                     "block_size": args.retention_block_size,
@@ -402,6 +410,7 @@ def main() -> None:
                 "quality_first": args.quality_first,
                 "quality_block_propagation": args.quality_block_propagation,
                 "quality_prefill_shadow_only": args.quality_prefill_shadow_only,
+                "exact_storage_dtype": exact_storage_dtype,
                 "exact_attention": args.exact_attention,
                 "background_size": args.background_size,
                 "block_size": args.retention_block_size,
@@ -488,6 +497,7 @@ def main() -> None:
         "quality_first": args.quality_first,
         "quality_block_propagation": args.quality_block_propagation,
         "quality_prefill_shadow_only": args.quality_prefill_shadow_only,
+        "exact_storage_dtype": args.exact_storage_dtype,
         "exact_attention": args.exact_attention,
         "background_size": args.background_size,
         "retention_block_size": args.retention_block_size,

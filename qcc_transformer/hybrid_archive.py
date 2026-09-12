@@ -115,6 +115,7 @@ class HybridQCCArchive(QCCArchive):
         quality_block_propagation: bool = False,
         exact_attention: bool = False,
         quality_prefill_shadow_only: bool = False,
+        exact_storage_dtype: torch.dtype | None = None,
         background_size: int = 0,
         block_size: int = 1,
         quality_query_tail: int | None = None,
@@ -197,6 +198,7 @@ class HybridQCCArchive(QCCArchive):
             replacement_policy=exact_replacement_policy,
             background_size=background_size,
             block_size=block_size,
+            storage_dtype=exact_storage_dtype,
         )
         # Hybrid admission is supplied by the teacher-trained predictor below.
         # Keep the bank's legacy internal score neutral and frozen.

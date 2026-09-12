@@ -714,3 +714,27 @@ The run also confirms why the long 2×2 attempt was slow: even with exact reads
 disabled, ordered background reservoir admission across 32 layers and 32K
 tokens takes roughly 12 minutes on one A10G. A full real-model matrix must
 persist each cell independently and should begin with shorter held-out rows.
+
+### Ordinary-prefill 768-capacity result
+
+The requested ordinary QCC prefill comparison is now valid and complete for
+both selected rows, with original scoring and 768 foreground plus 128
+background slots (24×32, block32, tail128). Row21: Full-KV contains the full
+UUID in a 128-token truncated response; QCC emits a corrupted suffix and also
+hits the limit, with raw answer recall 0 and score 0. Row6: Full-KV is correct;
+QCC emits 3894566, raw answer recall 0 and score 0, without hitting the limit.
+State is 5,912,547,840 bytes for both rows. Thus increasing capacity from
+384 to 768 does not make ordinary prefill usable on these two rows. The
+requested next focus is representation/selection drift, not another successor
+score or block-width scan.
+
+### Exact-storage dtype implementation
+
+The exact bank now accepts an explicit `storage_dtype` and the benchmark and
+diagnostic expose `--exact-storage-dtype {float32,bfloat16}`. The default stays
+FP32. When BF16 is selected, K/V, pending K/V, and background K/V are stored in
+BF16; scores and recurrent numerator/denominator retain their existing
+precision, and reads still perform the same FP32 arithmetic. A CPU test with
+BF16 source K/V confirms bit-identical FP32/BF16 read outputs and log partitions
+with lower bank state bytes. This is a storage-only change and is not a quality
+or speed claim. A real row21 FP32/BF16 paired run is the next measurement.

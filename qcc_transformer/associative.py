@@ -51,6 +51,7 @@ class SetAssociativeLandmarkBank(nn.Module):
         replacement_policy: str = "score",
         background_size: int = 0,
         block_size: int = 1,
+        storage_dtype: torch.dtype | None = None,
     ) -> None:
         super().__init__()
         if min(num_heads, head_dim, num_sets, ways, probe_sets) <= 0:
@@ -61,6 +62,10 @@ class SetAssociativeLandmarkBank(nn.Module):
             raise ValueError("temperature must be positive and finite")
         if replacement_policy not in ("score", "fifo"):
             raise ValueError("replacement_policy must be 'score' or 'fifo'")
+        if storage_dtype is not None and storage_dtype not in (
+            torch.float16, torch.bfloat16, torch.float32, torch.float64
+        ):
+            raise ValueError("storage_dtype must be a floating-point torch dtype")
         self.num_heads = num_heads
         self.head_dim = head_dim
         self.num_sets = num_sets
@@ -77,6 +82,7 @@ class SetAssociativeLandmarkBank(nn.Module):
         if block_size < 1 or (block_size > 1 and (ways != block_size or probe_sets != num_sets or replacement_policy != 'score')):
             raise ValueError('block retention requires ways=block_size and global score replacement')
         self.block_size = block_size
+        self.storage_dtype = storage_dtype
 
         scale = 1.0 / math.sqrt(head_dim)
         self.set_codes = nn.Parameter(torch.randn(num_heads, num_sets, head_dim) * scale)
@@ -93,7 +99,10 @@ class SetAssociativeLandmarkBank(nn.Module):
         if batch_size <= 0:
             raise ValueError("batch_size must be positive")
         device = device or self.set_codes.device
-        dtype = dtype if dtype in (torch.float32, torch.float64) else torch.float32
+        if self.storage_dtype is not None:
+            dtype = self.storage_dtype
+        else:
+            dtype = dtype if dtype in (torch.float32, torch.float64) else torch.float32
         shape = (batch_size, self.num_heads, self.num_sets, self.ways)
         self._keys = torch.zeros(*shape, self.head_dim, device=device, dtype=dtype)
         self._values = torch.zeros_like(self._keys)
