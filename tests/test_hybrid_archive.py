@@ -529,6 +529,38 @@ def test_quality_first_decode_uses_rotary_cosine_score():
     assert float(stored_scores[torch.isfinite(stored_scores)][0]) == pytest.approx(1.0)
 
 
+def test_quality_prefill_shadow_only_keeps_recurrent_output_and_populates_bank():
+    torch.manual_seed(227)
+    base = QCCArchive(
+        num_heads=1,
+        head_dim=4,
+        num_codes=2,
+        decay_rates=(0.9,),
+        window_size=2,
+        use_triton=False,
+        scan_block_size=4,
+    )
+    hybrid = HybridQCCArchive.from_archive(
+        base,
+        exact_num_sets=2,
+        exact_ways=2,
+        quality_first=True,
+        exact_attention=True,
+        quality_prefill_shadow_only=True,
+        background_size=2,
+        block_size=2,
+    )
+    reference = copy.deepcopy(base)
+    key = torch.randn(1, 1, 9, 4)
+    value = torch.randn_like(key)
+    query = torch.randn_like(key)
+    with torch.no_grad():
+        expected = reference.update_read_chunk(key, value, query)
+        actual = hybrid.update_read_chunk(key, value, query)
+    torch.testing.assert_close(actual, expected, atol=1e-6, rtol=1e-5)
+    assert bool(torch.isfinite(hybrid.exact_bank._scores).any())
+
+
 def test_hybrid_exact_shadow_uses_rotary_side_channel():
     base = QCCArchive(
         num_heads=1,

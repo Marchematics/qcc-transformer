@@ -256,6 +256,11 @@ def main() -> None:
         help="propagate each raw block score to its immediate successor (diagnostic)",
     )
     parser.add_argument(
+        "--quality-prefill-shadow-only",
+        action="store_true",
+        help="populate exact tier during prefill without feeding it into prompt outputs",
+    )
+    parser.add_argument(
         "--archive-position-invariant",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -365,6 +370,7 @@ def main() -> None:
                     "exact_probe_sets": args.exact_probe_sets,
                     "quality_first": True,
                     "quality_block_propagation": args.quality_block_propagation,
+                    "quality_prefill_shadow_only": args.quality_prefill_shadow_only,
                     "exact_attention": args.exact_attention,
                     "background_size": args.background_size,
                     "block_size": args.retention_block_size,
@@ -395,6 +401,7 @@ def main() -> None:
                 "exact_probe_sets": args.exact_probe_sets,
                 "quality_first": args.quality_first,
                 "quality_block_propagation": args.quality_block_propagation,
+                "quality_prefill_shadow_only": args.quality_prefill_shadow_only,
                 "exact_attention": args.exact_attention,
                 "background_size": args.background_size,
                 "block_size": args.retention_block_size,
@@ -480,6 +487,7 @@ def main() -> None:
         "prefill_chunk_size": args.prefill_chunk_size,
         "quality_first": args.quality_first,
         "quality_block_propagation": args.quality_block_propagation,
+        "quality_prefill_shadow_only": args.quality_prefill_shadow_only,
         "exact_attention": args.exact_attention,
         "background_size": args.background_size,
         "retention_block_size": args.retention_block_size,

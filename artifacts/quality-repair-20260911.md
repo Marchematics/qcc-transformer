@@ -697,3 +697,20 @@ was temporarily present were not used as evidence and are excluded from the
 main synchronization. This C/D result supports the report's warning that the
 constructed successor benefit does not transfer automatically to real model
 quality. A/B ordinary-prefill results under the stable code remain unmeasured.
+
+### Causal prefill shadow-only result
+
+Tested the new `quality_prefill_shadow_only` mode on real Phi row6 with the
+same 384+128 capacity, block32, tail128, and matched Full-KV reference. The
+mode keeps the exact tier bounded and populated but returns the recurrent QCC
+output during prefill, preventing exact-tier feedback into prompt states.
+Full-KV scored 1.0; shadow-only QCC generated 22 tokens saying the number was
+not mentioned, with `answer_recall=0` and `score=0`. State remained
+5,605,839,360 bytes. This is a valid single-row result, not an aggregate
+claim, and shows that removing exact-tier feedback alone does not recover the
+task. The option stays opt-in; no default behavior changed.
+
+The run also confirms why the long 2×2 attempt was slow: even with exact reads
+disabled, ordered background reservoir admission across 32 layers and 32K
+tokens takes roughly 12 minutes on one A10G. A full real-model matrix must
+persist each cell independently and should begin with shorter held-out rows.

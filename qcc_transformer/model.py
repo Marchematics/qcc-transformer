@@ -2617,7 +2617,10 @@ class QCCSelfAttention(nn.Module):
             ):
                 gate = gate * (1.0 - exact_gate.unsqueeze(-1).to(gate.dtype))
             local_partition = None
-            if bool(getattr(self.archive, "exact_attention", False)):
+            if (
+                bool(getattr(self.archive, "exact_attention", False))
+                and not bool(getattr(self.archive, "quality_prefill_shadow_only", False))
+            ):
                 local_partition = self._local_partition(q, combined_k, valid)
                 log_z = torch.full_like(local_partition, -torch.inf)
                 if event_count > 0:

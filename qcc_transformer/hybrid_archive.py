@@ -114,6 +114,7 @@ class HybridQCCArchive(QCCArchive):
         quality_first: bool = False,
         quality_block_propagation: bool = False,
         exact_attention: bool = False,
+        quality_prefill_shadow_only: bool = False,
         background_size: int = 0,
         block_size: int = 1,
         quality_query_tail: int | None = None,
@@ -215,6 +216,7 @@ class HybridQCCArchive(QCCArchive):
         self.quality_first = bool(quality_first)
         self.quality_block_propagation = bool(quality_block_propagation)
         self.exact_attention = bool(exact_attention)
+        self.quality_prefill_shadow_only = bool(quality_prefill_shadow_only)
         # Global-table writes and weighted reads never consult set routing.
         if self.exact_attention and probes == exact_num_sets:
             self.exact_bank.set_codes.requires_grad_(False)
@@ -605,6 +607,24 @@ class HybridQCCArchive(QCCArchive):
                     selected_positions.any(dim=0), as_tuple=False
                 ).flatten()
 
+            if self.quality_prefill_shadow_only:
+                # Populate the bounded tier without reading it back into the
+                # prefill representation. Admission remains ordered so block
+                # replacement and the background reservoir are unchanged.
+                for position_tensor in candidates:
+                    position = tile_start + int(position_tensor.item())
+                    index = position - tile_start
+                    self._admit_one(
+                        key[:, :, position],
+                        value[:, :, position],
+                        admission_score[:, :, index],
+                        write_mask=(
+                            eligible[:, :, index]
+                            & selected_positions[:, index, None]
+                        ),
+                    )
+                continue
+
             cursor = tile_start
             for position_tensor in candidates:
                 position = tile_start + int(position_tensor.item())
@@ -690,7 +710,13 @@ class HybridQCCArchive(QCCArchive):
             quality_key_start=quality_key_start,
             quality_query_start=quality_query_start,
         )
-        result = self._blend_exact(recurrent, exact, confidence)
+        if self.quality_prefill_shadow_only:
+            # The exact tier is populated as a bounded shadow during prefill,
+            # but its future-query selection must not feed back into the
+            # representation of earlier prompt tokens.
+            result = recurrent
+        else:
+            result = self._blend_exact(recurrent, exact, confidence)
         if output is not None:
             if output.shape != result.shape or output.device != result.device:
                 raise ValueError("output must match query shape and device")
