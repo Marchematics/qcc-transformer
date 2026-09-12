@@ -679,3 +679,21 @@ writing its aggregate JSON, so it is not evidence and no partial result is
 claimed. The prescribed comparison remains pending; future runs should write
 each group immediately or use a bounded diagnostic subset before committing
 to multiple 16K–32K records.
+
+### Stable-code row6 isolation result
+
+After reverting the non-equivalent batch-read optimization, a paired row6
+isolation was completed on the stable code. Group C (exact prefill, original
+block score) returns the correct 8650260 with `answer_recall=1.0` and
+`score=1.0`; Group D (exact prefill, one-step successor score) returns
+9510896 with `answer_recall=0` and `score=0`. Both use 384+128 capacity,
+block32, tail128, and the same checkpoint. The opt-in successor score rule
+therefore harms this real row6 case and remains disabled by default. Artifacts:
+`benchmark-exact-prefill-original-row6-current.json` and
+`benchmark-exact-prefill-successor-row6-current.json`.
+
+The earlier A/B artifacts generated while an unproven batch-read optimization
+was temporarily present were not used as evidence and are excluded from the
+main synchronization. This C/D result supports the report's warning that the
+constructed successor benefit does not transfer automatically to real model
+quality. A/B ordinary-prefill results under the stable code remain unmeasured.
