@@ -206,6 +206,30 @@ def test_bfloat16_exact_storage_round_trips_bfloat16_sources() -> None:
     assert bf16.state_bytes() < fp32.state_bytes()
 
 
+def test_bfloat16_exact_storage_keeps_replacement_scores_in_fp32() -> None:
+    bank = SetAssociativeLandmarkBank(
+        1,
+        2,
+        num_sets=1,
+        ways=2,
+        probe_sets=1,
+        block_size=2,
+        storage_dtype=torch.bfloat16,
+    )
+    old_key = torch.tensor([[[1.0, 0.0]]], dtype=torch.bfloat16)
+    new_key = torch.tensor([[[0.0, 1.0]]], dtype=torch.bfloat16)
+    with torch.no_grad():
+        bank.update(old_key, old_key, admission_bias=torch.tensor([[0.5001]]))
+        bank.update(old_key, old_key, admission_bias=torch.tensor([[0.5001]]))
+        bank.update(new_key, new_key, admission_bias=torch.tensor([[0.5002]]))
+        bank.update(new_key, new_key, admission_bias=torch.tensor([[0.5002]]))
+    assert bank._keys.dtype == torch.bfloat16
+    assert bank._scores.dtype == torch.float32
+    assert bank._pending_scores.dtype == torch.float32
+    assert bool((bank._keys == new_key.reshape(1, 1, 1, 2)).all(-1).any())
+    assert float(bank._scores[torch.isfinite(bank._scores)][0]) == pytest.approx(0.5002)
+
+
 def test_admission_bias_protects_salient_record_from_distractors() -> None:
     torch.manual_seed(9)
     bank = SetAssociativeLandmarkBank(

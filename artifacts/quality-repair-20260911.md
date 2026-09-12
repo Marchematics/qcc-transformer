@@ -748,3 +748,29 @@ raw answer recall 0 and score 0. Exact storage dtype changed state size
 without recovering this task. The BF16 artifact is
 `benchmark-ordinary-cap768-bf16-row21.json`; this is one row, not a quality or
 speed claim.
+
+### BF16 score-precision correction
+
+The preceding BF16 result is not a pure K/V-storage comparison. At that time
+`_scores` and `_pending_scores` followed the BF16 K/V dtype, so close scores
+could round into a tie and change replacement decisions. The state difference
+therefore included 364,904,448 bytes from K/V plus 1,638,400 bytes from score
+and pending-score tensors; 366,542,848 bytes is 349.5625 MiB. The old artifact
+is retained as evidence of the mixed-dtype run, but must not be cited as an
+FP32-score/BF16-KV result.
+
+Fixed `reset_state` so K/V, pending K/V, and background K/V use the requested
+storage dtype while `_scores` and `_pending_scores` use FP32 (or FP64 when the
+state dtype is FP64). Admission/diversity score arithmetic is explicitly
+FP32, and assignment casts only at the FP32 score destination. An existing
+CPU replacement test reproduces 0.5001 versus 0.5002 competing for one block:
+the BF16-KV bank now accepts the higher score exactly as the FP32 bank does.
+All 108 focused tests pass. The corrected real pair then completed on row21:
+BF16 K/V with FP32 scores,
+same 768+128/original-score/ordinary-prefill configuration. QCC generated the
+same corrupted UUID suffix as the FP32 run, reached the 128-token limit, and
+had raw answer recall 0 and score 0. Its state is 5,547,643,392 bytes, exactly
+the prior mixed-dtype state plus 1,638,400 bytes of restored FP32 score and
+pending-score storage. This validates the storage-only interpretation for this
+row's end-to-end output; it remains a one-row quality result, not a general
+parity or performance claim.

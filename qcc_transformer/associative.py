@@ -103,10 +103,11 @@ class SetAssociativeLandmarkBank(nn.Module):
             dtype = self.storage_dtype
         else:
             dtype = dtype if dtype in (torch.float32, torch.float64) else torch.float32
+        score_dtype = torch.float64 if dtype == torch.float64 else torch.float32
         shape = (batch_size, self.num_heads, self.num_sets, self.ways)
         self._keys = torch.zeros(*shape, self.head_dim, device=device, dtype=dtype)
         self._values = torch.zeros_like(self._keys)
-        self._scores = torch.full(shape, -torch.inf, device=device, dtype=dtype)
+        self._scores = torch.full(shape, -torch.inf, device=device, dtype=score_dtype)
         self._ages = torch.zeros(shape, device=device, dtype=torch.long)
         self._fifo_cursor = torch.zeros(
             batch_size, self.num_heads, device=device, dtype=torch.long
@@ -116,7 +117,12 @@ class SetAssociativeLandmarkBank(nn.Module):
         if self.block_size > 1:
             self._pending_keys = torch.zeros(batch_size, self.num_heads, self.block_size, self.head_dim, device=device, dtype=dtype)
             self._pending_values = torch.zeros_like(self._pending_keys)
-            self._pending_scores = torch.full((batch_size, self.num_heads, self.block_size), -torch.inf, device=device, dtype=dtype)
+            self._pending_scores = torch.full(
+                (batch_size, self.num_heads, self.block_size),
+                -torch.inf,
+                device=device,
+                dtype=score_dtype,
+            )
         if self.background_size:
             self._background_keys = torch.zeros(batch_size, self.num_heads, self.background_size, self.head_dim, device=device, dtype=dtype)
             self._background_values = torch.zeros_like(self._background_keys)
@@ -153,7 +159,11 @@ class SetAssociativeLandmarkBank(nn.Module):
         slot = self._pending_count
         self._pending_keys[:, :, slot] = key
         self._pending_values[:, :, slot] = value
-        score = torch.zeros_like(self._scores[:, :, 0, 0]) if admission_bias is None else admission_bias
+        score = (
+            torch.zeros_like(self._scores[:, :, 0, 0])
+            if admission_bias is None
+            else admission_bias.to(self._pending_scores.dtype)
+        )
         if write_mask is not None:
             if write_mask.ndim == 1:
                 write_mask = write_mask[:, None]
@@ -316,8 +326,8 @@ class SetAssociativeLandmarkBank(nn.Module):
 
         diversity = 0.0
         if self.diversity_weight:
-            normalized_key = F.normalize(key.to(self._keys.dtype), dim=-1)
-            normalized_slots = F.normalize(slots_key, dim=-1)
+            normalized_key = F.normalize(key.float(), dim=-1)
+            normalized_slots = F.normalize(slots_key.float(), dim=-1)
             similarity = torch.einsum("bhd,bhwd->bhw", normalized_key, normalized_slots)
             max_similarity = torch.where(
                 valid, similarity, torch.full_like(similarity, -1.0)
@@ -326,8 +336,8 @@ class SetAssociativeLandmarkBank(nn.Module):
 
         admission = torch.einsum(
             "bhd,hd->bh",
-            key.to(self._keys.dtype),
-            self.admission_vector.to(key.device, self._keys.dtype),
+            key.float(),
+            self.admission_vector.to(key.device, dtype=torch.float32),
         ) / math.sqrt(self.head_dim)
         if admission_bias is not None:
             if admission_bias.shape != admission.shape:
@@ -390,7 +400,7 @@ class SetAssociativeLandmarkBank(nn.Module):
         )[should_write]
         self._scores[write_batch, write_head, write_set, write_way] = candidate_score[
             should_write
-        ]
+        ].to(self._scores.dtype)
         self._ages[write_batch, write_head, write_set, write_way] = self._step
 
     def read_attention(
