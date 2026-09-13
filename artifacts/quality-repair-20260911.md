@@ -878,3 +878,11 @@ comparison. Tests cover counted identical-key exactness, chunk invariance,
 suffix independence, and an HF-attention integration case where the entire
 evicted history fits in the coreset; the full local suite passes. No real-model
 task score has been run with this new mode yet.
+
+The causal bank also exposes an opt-in `merge_policy="response"`. It retains a
+small FIFO set of queries observed at or before each write and chooses the pair
+that minimizes a bounded joint response and log-partition error on those causal
+probes; `merge_policy="ward"` remains the default transparent geometric
+reference. Both policies keep the same state bound and are chunk invariant. A
+past/current-query objective cannot guarantee an unseen future query, so this is
+an experimental comparison hook, not a claim of future-query quality.

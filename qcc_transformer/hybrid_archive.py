@@ -120,6 +120,9 @@ class HybridQCCArchive(QCCArchive):
         exact_query_correction: bool = False,
         causal_coreset: bool = False,
         coreset_capacity: int | None = None,
+        coreset_merge_policy: str = "ward",
+        coreset_query_probes: int = 8,
+        coreset_partition_weight: float = 1.0,
         background_size: int = 0,
         block_size: int = 1,
         quality_query_tail: int | None = None,
@@ -214,6 +217,9 @@ class HybridQCCArchive(QCCArchive):
                 storage_dtype=(
                     torch.float32 if exact_storage_dtype is None else exact_storage_dtype
                 ),
+                merge_policy=coreset_merge_policy,
+                query_probe_capacity=coreset_query_probes,
+                response_partition_weight=coreset_partition_weight,
             )
         else:
             self.exact_bank = SetAssociativeLandmarkBank(
@@ -535,6 +541,13 @@ class HybridQCCArchive(QCCArchive):
         exact_key: Tensor | None = None,
         exact_query: Tensor | None = None,
     ) -> None:
+        if self.causal_coreset:
+            self.exact_bank.update(
+                key if exact_key is None else exact_key,
+                value,
+                query=exact_query,
+            )
+            return
         super().update(key, value)
         with torch.no_grad():
             if self.quality_first and exact_key is not None and exact_query is not None:

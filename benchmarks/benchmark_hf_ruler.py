@@ -277,6 +277,18 @@ def main() -> None:
         help="number of causal weighted KV representatives (requires --causal-coreset)",
     )
     parser.add_argument(
+        "--coreset-merge-policy", choices=("ward", "response"), default="ward",
+        help="causal coreset merge objective; response uses only past/current query probes",
+    )
+    parser.add_argument(
+        "--coreset-query-probes", type=int, default=8,
+        help="bounded causal query probes used by response-aware coreset merging",
+    )
+    parser.add_argument(
+        "--coreset-partition-weight", type=float, default=1.0,
+        help="partition-error weight for response-aware coreset merging",
+    )
+    parser.add_argument(
         "--archive-position-invariant",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -293,6 +305,12 @@ def main() -> None:
         raise ValueError("causal-coreset does not support background sampling")
     if args.coreset_capacity is not None and not args.causal_coreset:
         raise ValueError("coreset-capacity requires --causal-coreset")
+    if args.coreset_merge_policy != "ward" and not args.causal_coreset:
+        raise ValueError("coreset-merge-policy requires --causal-coreset")
+    if args.coreset_query_probes != 8 and not args.causal_coreset:
+        raise ValueError("coreset-query-probes requires --causal-coreset")
+    if args.coreset_partition_weight != 1.0 and not args.causal_coreset:
+        raise ValueError("coreset-partition-weight requires --causal-coreset")
     if args.exact_attention and not (args.quality_first or args.adapter or args.causal_coreset):
         raise ValueError("exact-attention requires a hybrid archive (--quality-first, --causal-coreset, or --adapter)")
     if args.background_size and not args.exact_attention:
@@ -420,6 +438,9 @@ def main() -> None:
                 hybrid_kwargs={
                     "causal_coreset": True,
                     "coreset_capacity": args.coreset_capacity,
+                    "coreset_merge_policy": args.coreset_merge_policy,
+                    "coreset_query_probes": args.coreset_query_probes,
+                    "coreset_partition_weight": args.coreset_partition_weight,
                     "exact_attention": True,
                     "exact_storage_dtype": exact_storage_dtype,
                 },
@@ -457,6 +478,9 @@ def main() -> None:
                 "quality_query_tail": args.quality_query_tail,
                 "causal_coreset": args.causal_coreset,
                 "coreset_capacity": args.coreset_capacity,
+                "coreset_merge_policy": args.coreset_merge_policy,
+                "coreset_query_probes": args.coreset_query_probes,
+                "coreset_partition_weight": args.coreset_partition_weight,
             },
             window_size=args.window_size,
             attention_sink_size=args.attention_sink_size,
@@ -543,6 +567,9 @@ def main() -> None:
         "exact_query_correction": args.exact_query_correction,
         "causal_coreset": args.causal_coreset,
         "coreset_capacity": args.coreset_capacity,
+        "coreset_merge_policy": args.coreset_merge_policy,
+        "coreset_query_probes": args.coreset_query_probes,
+        "coreset_partition_weight": args.coreset_partition_weight,
         "exact_attention": args.exact_attention,
         "background_size": args.background_size,
         "retention_block_size": args.retention_block_size,

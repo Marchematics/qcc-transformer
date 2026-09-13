@@ -51,16 +51,28 @@ class CausalWeightedKVBank(nn.Module):
         *,
         capacity: int,
         storage_dtype: torch.dtype = torch.float32,
+        merge_policy: str = "ward",
+        query_probe_capacity: int = 8,
+        response_partition_weight: float = 1.0,
     ) -> None:
         super().__init__()
         if min(num_heads, head_dim, capacity) <= 0:
             raise ValueError("num_heads, head_dim, and capacity must be positive")
         if storage_dtype not in (torch.float16, torch.bfloat16, torch.float32, torch.float64):
             raise ValueError("storage_dtype must be a floating-point torch dtype")
+        if merge_policy not in ("ward", "response"):
+            raise ValueError("merge_policy must be 'ward' or 'response'")
+        if query_probe_capacity < 0:
+            raise ValueError("query_probe_capacity must be nonnegative")
+        if not math.isfinite(response_partition_weight) or response_partition_weight < 0:
+            raise ValueError("response_partition_weight must be finite and nonnegative")
         self.num_heads = int(num_heads)
         self.head_dim = int(head_dim)
         self.capacity = int(capacity)
         self.storage_dtype = storage_dtype
+        self.merge_policy = merge_policy
+        self.query_probe_capacity = int(query_probe_capacity)
+        self.response_partition_weight = float(response_partition_weight)
         # The bank has no trainable routing parameters.  A tiny non-persistent
         # anchor keeps ``to(device)`` and state inspection conventional without
         # adding to the mutable request state.
@@ -87,6 +99,17 @@ class CausalWeightedKVBank(nn.Module):
         self._radii = torch.zeros(
             batch_size, self.num_heads, self.capacity, device=device, dtype=torch.float32
         )
+        self._query_probes = torch.zeros(
+            batch_size,
+            self.num_heads,
+            self.query_probe_capacity,
+            self.head_dim,
+            device=device,
+            dtype=torch.float32,
+        )
+        self._query_probe_count = torch.zeros(
+            batch_size, self.num_heads, device=device, dtype=torch.long
+        )
 
     @property
     def state(self) -> CausalWeightedKVState:
@@ -103,7 +126,14 @@ class CausalWeightedKVBank(nn.Module):
     def state_bytes(self) -> int:
         return sum(
             tensor.numel() * tensor.element_size()
-            for tensor in (self._keys, self._values, self._counts, self._radii)
+            for tensor in (
+                self._keys,
+                self._values,
+                self._counts,
+                self._radii,
+                self._query_probes,
+                self._query_probe_count,
+            )
         )
 
     def _ensure_state(self, key: Tensor) -> None:
@@ -114,9 +144,99 @@ class CausalWeightedKVBank(nn.Module):
             self.reset_state(key.shape[0], device=key.device)
 
     @torch.no_grad()
-    def _insert_one(self, key: Tensor, value: Tensor, batch: int, head: int) -> None:
+    def _append_probe(self, query: Tensor | None, batch: int, head: int) -> None:
+        if query is None or self.query_probe_capacity == 0:
+            return
+        count = int(self._query_probe_count[batch, head].item())
+        if count < self.query_probe_capacity:
+            self._query_probes[batch, head, count] = query.float()
+            self._query_probe_count[batch, head] = count + 1
+        else:
+            self._query_probes[batch, head, :-1] = self._query_probes[batch, head, 1:].clone()
+            self._query_probes[batch, head, -1] = query.float()
+
+    @staticmethod
+    def _ward_pair(
+        keys: Tensor, counts: Tensor
+    ) -> tuple[int, int]:
+        diff = keys[:, None, :] - keys[None, :, :]
+        distance = diff.square().sum(-1)
+        mass = counts[:, None] * counts[None, :]
+        cost = distance * mass / (counts[:, None] + counts[None, :])
+        cost = cost.masked_fill(
+            torch.tril(torch.ones_like(cost, dtype=torch.bool)), torch.inf
+        )
+        first, second = torch.where(cost == cost.min())
+        return int(first[0].item()), int(second[0].item())
+
+    def _response_pair(
+        self,
+        keys: Tensor,
+        values: Tensor,
+        counts: Tensor,
+        probes: Tensor,
+    ) -> tuple[int, int]:
+        """Choose a merge that preserves responses on causal query probes."""
+
+        if probes.numel() == 0:
+            return self._ward_pair(keys, counts)
+        n = keys.shape[0]
+        pairs = torch.triu_indices(n, n, offset=1, device=keys.device)
+        query = probes.float()
+        logits = query @ keys.transpose(0, 1) / math.sqrt(self.head_dim)
+        logits = logits + counts.clamp_min(1).log().unsqueeze(0)
+        scale = logits.max(dim=-1, keepdim=True).values
+        weights = torch.exp(logits - scale)
+        total_z = weights.sum(-1)
+        total_n = weights @ values
+        reference = total_n / total_z.unsqueeze(-1).clamp_min(1e-12)
+        best_cost = torch.tensor(torch.inf, device=keys.device)
+        best_pair = (0, 1)
+        # Keep pairwise response temporaries bounded for a diagnostic capacity
+        # larger than a few dozen slots. The loop is still a reference path.
+        pair_batch = 4096
+        for start in range(0, pairs.shape[1], pair_batch):
+            i = pairs[0, start : start + pair_batch]
+            j = pairs[1, start : start + pair_batch]
+            total_count = counts[i] + counts[j]
+            merged_keys = (
+                counts[i, None] * keys[i] + counts[j, None] * keys[j]
+            ) / total_count[:, None]
+            merged_values = (
+                counts[i, None] * values[i] + counts[j, None] * values[j]
+            ) / total_count[:, None]
+            merged_logits = query @ merged_keys.transpose(0, 1) / math.sqrt(self.head_dim)
+            merged_z = torch.exp(
+                merged_logits + total_count.clamp_min(1).log().unsqueeze(0) - scale
+            )
+            pair_z = weights[:, i] + weights[:, j]
+            pair_n = weights[:, i, None] * values[i] + weights[:, j, None] * values[j]
+            approx_z = total_z[:, None] - pair_z + merged_z
+            approx_n = total_n[:, None, :] - pair_n + merged_z[:, :, None] * merged_values
+            approx = approx_n / approx_z[:, :, None].clamp_min(1e-12)
+            output_error = (approx - reference[:, None, :]).square().mean(-1)
+            partition_error = (
+                torch.log(approx_z.clamp_min(1e-12)) - torch.log(total_z)[:, None]
+            ).square()
+            cost = output_error + self.response_partition_weight * partition_error
+            candidate_cost, candidate_index = cost.mean(0).min(0)
+            if bool(candidate_cost < best_cost):
+                best_cost = candidate_cost
+                offset = int(candidate_index.item())
+                best_pair = (int(i[offset].item()), int(j[offset].item()))
+        return best_pair
+
+    def _insert_one(
+        self,
+        key: Tensor,
+        value: Tensor,
+        batch: int,
+        head: int,
+        query: Tensor | None = None,
+    ) -> None:
         """Commit one event for one request/head."""
 
+        self._append_probe(query, batch, head)
         counts = self._counts[batch, head]
         valid = counts > 0
         if bool(valid.any()):
@@ -152,19 +272,16 @@ class CausalWeightedKVBank(nn.Module):
             (old_radii, torch.zeros(1, device=key.device, dtype=torch.float32)), dim=0
         )
 
-        # Ward's merge cost is the increase in weighted within-cluster
-        # squared error.  Only the upper triangle is eligible; all candidates
-        # are valid here because this branch runs after the table fills.
-        diff = candidate_keys[:, None, :] - candidate_keys[None, :, :]
-        distance = diff.square().sum(-1)
-        mass = candidate_counts[:, None] * candidate_counts[None, :]
-        cost = distance * mass / (candidate_counts[:, None] + candidate_counts[None, :])
-        cost = cost.masked_fill(
-            torch.tril(torch.ones_like(cost, dtype=torch.bool)), torch.inf
-        )
-        first, second = torch.where(cost == cost.min())
-        i = int(first[0].item())
-        j = int(second[0].item())
+        if self.merge_policy == "response":
+            probe_count = int(self._query_probe_count[batch, head].item())
+            i, j = self._response_pair(
+                candidate_keys,
+                candidate_values,
+                candidate_counts,
+                self._query_probes[batch, head, :probe_count],
+            )
+        else:
+            i, j = self._ward_pair(candidate_keys, candidate_counts)
         total = candidate_counts[i] + candidate_counts[j]
         merged_key = (
             candidate_counts[i] * candidate_keys[i]
@@ -190,7 +307,7 @@ class CausalWeightedKVBank(nn.Module):
         self._radii[batch, head] = candidate_radii[keep]
 
     @torch.no_grad()
-    def update(self, key: Tensor, value: Tensor) -> None:
+    def update(self, key: Tensor, value: Tensor, *, query: Tensor | None = None) -> None:
         """Commit one causal KV event with shape ``[batch, heads, dim]``."""
 
         if key.ndim != 3 or key.shape != value.shape:
@@ -200,7 +317,8 @@ class CausalWeightedKVBank(nn.Module):
         self._ensure_state(key)
         for batch in range(key.shape[0]):
             for head in range(self.num_heads):
-                self._insert_one(key[batch, head], value[batch, head], batch, head)
+                probe = None if query is None else query[batch, head]
+                self._insert_one(key[batch, head], value[batch, head], batch, head, probe)
 
     def read_attention(self, query: Tensor) -> tuple[Tensor, Tensor]:
         """Read weighted representatives and return response plus log mass."""
@@ -252,7 +370,7 @@ class CausalWeightedKVBank(nn.Module):
         outputs: list[Tensor] = []
         partitions: list[Tensor] = []
         for index in range(key.shape[2]):
-            self.update(key[:, :, index], value[:, :, index])
+            self.update(key[:, :, index], value[:, :, index], query=query[:, :, index])
             result, log_z = self.read_attention(query[:, :, index])
             outputs.append(result)
             partitions.append(log_z)
