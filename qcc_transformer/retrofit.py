@@ -712,6 +712,13 @@ class HFQCCAttention(nn.Module):
                 archive_hint=archive_hint,
                 position_embeddings=position_embeddings,
             )
+        if not self.training and bool(getattr(self.qcc.archive, "exact_only", False)):
+            # Chunk scratch is needed only while this layer is executing.
+            # The ring owns copied K/V and out_proj owns the returned output;
+            # releasing scratch lets the allocator reuse it for the next layer.
+            # No empty_cache or cross-stream shared mutable buffer is needed.
+            self.qcc._chunk_key_scratch = None
+            self.qcc._chunk_value_scratch = None
         present = cache_handle
         # Attention weights are intentionally unavailable: QCC computes a
         # bounded approximation and cannot expose the exact historical matrix.

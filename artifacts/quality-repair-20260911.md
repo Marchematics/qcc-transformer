@@ -1183,3 +1183,20 @@ same-head shapes asserted before recomputing. Original values are preserved,
 with explicit validity annotations. The separate synthetic counterexamples
 remain separate evidence. These corrections retract the earlier conclusions
 based on these two numbers; they do not establish new quality results.
+
+### Release per-layer exact-path scratch after execution
+
+HF inference now drops each exact-only layer's chronological K/V scratch after
+its forward completes. The persistent ring has already copied the retained
+K/V; projected outputs do not alias scratch. PyTorch can reuse the released
+allocation on subsequent layers on the same execution stream. This preserves
+reuse within a layer's internal prefill loop without maintaining a second
+K/V working window for every layer for the entire request. No allocator cache
+flush or shared mutable cross-stream buffer is introduced.
+
+An existing HF test file compares this lifecycle with a scratch-retaining
+reference through a 13-token prefill, 5-token continuation and single-token
+decode after eviction. Outputs match exactly and owned runtime bytes decrease;
+all 33 HF retrofit tests pass. Actual GPU peak/reserved-memory and throughput
+changes remain unmeasured. The currently running row16 state-reclaim-v2 job
+was launched before this scratch-lifetime edit and does not test this change.

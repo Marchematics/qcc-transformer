@@ -489,3 +489,30 @@ def test_fidelity_gate_and_adapter_manifest(tmp_path):
     payload = torch.load(path, map_location="cpu")
     assert payload["format"] == "qcc-retrofit-v1"
     assert payload["metadata"]["base_model"] == "fixture"
+
+
+def test_exact_hf_releases_scratch_without_changing_continuation():
+    import copy
+    torch.manual_seed(902)
+    model = _Model().eval()
+    patch_hf_model_hybrid(model, window_size=4, prefill_chunk_size=3,
+        use_triton=False, hybrid_kwargs=dict(quality_first=True,
+        exact_attention=True, exact_num_sets=2, exact_ways=2,
+        background_size=3, block_size=2))
+    reference = copy.deepcopy(model.attn)
+    with torch.no_grad():
+        for count in (13, 5, 1):
+            hidden = torch.randn(1, count, 16)
+            seen = reference.qcc._seen_tokens
+            if count > 1:
+                expected = reference._bounded_prefill(hidden,
+                    torch.arange(seen, seen + count).view(1, -1),
+                    reset=seen == 0, archive_hint=None, position_embeddings=None)
+            else:
+                expected = reference.qcc.step(hidden[:, 0]).unsqueeze(1)
+            actual = model.attn(hidden, use_cache=True)[0]
+            torch.testing.assert_close(actual, expected, atol=0, rtol=0)
+            assert model.attn.qcc._chunk_key_scratch is None
+            assert model.attn.qcc._chunk_value_scratch is None
+            assert model.attn.qcc._archive_key_cache is None
+    assert qcc_runtime_state_bytes(model)['total_bytes'] < qcc_runtime_state_bytes(reference)['total_bytes']
