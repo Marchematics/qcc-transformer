@@ -27,6 +27,7 @@ from torch import Tensor, nn
 import torch.nn.functional as F
 
 from .associative import SetAssociativeLandmarkBank
+from .causal_coreset import CausalWeightedKVBank
 from .model import QCCArchive, QCCSelfAttention
 
 
@@ -117,6 +118,8 @@ class HybridQCCArchive(QCCArchive):
         quality_prefill_shadow_only: bool = False,
         exact_storage_dtype: torch.dtype | None = None,
         exact_query_correction: bool = False,
+        causal_coreset: bool = False,
+        coreset_capacity: int | None = None,
         background_size: int = 0,
         block_size: int = 1,
         quality_query_tail: int | None = None,
@@ -127,6 +130,19 @@ class HybridQCCArchive(QCCArchive):
             raise ValueError('hybrid block retention requires background sampling to process every eviction')
         if quality_query_tail is not None and quality_query_tail <= 0:
             raise ValueError("quality_query_tail must be positive")
+        if causal_coreset:
+            if not exact_attention:
+                raise ValueError("causal_coreset requires exact_attention")
+            if quality_first:
+                raise ValueError("causal_coreset cannot use future-query quality_first selection")
+            if background_size or block_size != 1:
+                raise ValueError("causal_coreset does not support background or block retention")
+            if coreset_capacity is None:
+                coreset_capacity = exact_num_sets * exact_ways
+            if coreset_capacity <= 0:
+                raise ValueError("coreset_capacity must be positive")
+        elif coreset_capacity is not None:
+            raise ValueError("coreset_capacity requires causal_coreset")
         self.quality_query_tail = quality_query_tail
         if active_codes is not None or lazy_decay:
             raise ValueError(
@@ -189,23 +205,35 @@ class HybridQCCArchive(QCCArchive):
         # salient record in an unprobed bucket.  Deployments with a measured
         # latency budget may still set ``exact_probe_sets`` explicitly.
         probes = exact_num_sets if exact_probe_sets is None else exact_probe_sets
-        self.exact_bank = SetAssociativeLandmarkBank(
-            num_heads=num_heads,
-            head_dim=head_dim,
-            num_sets=exact_num_sets,
-            ways=exact_ways,
-            probe_sets=probes,
-            diversity_weight=0.0 if background_size else 0.10,
-            replacement_policy=exact_replacement_policy,
-            background_size=background_size,
-            block_size=block_size,
-            storage_dtype=exact_storage_dtype,
-        )
+        self.causal_coreset = bool(causal_coreset)
+        if self.causal_coreset:
+            self.exact_bank = CausalWeightedKVBank(
+                num_heads=num_heads,
+                head_dim=head_dim,
+                capacity=int(coreset_capacity),
+                storage_dtype=(
+                    torch.float32 if exact_storage_dtype is None else exact_storage_dtype
+                ),
+            )
+        else:
+            self.exact_bank = SetAssociativeLandmarkBank(
+                num_heads=num_heads,
+                head_dim=head_dim,
+                num_sets=exact_num_sets,
+                ways=exact_ways,
+                probe_sets=probes,
+                diversity_weight=0.0 if background_size else 0.10,
+                replacement_policy=exact_replacement_policy,
+                background_size=background_size,
+                block_size=block_size,
+                storage_dtype=exact_storage_dtype,
+            )
         # Hybrid admission is supplied by the teacher-trained predictor below.
         # Keep the bank's legacy internal score neutral and frozen.
-        with torch.no_grad():
-            self.exact_bank.admission_vector.zero_()
-        self.exact_bank.admission_vector.requires_grad_(False)
+        if not self.causal_coreset:
+            with torch.no_grad():
+                self.exact_bank.admission_vector.zero_()
+            self.exact_bank.admission_vector.requires_grad_(False)
         self.admission = LandmarkAdmissionPredictor(
             num_heads, head_dim, bias_init=admission_bias_init
         )
@@ -222,7 +250,11 @@ class HybridQCCArchive(QCCArchive):
         self.quality_prefill_shadow_only = bool(quality_prefill_shadow_only)
         self.exact_query_correction = bool(exact_query_correction)
         # Global-table writes and weighted reads never consult set routing.
-        if self.exact_attention and probes == exact_num_sets:
+        if (
+            not self.causal_coreset
+            and self.exact_attention
+            and probes == exact_num_sets
+        ):
             self.exact_bank.set_codes.requires_grad_(False)
         self.exact_hard_read = exact_hard_read
         # Per-read confidence gate consumed by QCCSelfAttention.  Keeping it
@@ -552,6 +584,14 @@ class HybridQCCArchive(QCCArchive):
     ) -> tuple[Tensor, Tensor]:
         """Causally read a block with a bounded number of admission events."""
 
+        if self.causal_coreset:
+            # The counted coreset commits each event immediately before the
+            # matching query.  It deliberately ignores all future-query
+            # salience arguments; accepting them here would reintroduce the
+            # non-causal prefill side channel this mode is intended to test.
+            del score, quality_query, quality_key_start, quality_query_start
+            return self.exact_bank.update_read_chunk(key, value, query)
+
         batch, _, tokens, _ = query.shape
         exact = torch.zeros_like(query)
         confidence = torch.full(
@@ -712,6 +752,24 @@ class HybridQCCArchive(QCCArchive):
             raise ValueError(
                 "exact_key/exact_query must match key/query shapes and devices"
             )
+        if self.causal_coreset:
+            # A causal coreset is the complete remote state for this opt-in
+            # path.  Do not spend memory or compute maintaining the obsolete
+            # recurrent response that the output would ignore.
+            exact, partition = self._exact_chunk(
+                exact_key,
+                value,
+                exact_query,
+                self.admission(key, value),
+            )
+            result = self._blend_exact(torch.zeros_like(exact), exact, partition)
+            if output is not None:
+                if output.shape != result.shape or output.device != result.device:
+                    raise ValueError("output must match query shape and device")
+                output.copy_(result)
+                return output
+            return result
+
         recurrent = super().update_read_chunk(key, value, query, output=None)
         score = self.admission(key, value) if admission_score is None else admission_score
         # The recurrent path can use position-invariant raw Q/K, while the

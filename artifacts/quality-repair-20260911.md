@@ -856,3 +856,25 @@ the main conclusion: Q, K/V representation, and selection are coupled, and a
 one-layer conditional read cannot assign a system-wide share of responsibility.
 The result is a diagnostic read metric, not a free-generation score or evidence
 that a Q-only adapter will meet the target.
+
+### Causal weighted coreset reference path
+
+Implemented an opt-in `CausalWeightedKVBank` and wired it through
+`HybridQCCArchive(..., causal_coreset=True, coreset_capacity=...)`. The bank
+commits each evicted KV before reading the matching query, stores a bounded
+count-weighted key/value representative, and uses the count as a log-softmax
+multiplicity. When full, its transparent reference merge chooses the least-cost
+Ward pair among the existing representatives and the new event. It never reads
+future queries, answer labels, or an external chunk boundary. The old
+future-query `quality_first` table and recurrent response are not used in this
+mode; it requires `exact_attention` so the retained response is combined with
+the local partition by the existing exact mass equation.
+
+The bank has fixed mutable state (`keys`, `values`, integer counts, and bounded
+key radii); its merge loop is deliberately a CPU/GPU reference implementation,
+not a serving-speed claim. Existing RULER CLI now exposes
+`--causal-coreset` and `--coreset-capacity` for a reproducible real-model
+comparison. Tests cover counted identical-key exactness, chunk invariance,
+suffix independence, and an HF-attention integration case where the entire
+evicted history fits in the coreset; the full local suite passes. No real-model
+task score has been run with this new mode yet.

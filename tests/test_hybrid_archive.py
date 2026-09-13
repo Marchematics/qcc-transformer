@@ -63,6 +63,30 @@ def test_weighted_exact_archive_matches_full_kv_while_all_keys_fit() -> None:
     differentiable.sum().backward()
 
 
+def test_causal_coreset_matches_full_kv_before_capacity_is_reached() -> None:
+    torch.manual_seed(118)
+    attention = QCCSelfAttention(
+        16, 2, window_size=4, attention_sink_size=2, num_codes=3,
+        use_triton=False, rope_theta=10000, archive_position_invariant=True,
+    ).eval()
+    reference = copy.deepcopy(attention)
+    reference.use_archive = False
+    reference.window_size = 32
+    upgrade_qcc_attention(
+        attention,
+        exact_attention=True,
+        causal_coreset=True,
+        coreset_capacity=32,
+    )
+    x = torch.randn(1, 19, 16)
+    with torch.no_grad():
+        expected = reference.step_chunk(x)
+        actual = attention.step_chunk(x)
+    torch.testing.assert_close(actual, expected, atol=1e-6, rtol=1e-5)
+    assert attention.archive.causal_coreset is True
+    assert attention.archive.exact_bank.state_bytes() == attention.archive.exact_state_bytes()
+
+
 @pytest.mark.parametrize('block_size', [1, 2])
 def test_background_streaming_matches_chunks_after_reservoir_fills(block_size):
     torch.manual_seed(83)

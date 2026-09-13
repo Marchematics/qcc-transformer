@@ -1,6 +1,7 @@
 """QCC-Transformer research prototype."""
 
 from .associative import AssociativeLandmarkState, SetAssociativeLandmarkBank
+from .causal_coreset import CausalWeightedKVBank, CausalWeightedKVState
 from .hybrid_archive import (
     HybridQCCArchive,
     LandmarkAdmissionPredictor,
@@ -35,6 +36,8 @@ from .vllm_plugin import register_vllm_backend
 __all__ = [
     "AssociativeLandmarkState",
     "SetAssociativeLandmarkBank",
+    "CausalWeightedKVBank",
+    "CausalWeightedKVState",
     "HybridQCCArchive",
     "LandmarkAdmissionPredictor",
     "enable_hybrid_retrofit",

@@ -2,7 +2,7 @@ import math
 import pytest
 import torch
 
-from qcc_transformer import SetAssociativeLandmarkBank
+from qcc_transformer import CausalWeightedKVBank, SetAssociativeLandmarkBank
 from qcc_transformer import triton_kernels
 
 
@@ -354,6 +354,53 @@ def test_read_chunk_matches_individual_reads_for_frozen_state() -> None:
         confidences.append(confidence)
     torch.testing.assert_close(block_out, torch.stack(outputs, dim=2))
     torch.testing.assert_close(block_conf, torch.stack(confidences, dim=2))
+
+
+def test_causal_weighted_bank_keeps_counted_identical_keys_exact() -> None:
+    bank = CausalWeightedKVBank(1, 2, capacity=2)
+    key = torch.tensor([[[1.0, 0.0]]])
+    other = torch.tensor([[[0.0, 1.0]]])
+    with torch.no_grad():
+        for value in (0.0, 1.0, 0.0):
+            bank.update(key, torch.full_like(key, value))
+        bank.update(other, torch.full_like(other, 2.0))
+    assert bank.state.counts[0, 0].tolist() == [3, 1]
+    query = torch.tensor([[[4.0, 0.0]]])
+    actual, log_z = bank.read_attention(query)
+    keys = torch.cat((key.expand(1, 1, 3, 2), other.unsqueeze(2)), dim=2)
+    values = torch.cat((torch.tensor([[[[0.0, 0.0], [1.0, 1.0], [0.0, 0.0]]]]),
+                        torch.full((1, 1, 1, 2), 2.0)), dim=2)
+    logits = torch.matmul(query, keys.transpose(-1, -2)) / math.sqrt(2)
+    expected = logits.softmax(-1) @ values
+    expected_z = logits.logsumexp(-1)
+    torch.testing.assert_close(actual, expected.squeeze(2))
+    torch.testing.assert_close(log_z, expected_z.squeeze(2))
+
+
+def test_causal_weighted_bank_is_chunk_invariant_and_suffix_independent() -> None:
+    torch.manual_seed(221)
+    keys = torch.randn(1, 1, 40, 4)
+    values = torch.randn_like(keys)
+    queries = torch.randn_like(keys)
+    whole = CausalWeightedKVBank(1, 4, capacity=8)
+    split = CausalWeightedKVBank(1, 4, capacity=8)
+    with torch.no_grad():
+        out_whole, z_whole = whole.update_read_chunk(keys, values, queries)
+        first_out, first_z = split.update_read_chunk(keys[:, :, :17], values[:, :, :17], queries[:, :, :17])
+        second_out, second_z = split.update_read_chunk(keys[:, :, 17:], values[:, :, 17:], queries[:, :, 17:])
+    torch.testing.assert_close(out_whole, torch.cat((first_out, second_out), dim=2))
+    torch.testing.assert_close(z_whole, torch.cat((first_z, second_z), dim=2))
+    changed = keys.clone()
+    changed[:, :, 20:] = torch.randn_like(changed[:, :, 20:])
+    changed_values = values.clone()
+    changed_values[:, :, 20:] = torch.randn_like(changed_values[:, :, 20:])
+    prefix = CausalWeightedKVBank(1, 4, capacity=8)
+    changed_bank = CausalWeightedKVBank(1, 4, capacity=8)
+    with torch.no_grad():
+        prefix_out, _ = prefix.update_read_chunk(keys[:, :, :20], values[:, :, :20], queries[:, :, :20])
+        changed_out, _ = changed_bank.update_read_chunk(changed[:, :, :20], changed_values[:, :, :20], queries[:, :, :20])
+    torch.testing.assert_close(prefix_out, changed_out)
+    assert whole.state_bytes() == CausalWeightedKVBank(1, 4, capacity=8).state_bytes()
 
 
 @pytest.mark.skipif(

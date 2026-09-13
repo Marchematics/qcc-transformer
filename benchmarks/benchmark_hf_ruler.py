@@ -269,6 +269,14 @@ def main() -> None:
         help="apply the existing low-rank correction to exact-tier queries (diagnostic)",
     )
     parser.add_argument(
+        "--causal-coreset", action="store_true",
+        help="use the causal counted-KV coreset reference in place of future-query retention",
+    )
+    parser.add_argument(
+        "--coreset-capacity", type=int, default=None,
+        help="number of causal weighted KV representatives (requires --causal-coreset)",
+    )
+    parser.add_argument(
         "--archive-position-invariant",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -279,8 +287,14 @@ def main() -> None:
     parser.add_argument("--progress-jsonl", type=Path, default=None)
     parser.add_argument("--trust-remote-code", action="store_true")
     args = parser.parse_args()
-    if args.exact_attention and not (args.quality_first or args.adapter):
-        raise ValueError("exact-attention requires a hybrid archive (--quality-first or --adapter)")
+    if args.causal_coreset and args.quality_first:
+        raise ValueError("causal-coreset is causal and cannot use future-query quality-first selection")
+    if args.causal_coreset and args.background_size:
+        raise ValueError("causal-coreset does not support background sampling")
+    if args.coreset_capacity is not None and not args.causal_coreset:
+        raise ValueError("coreset-capacity requires --causal-coreset")
+    if args.exact_attention and not (args.quality_first or args.adapter or args.causal_coreset):
+        raise ValueError("exact-attention requires a hybrid archive (--quality-first, --causal-coreset, or --adapter)")
     if args.background_size and not args.exact_attention:
         raise ValueError("background-size requires --exact-attention")
     if args.retention_block_size > 1 and not args.background_size:
@@ -390,6 +404,26 @@ def main() -> None:
                     "quality_query_tail": args.quality_query_tail,
                 },
             )
+        elif args.causal_coreset:
+            replaced = patch_hf_model_hybrid(
+                patched,
+                window_size=args.window_size,
+                attention_sink_size=args.attention_sink_size,
+                **mix_kwargs,
+                num_codes=args.num_codes,
+                max_position_embeddings=native_context_tokens,
+                archive_position_invariant=args.archive_position_invariant,
+                kv_head_policy=args.kv_head_policy,
+                use_triton=args.use_triton,
+                local_attention_backend=args.local_attention_backend,
+                prefill_chunk_size=args.prefill_chunk_size,
+                hybrid_kwargs={
+                    "causal_coreset": True,
+                    "coreset_capacity": args.coreset_capacity,
+                    "exact_attention": True,
+                    "exact_storage_dtype": exact_storage_dtype,
+                },
+            )
         else:
             replaced = patch_hf_model(
                 patched,
@@ -421,6 +455,8 @@ def main() -> None:
                 "background_size": args.background_size,
                 "block_size": args.retention_block_size,
                 "quality_query_tail": args.quality_query_tail,
+                "causal_coreset": args.causal_coreset,
+                "coreset_capacity": args.coreset_capacity,
             },
             window_size=args.window_size,
             attention_sink_size=args.attention_sink_size,
@@ -505,6 +541,8 @@ def main() -> None:
         "quality_prefill_shadow_only": args.quality_prefill_shadow_only,
         "exact_storage_dtype": args.exact_storage_dtype,
         "exact_query_correction": args.exact_query_correction,
+        "causal_coreset": args.causal_coreset,
+        "coreset_capacity": args.coreset_capacity,
         "exact_attention": args.exact_attention,
         "background_size": args.background_size,
         "retention_block_size": args.retention_block_size,
