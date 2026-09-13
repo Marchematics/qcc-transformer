@@ -1086,3 +1086,11 @@ limit, and variable tracking likewise hit the limit. QCC answer recall was
 1.0 on all four records. This is a four-record, 0–8K diagnostic, not a suite
 result; artifact `benchmark-quality-first-selected8k-v1.json` records both
 recall and completion scores.
+
+The corrected LongRoPE path was checked against the ordinary archive on the
+same row16. With window4096 and 16 recurrent codes (no exact tier), Full-KV
+scored 1.0 while ordinary QCC still scored 0 and produced a semantic refusal
+until the 128-token limit. State was 5,160,566,784 bytes and peak allocated
+8,931,024,896 bytes. Artifact `benchmark-ordinary-row16-longrope-fix-v1.json`.
+This separates the resolved rotary implementation error from the remaining
+recurrent archive quality loss.
