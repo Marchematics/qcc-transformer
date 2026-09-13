@@ -18,6 +18,7 @@ model and a task-appropriate checkpoint.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import wraps
 from pathlib import Path
 from typing import Any, Optional
 
@@ -507,6 +508,7 @@ class HFQCCAttention(nn.Module):
         """
 
         length = hidden_states.shape[1]
+        rope_context_length = (0 if reset else int(self.qcc._seen_tokens)) + length
         chunk_size = self.prefill_chunk_size
         if chunk_size is None:
             chunk_size = int(getattr(self.qcc.archive, "scan_block_size", 1024))
@@ -535,7 +537,7 @@ class HFQCCAttention(nn.Module):
                 q_raw,
                 positions[:, query_token_start:],
                 query_embeddings,
-                sequence_length=length,
+                sequence_length=rope_context_length,
             )
             quality_query = q_rotary
             quality_query_start = max(0, query_token_start - self.qcc.window_size)
@@ -548,7 +550,7 @@ class HFQCCAttention(nn.Module):
                 position_embeddings=position_embeddings,
                 quality_query=quality_query,
                 quality_query_start=quality_query_start,
-                rope_sequence_length=length,
+                rope_sequence_length=rope_context_length,
             )
         outputs: list[Tensor] = []
         for start in range(0, length, chunk_size):
@@ -569,7 +571,7 @@ class HFQCCAttention(nn.Module):
                     position_embeddings=piece_embeddings,
                     quality_query=quality_query,
                     quality_query_start=quality_query_start,
-                    rope_sequence_length=length,
+                    rope_sequence_length=rope_context_length,
                 )
             )
         return torch.cat(outputs, dim=1)
@@ -717,6 +719,36 @@ class HFQCCAttention(nn.Module):
         if modern_cache_call:
             return output, None
         return output, None, present
+def _synchronize_native_prefix_rebuild(model: nn.Module) -> None:
+    """Reset QCC state when native generation explicitly rebuilds its cache.
+
+    A missing cache at an ordinary request boundary is not enough to infer a
+    reset: QCC deliberately owns its state outside the framework cache. Some
+    Phi LongRoPE implementations do, however, receive an existing cache and
+    return ``past_key_values=None`` on the first short-to-long transition to
+    force a full-prefix recomputation. In that one case the wrapper must reset
+    its bounded state as well.
+    """
+
+    if getattr(model, "_qcc_native_prepare_wrapped", False):
+        return
+    original_prepare = getattr(model, "prepare_inputs_for_generation", None)
+    if not callable(original_prepare):
+        return
+
+    @wraps(original_prepare)
+    def prepare(input_ids, past_key_values=None, *args, **kwargs):
+        prepared = original_prepare(input_ids, past_key_values, *args, **kwargs)
+        if (
+            past_key_values is not None
+            and isinstance(prepared, dict)
+            and prepared.get("past_key_values") is None
+        ):
+            reset_hf_qcc_cache(model, batch_size=int(input_ids.shape[0]))
+        return prepared
+
+    model.prepare_inputs_for_generation = prepare
+    setattr(model, "_qcc_native_prepare_wrapped", True)
 
 
 def _module_parent(root: nn.Module, path: str) -> tuple[nn.Module, str]:
@@ -873,6 +905,13 @@ def patch_hf_model(
         parent, attr = _module_parent(model, name)
         setattr(parent, attr, wrapper)
         replaced.append(name)
+    if (
+        replaced
+        and getattr(config, "model_type", None) == "phi3"
+        and "rope_original_max_position_embeddings" in rope_kwargs
+        and callable(getattr(model, "prepare_inputs_for_generation", None))
+    ):
+        _synchronize_native_prefix_rebuild(model)
     return replaced
 
 

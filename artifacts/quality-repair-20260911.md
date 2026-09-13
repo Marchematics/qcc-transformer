@@ -1117,3 +1117,20 @@ The first corrected 16K quality-first probe completed on row1 (16,120 tokens,
 `niah_multikey_2`). Full-KV and QCC both returned `7549132` normally, score
 1.0. QCC state was 5,899,964,928 bytes and peak allocated 11,407,241,216
 bytes. Artifact `benchmark-quality-first-row1-16k-longrope-v1.json`.
+
+The corrected 16K UUID probe completed on row21 (`niah_multikey_3`, 16,156
+tokens). Full-KV produced a 128-token answer containing the target UUID but
+hit the configured completion limit (raw recall 1, score 0). Quality-first
+768+128 QCC terminated after 92 tokens but returned a different UUID
+(`9917b1c1-2b7d-477e-9af0-86ff63c8bdd8`), raw recall 0 and score 0. QCC state
+was 5,899,964,928 bytes and peak allocated 11,414,560,256 bytes. Artifact
+`benchmark-quality-first-row21-16k-longrope-v1.json`. This is the first
+post-RoPE long UUID failure and shows the repaired implementation still needs
+a better retention/representation path for UUID-style associations.
+
+The post-study boundary patch is now integrated: bounded prefill computes
+`rope_context_length = previous_logical_length + new_length`, and the wrapper
+synchronizes QCC state only when a native Phi prepare call explicitly drops an
+existing cache. CPU tests cover both behaviours; the full suite passes. The
+model-level cache-rebuild path still needs a real crossing test before it is
+used as a production compatibility guarantee.

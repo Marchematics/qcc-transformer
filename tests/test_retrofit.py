@@ -12,6 +12,7 @@ from qcc_transformer.retrofit import (
     save_retrofit_adapter,
     reset_hf_qcc_cache,
     qcc_runtime_state_bytes,
+    _synchronize_native_prefix_rebuild,
 )
 from qcc_transformer.hybrid_archive import patch_hf_model_hybrid
 from benchmarks.calibrate_hf_admission import _load_initial_adapter
@@ -268,6 +269,7 @@ def test_quality_first_prefill_keeps_future_queries_visible(tail, expected_lengt
     calls = []
     quality_queries = []
     query_starts = []
+    rope_lengths = []
     projection_lengths = []
     project = qcc._project_qkv_gate
     def observed_project(hidden):
@@ -280,6 +282,7 @@ def test_quality_first_prefill_keeps_future_queries_visible(tail, expected_lengt
         calls.append(int(hidden.shape[1]))
         quality_queries.append(kwargs.get("quality_query"))
         query_starts.append(kwargs.get("quality_query_start"))
+        rope_lengths.append(kwargs.get("rope_sequence_length"))
         return original(hidden, **kwargs)
 
     qcc.step_chunk = counted
@@ -297,6 +300,7 @@ def test_quality_first_prefill_keeps_future_queries_visible(tail, expected_lengt
     assert [query.shape[2] for query in quality_queries] == [expected_length] * 3
     # Offsets use archive-query events, not absolute token positions.
     assert query_starts == [expected_start] * 3
+    assert rope_lengths == [10] * 3
     assert projection_lengths[0] == expected_length
     assert max(projection_lengths[1:]) <= 4
     # Compare the sliced projection against the previous full-prompt equation.
@@ -350,6 +354,28 @@ def test_modern_cache_reports_logical_qcc_length_without_physical_kv():
     assert len(second) == 2
     assert cache.get_seq_length() == 5
     assert cache.get_usable_length(1) == 5
+
+
+def test_native_prepare_cache_rebuild_resets_qcc_once():
+    model = _Model()
+    patch_hf_model(model, window_size=4, num_codes=4, use_triton=False)
+    model.attn.qcc._seen_tokens = 7
+    dropped = {"value": False}
+
+    def prepare(input_ids, past_key_values=None):
+        del input_ids
+        return {"past_key_values": None if dropped["value"] else past_key_values}
+
+    model.prepare_inputs_for_generation = prepare
+    _synchronize_native_prefix_rebuild(model)
+    model.prepare_inputs_for_generation(torch.zeros(1, 3, dtype=torch.long), object())
+    assert model.attn.qcc._seen_tokens == 7
+    dropped["value"] = True
+    model.prepare_inputs_for_generation(torch.zeros(1, 3, dtype=torch.long), object())
+    assert model.attn.qcc._seen_tokens == 0
+    model.attn.qcc._seen_tokens = 9
+    model.prepare_inputs_for_generation(torch.zeros(1, 3, dtype=torch.long), None)
+    assert model.attn.qcc._seen_tokens == 9
 
 
 def test_patch_hf_exposes_differentiable_calibration_path():
