@@ -1476,3 +1476,18 @@ position IDs and native position embeddings are adapted to one-token chunks;
 internal RoPE receives the total seen length. The existing small-model test
 now compares direct token calls as well as mixed HF calls, with and without
 eviction. Both configurations and the scratch-lifetime regression pass.
+
+### Prespecified native Phi causal-block follow-up
+
+A sequential follow-up has been queued behind the live four-task process.
+Inputs are source rows16 and21, preserving source_line in
+ruler-causal-block-row16-row21-input.jsonl. The exact command arguments are
+causal-block-cap8192-launch.json: Phi3 template, NF4 backbone, BF16 8192+128
+exact storage, window4096, retention block32, prefill512, 128 output tokens.
+Both rows get matched Full-KV quality references. Row16 checks the native
+all-fit path; row21 exercises retention. The only intended policy change from
+the preceding enlarged-table candidate is causal read/commit and causal
+contemporaneous-logit scoring, with future-tail scoring disabled.
+The waiter owns no GPU state and waits for the preceding process to exit;
+no causal Phi result is available yet. This is a quality experiment, not a
+serving benchmark (Full-KV offloading is retained for memory feasibility).
