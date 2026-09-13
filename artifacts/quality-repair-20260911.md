@@ -1112,3 +1112,8 @@ collected before the LongRoPE factor-selection repair. Their Q/K source
 comparisons include the pre-fix rotary mismatch and must not be used as current
 factor rankings. They remain retained for debugging history; the row16
 post-repair cross-read is the current diagnostic reference.
+
+The first corrected 16K quality-first probe completed on row1 (16,120 tokens,
+`niah_multikey_2`). Full-KV and QCC both returned `7549132` normally, score
+1.0. QCC state was 5,899,964,928 bytes and peak allocated 11,407,241,216
+bytes. Artifact `benchmark-quality-first-row1-16k-longrope-v1.json`.
