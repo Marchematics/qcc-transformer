@@ -466,7 +466,6 @@ class SetAssociativeLandmarkBank(nn.Module):
                 log_multiplicity = torch.cat(
                     (log_multiplicity, torch.zeros(batch, heads, extra_count, device=query.device)), -1
                 )
-        any_valid = valid.any(-1)
         response = torch.empty_like(block)
         partition = torch.empty((batch, heads, tokens), device=block.device, dtype=torch.float32)
         for start in range(0, tokens, 128):
@@ -482,7 +481,7 @@ class SetAssociativeLandmarkBank(nn.Module):
                 )
             logits = logits.masked_fill(~valid_mask, -torch.inf)
             log_z = torch.logsumexp(logits, -1)
-            safe_z = torch.where(any_valid.unsqueeze(-1), log_z, torch.zeros_like(log_z))
+            safe_z = torch.where(valid_mask.any(-1), log_z, torch.zeros_like(log_z))
             weights = torch.exp(logits - safe_z.unsqueeze(-1))
             response[:, :, start:end] = torch.matmul(weights, values).to(block.dtype)
             partition[:, :, start:end] = log_z

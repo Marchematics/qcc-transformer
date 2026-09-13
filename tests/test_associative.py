@@ -67,6 +67,36 @@ def test_background_reservoir_is_disjoint_bounded_and_mass_correct(device):
     assert int(bank._background_count.item()) == 50
 
 
+def test_attention_current_block_normalizes_with_empty_and_populated_heads():
+    torch.manual_seed(293)
+    bank = SetAssociativeLandmarkBank(2, 4, num_sets=1, ways=3, probe_sets=1)
+    bank.reset_state(1, device=torch.device('cpu'))
+    keys = torch.randn(1, 2, 3, 4)
+    values = torch.randn_like(keys)
+    for i in range(3):
+        bank.update(keys[:, :, i], values[:, :, i])
+    bank._scores[:, 0].fill_(-torch.inf)
+    query = torch.randn(1, 2, 129, 4)
+    extra_keys = torch.randn_like(query)
+    extra_values = torch.randn_like(query)
+    actual, log_z = bank.read_attention(
+        query, extra_keys=extra_keys, extra_values=extra_values,
+    )
+    all_keys = torch.cat((bank._keys.flatten(2, 3), extra_keys), 2)
+    all_values = torch.cat((bank._values.flatten(2, 3), extra_values), 2)
+    retained = torch.isfinite(bank._scores.flatten(2, 3))
+    mask = torch.cat((
+        retained.unsqueeze(2).expand(-1, -1, 129, -1),
+        torch.ones(129, 129, dtype=torch.bool).tril().view(1, 1, 129, 129).expand(1, 2, -1, -1),
+    ), -1)
+    expected = torch.nn.functional.scaled_dot_product_attention(
+        query, all_keys, all_values, attn_mask=mask,
+    )
+    expected_z = (query @ all_keys.transpose(-1, -2) / 2).masked_fill(~mask, -torch.inf).logsumexp(-1)
+    torch.testing.assert_close(actual, expected, atol=1e-6, rtol=1e-5)
+    torch.testing.assert_close(log_z, expected_z)
+
+
 def test_background_reservoir_sampling_is_independent_per_batch_request():
     def make_bank():
         return SetAssociativeLandmarkBank(
@@ -76,6 +106,8 @@ def test_background_reservoir_sampling_is_independent_per_batch_request():
 
     batched = make_bank()
     independent = [make_bank(), make_bank()]
+    for bank in independent:
+        bank.load_state_dict(batched.state_dict())
     keys = torch.arange(40, dtype=torch.float32).reshape(2, 1, 10, 2)
     values = keys + 100
     writes = torch.tensor(

@@ -1398,3 +1398,18 @@ pair resolves completion on this sample without candidate-specific stop rules.
 Prompt length changes from 16,156 to 16,205, so this is a format intervention,
 not the exact same token input. It remains one UUID sample, with future-query
 retention, and does not establish suite or serving targets.
+
+### Current-block read normalization correction
+
+An empty retained head with visible extra current-block KV used a zero
+normalizer because validity only covered retained slots. The CPU regression
+reproduced a maximum absolute output error of 81.30 against direct masked
+SDPA. Normalization now uses the complete per-query validity mask. The
+regression covers empty and populated heads together, including the 128-query
+tile boundary; output and log partition agree with direct attention.
+All 18 CPU associative tests pass. A pre-existing batch-independence test
+compared separately randomized admission parameters; it now copies identical
+parameters before comparing request states. No new test file was introduced.
+This fixes the existing extra-KV interface for causal block reads; it does
+not establish HF causal-writer integration or a generation improvement.
+The running four-task experiment retains its already loaded implementation.
