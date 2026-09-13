@@ -1,0 +1,102 @@
+/root/miniconda3/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+`torch_dtype` is deprecated! Use `dtype` instead!
+`flash-attention` package not found, consider installing for better performance: No module named 'flash_attn'.
+Current `flash-attention` does not support `window_size`. Either upgrade or use `attn_implementation='eager'`.
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards:  50%|█████     | 1/2 [00:04<00:04,  4.72s/it]Loading checkpoint shards: 100%|██████████| 2/2 [00:07<00:00,  3.41s/it]Loading checkpoint shards: 100%|██████████| 2/2 [00:07<00:00,  3.61s/it]
+{"event": "record", "run_id": "quality-first-row21-cap8192-bf16-v1", "mode": "full_kv", "line": 21, "answers": ["f9b81b81-b24d-4b46-bdba-f5f787343daf"], "length_chars": 23030, "tokens": 16156, "task": "niah_multikey_3", "length_bucket": "8-32K", "prediction": "\n\nA: f9b81b81-b24d-4b46-bdba-f5f787343daf\nB: 98169590-ea5d-48fc-aa20-3ee36c80f981\nC: 5f8173e2-8fc6-4848-bf79-c0a604fcc73e\nD: 461c57ec-b433-4", "generated_tokens": 128, "reached_output_limit": true, "answer_recall": 1.0, "score": 0.0, "correct": false, "peak_cuda_allocated_bytes": 7068802560}
+past_key_values should not be None in from_legacy_cache()
+{"event": "record", "run_id": "quality-first-row21-cap8192-bf16-v1", "mode": "qcc", "line": 21, "answers": ["f9b81b81-b24d-4b46-bdba-f5f787343daf"], "length_chars": 23030, "tokens": 16156, "task": "niah_multikey_3", "length_bucket": "8-32K", "prediction": "\n\nThe special magic uuid for 9917b1c1-2b7d-477e-9af0-86ff63c8bdd8 mentioned in the provided text is: f9b81b81-b24d-4b46-bdba-f5f787343daf.\n\n", "generated_tokens": 86, "reached_output_limit": false, "answer_recall": 1.0, "score": 1.0, "correct": true, "qcc_runtime_state": {"tensor_storage_by_device": {"cuda:0": 4996354560}, "rng_state_bytes": 512, "total_bytes": 4996355072}, "peak_cuda_allocated_bytes": 10601283072}
+{
+  "model": "/datasets/ComfyUI/models/LLM/Phi-3.5-mini-instruct",
+  "records": 1,
+  "patched_layers": [
+    "model.layers.0.self_attn",
+    "model.layers.1.self_attn",
+    "model.layers.2.self_attn",
+    "model.layers.3.self_attn",
+    "model.layers.4.self_attn",
+    "model.layers.5.self_attn",
+    "model.layers.6.self_attn",
+    "model.layers.7.self_attn",
+    "model.layers.8.self_attn",
+    "model.layers.9.self_attn",
+    "model.layers.10.self_attn",
+    "model.layers.11.self_attn",
+    "model.layers.12.self_attn",
+    "model.layers.13.self_attn",
+    "model.layers.14.self_attn",
+    "model.layers.15.self_attn",
+    "model.layers.16.self_attn",
+    "model.layers.17.self_attn",
+    "model.layers.18.self_attn",
+    "model.layers.19.self_attn",
+    "model.layers.20.self_attn",
+    "model.layers.21.self_attn",
+    "model.layers.22.self_attn",
+    "model.layers.23.self_attn",
+    "model.layers.24.self_attn",
+    "model.layers.25.self_attn",
+    "model.layers.26.self_attn",
+    "model.layers.27.self_attn",
+    "model.layers.28.self_attn",
+    "model.layers.29.self_attn",
+    "model.layers.30.self_attn",
+    "model.layers.31.self_attn"
+  ],
+  "baseline_full_kv": {
+    "correct": 0,
+    "score_sum": 0.0,
+    "accuracy": 0.0,
+    "records": [
+      {
+        "line": 21,
+        "answers": [
+          "f9b81b81-b24d-4b46-bdba-f5f787343daf"
+        ],
+        "length_chars": 23030,
+        "tokens": 16156,
+        "task": "niah_multikey_3",
+        "length_bucket": "8-32K",
+        "prediction": "\n\nA: f9b81b81-b24d-4b46-bdba-f5f787343daf\nB: 98169590-ea5d-48fc-aa20-3ee36c80f981\nC: 5f8173e2-8fc6-4848-bf79-c0a604fcc73e\nD: 461c57ec-b433-4",
+        "generated_tokens": 128,
+        "reached_output_limit": true,
+        "answer_recall": 1.0,
+        "score": 0.0,
+        "correct": false,
+        "peak_cuda_allocated_bytes": 7068802560
+      }
+    ]
+  },
+  "qcc_retrofit": {
+    "correct": 1,
+    "score_sum": 1.0,
+    "accuracy": 1.0,
+    "records": [
+      {
+        "line": 21,
+        "answers": [
+          "f9b81b81-b24d-4b46-bdba-f5f787343daf"
+        ],
+        "length_chars": 23030,
+        "tokens": 16156,
+        "task": "niah_multikey_3",
+        "length_bucket": "8-32K",
+        "prediction": "\n\nThe special magic uuid for 9917b1c1-2b7d-477e-9af0-86ff63c8bdd8 mentioned in the provided text is: f9b81b81-b24d-4b46-bdba-f5f787343daf.\n\n",
+        "generated_tokens": 86,
+        "reached_output_limit": false,
+        "answer_recall": 1.0,
+        "score": 1.0,
+        "correct": true,
+        "qcc_runtime_state": {
+          "tensor_storage_by_device": {
+            "cuda:0": 4996354560
+          },
+          "rng_state_bytes": 512,
+          "total_bytes": 4996355072
+        },
+        "peak_cuda_allocated_bytes": 10601283072
+      }
+    ]
+  }
+}

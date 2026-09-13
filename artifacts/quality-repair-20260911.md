@@ -1335,3 +1335,28 @@ Default as-is preserves prior experimental inputs. Four runner tests pass.
 Existing bare-input failures and continuation behaviour remain observations of
 that format; no claim that chat formatting repairs retrieval or EOS is made.
 The running 8192-slot comparison still uses its original bare input.
+
+### 8192 original-BF16 foreground slots recover row21
+
+The cap8192-bf16-v1 paired run completed on the unmodified bare row21 input
+(16,156 tokens, Phi-3.5 NF4). QCC returned the full target UUID
+f9b81b81-b24d-4b46-bdba-f5f787343daf and stopped normally after 86 tokens:
+answer recall 1, completion score 1. The matched Full-KV output is identical
+to the earlier row21 reference: it contains the target UUID but reaches the
+128-token limit, recall 1 and completion score 0. Its zero completion score
+must not be used as a ratio denominator.
+
+QCC owned state is 4,996,355,072 bytes (4.65 GiB), exactly the allocation-derived
+budget; peak allocated is 10,601,283,072 bytes. Compared with the earlier
+768+128 FP32 row21 run (wrong UUID, 5,899,964,928 bytes), the combined cleanup
+and larger BF16 table recovers this answer with 15.32% less owned state.
+Same-capacity reclamation and BF16 parity were separately verified on row16,
+not on row21, so this is a combined-candidate comparison for row21 rather than
+a fully isolated capacity effect. No teacher-prefill intervention was used.
+
+This candidate still uses future-tail quality-first scoring; it is not yet the
+causal block writer proposed in the study. One UUID success proves neither
+suite-level quality nor 1M retrieval or speedups. Logical parameter accounting
+now reports the correct 3,821,079,552 backbone count; 6,589,440 parameters remain
+marked trainable (0.17245%), without implying that each affects this path.
+The same-capacity Phi3 prompt-format paired comparison has begun sequentially.
