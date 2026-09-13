@@ -145,6 +145,19 @@ def _fit_low_rank_query_map(student_query, teacher_query, target_query, rank):
     )
 
 
+def _aligned_read_metrics(output, reference, partition):
+    """Compare the same batch/head/query coordinates, never broadcast heads."""
+    if output.ndim != 3 or output.shape != reference.shape:
+        raise ValueError("read outputs must both have identical [batch, heads, dim] shape")
+    if partition.shape != output.shape[:-1]:
+        raise ValueError("log partition must match [batch, heads]")
+    error = (output.float() - reference.float()).square().sum(-1)
+    energy = reference.float().square().sum(-1).clamp_min(1e-12)
+    return dict(relative_squared_error=(error / energy).tolist(),
+                cosine=F.cosine_similarity(output.float(), reference.float(), dim=-1).tolist(),
+                log_partition=partition.tolist())
+
+
 def cross_read_diagnostic(model, tokenizer, record, args):
     """Compare position, K/V, and Q sources under one teacher-generated prefix."""
     from qcc_transformer.hybrid_archive import HybridQCCArchive, patch_hf_model_hybrid
@@ -326,11 +339,7 @@ def cross_read_diagnostic(model, tokenizer, record, args):
         remote_ref = torch.softmax(logits, dim=-1).unsqueeze(-1).mul(remote_values.float()).sum(2)
 
     def metrics(output, partition):
-        error = (output.float() - remote_ref.float()).square().sum(-1)
-        energy = remote_ref.float().square().sum(-1).clamp_min(1e-12)
-        return dict(relative_squared_error=(error / energy).tolist(),
-                    cosine=torch.nn.functional.cosine_similarity(output.float(), remote_ref.float(), dim=-1).tolist(),
-                    log_partition=partition.tolist())
+        return _aligned_read_metrics(output, remote_ref, partition)
 
     top = torch.topk(student_output.logits[0, -1].float(), 5)
     result = dict(

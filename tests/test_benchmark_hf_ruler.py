@@ -69,3 +69,14 @@ def test_phi3_record_template_applies_answer_prefix_once():
     assert _format_phi3_record(formatted) == formatted
     assert record["input"] == "Find the number."
     assert formatted["outputs"] == record["outputs"]
+
+
+def test_diagnostic_read_metrics_reject_cross_head_broadcast():
+    from benchmarks.diagnose_hf_archive import _aligned_read_metrics
+    reference = torch.tensor([[[1., 0.], [0., 1.]]])
+    partition = torch.zeros(1, 2)
+    metrics = _aligned_read_metrics(reference, reference, partition)
+    assert metrics['relative_squared_error'] == [[0., 0.]]
+    assert metrics['cosine'] == [[1., 1.]]
+    with pytest.raises(ValueError, match="identical"):
+        _aligned_read_metrics(reference.unsqueeze(2), reference, partition)
