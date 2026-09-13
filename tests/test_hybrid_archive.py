@@ -526,6 +526,21 @@ def test_quality_first_successor_score_propagates_one_block_only():
     assert not run(make_archive(False))
     assert run(make_archive(True))
 
+    propagated = make_archive(True)
+    with torch.no_grad():
+        for i, raw_score in enumerate((0.1, 0.1, 0.2, 0.9, 0.3, 0.4, 0.1, 0.1)):
+            propagated._admit_one(keys[i], values[i], torch.tensor([[raw_score]]))
+            if i == 3:
+                torch.testing.assert_close(propagated._quality_previous_raw_score,
+                                           torch.tensor([[0.9]]))
+                assert propagated.exact_bank._scores.max().item() == pytest.approx(0.9)
+            if i == 5:
+                torch.testing.assert_close(propagated._quality_previous_raw_score,
+                                           torch.tensor([[0.4]]))
+                assert propagated.exact_bank._scores.min().item() == pytest.approx(0.9)
+    # The propagated 0.9 must not spread into the fourth block.
+    assert not (propagated.exact_bank._keys[..., 0] == 6).any()
+
 
 def test_quality_first_decode_uses_rotary_cosine_score():
     archive = HybridQCCArchive(

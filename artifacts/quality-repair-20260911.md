@@ -1373,3 +1373,14 @@ records are a candidate follow-up, not an untouched validation set for all
 historical project work, and not a 128K suite. They will use matched Full-KV,
 the same 8192 BF16 configuration and 128-token output budget after the current
 row21 template comparison terminates. No follow-up scores exist yet.
+
+### Successor-score implementation correction (disabled branch)
+
+Corrected the previously reported opt-in propagation bug: later raw token
+scores now raise the current block's write score, instead of locking it to the
+first token and previous block. Only the completed block's raw maximum is
+carried to the successor, so propagation remains one step. The existing test
+now exercises a 0.2-to-0.9 within-block rise and verifies that 0.9 does not
+propagate indefinitely. It passes. The option remains disabled in all active
+experiments; no new propagation quality run is scheduled and old failures
+remain historical evidence for their original implementation.

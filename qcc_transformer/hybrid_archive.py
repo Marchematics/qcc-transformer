@@ -480,6 +480,9 @@ class HybridQCCArchive(QCCArchive):
                 self._quality_current_raw_score = torch.maximum(
                     self._quality_current_raw_score, score
                 )
+                self._quality_current_write_score = torch.maximum(
+                    self._quality_current_write_score, score
+                )
             score = self._quality_current_write_score
         mask = score >= self.admission_threshold
         if write_mask is not None:
