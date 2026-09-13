@@ -919,3 +919,16 @@ range did not recover the response. Artifact
 `causal-coreset-phi-layer17.json` records the prompt construction and metrics.
 This is a real pretrained-layer diagnostic, not a task score or generation
 result, and it rules out promoting the simple Ward mean as the quality method.
+
+A companion real Phi layer17 selection probe used the same shortened teacher
+trace but kept original K/V entries rather than averaging them. At capacities
+32/64/128, deterministic uniform samples with an inverse-count mass correction
+reached mean cosine 0.7354/0.7548/0.7755; online-equivalent random reservoir
+samples were 0.3635/0.4444/0.4831. Farthest-point k-center selections were
+0.6608/0.7413/0.7860. A post-hoc top-query selection (an oracle unavailable at
+causal writes) reached 0.9370/0.9613/0.9780. Top-key-norm selection was poor
+(0.2527/0.2774/0.3011). These are attention-read diagnostics, not task scores;
+the artifact is `causal-selection-phi-layer17.json`. The gap between causal
+static selection and the query oracle shows that preserving original K/V avoids
+the Ward-mean failure but does not by itself solve unknown-future-query
+selection.
