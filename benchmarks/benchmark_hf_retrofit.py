@@ -132,6 +132,10 @@ def main() -> None:
         default=8,
         help="rank of the calibrated query-conditioned archive residual",
     )
+    parser.add_argument(
+        "--active-query-correction", action="store_true",
+        help="apply the calibrated residual to the live Q used by attention",
+    )
     parser.add_argument("--max-position-embeddings", type=int, default=None)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--dtype", choices=("float16", "bfloat16", "float32"), default="bfloat16")
@@ -304,6 +308,7 @@ def main() -> None:
         "archive_global_normalization": args.archive_global_normalization,
         "archive_position_invariant": args.archive_position_invariant,
         "archive_query_correction_rank": args.archive_query_correction_rank,
+        "active_query_correction": args.active_query_correction,
         "use_triton": args.use_triton,
         "local_attention_backend": args.local_attention_backend,
         "prefill_chunk_size": args.prefill_chunk_size,
@@ -393,6 +398,7 @@ def main() -> None:
         "qcc_only": False,
         "logits_to_keep": args.logits_to_keep or None,
         "forward_chunk_size": args.forward_chunk_size or None,
+        "active_query_correction": args.active_query_correction,
         "adapter": str(args.adapter) if args.adapter is not None else None,
         "hybrid": args.hybrid,
         "quality_first": args.quality_first if args.hybrid else False,

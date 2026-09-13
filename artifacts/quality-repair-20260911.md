@@ -951,3 +951,18 @@ An active-query-correction calibration attempt on the existing real Phi-3.5
 metrics artifact. It is not evidence for or against the correction. Future
 calibration should first reduce the token/step budget or use the layerwise
 frozen-prefix path before attempting a longer run.
+
+### Active-query-correction calibration probe
+
+A bounded real Phi-3.5 layerwise calibration was completed on one 1,024-token
+training chunk and one independent 1,024-token held-out chunk, selecting only
+layer31, rank8 active Q correction, window512, 16 codes, bf16, and 10 steps.
+The best held-out calibration metrics were cosine 0.999186 and top-1 0.787109;
+the fidelity gate therefore remained false. Evaluating that adapter on the
+independent 4,096-token `held_4k` prompt gave mean logit cosine 0.987627 and
+top-1 agreement 0.650391. The report is
+`artifacts/active-query-calibration/eval_layer31_activeq_held4k.json`; the
+adapter is retained locally but is ignored by Git because it is a binary
+checkpoint. This is a targeted calibration diagnostic, not a task score.
+The active Q hook is effective, but this small probe does not justify
+promoting it or claiming that query correction alone solves the quality gap.
