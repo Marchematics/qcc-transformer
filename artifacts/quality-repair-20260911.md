@@ -944,3 +944,10 @@ the exact-read-only correction to prevent double application, and exposed by
 both calibration CLIs and the RULER benchmark. A focused test confirms that a
 nonzero factor changes the live query; the full local suite remains green. No
 weights have been trained and no quality improvement is claimed yet.
+
+An active-query-correction calibration attempt on the existing real Phi-3.5
+4K diagnostic text (50 steps, window512, rank8, bf16) was stopped after about
+45 minutes while the single A10G remained occupied; it produced no adapter or
+metrics artifact. It is not evidence for or against the correction. Future
+calibration should first reduce the token/step budget or use the layerwise
+frozen-prefix path before attempting a longer run.
