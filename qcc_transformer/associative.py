@@ -172,6 +172,10 @@ class SetAssociativeLandmarkBank(nn.Module):
         self._pending_count += 1
         if self._pending_count < self.block_size:
             return
+        self._commit_pending_block()
+
+    @torch.no_grad()
+    def _commit_pending_block(self) -> None:
         score = self._pending_scores.amax(-1)
         previous = self._scores[:, :, :, 0]
         empty = ~torch.isfinite(previous)
@@ -179,8 +183,9 @@ class SetAssociativeLandmarkBank(nn.Module):
         index = torch.where(has_empty, empty.long().argmax(-1), previous.argmin(-1))
         weakest = previous.gather(-1, index[..., None]).squeeze(-1)
         write = torch.isfinite(score) & (has_empty | (score > weakest))
-        batch = torch.arange(key.shape[0], device=key.device)[:, None]
-        head = torch.arange(self.num_heads, device=key.device)[None, :]
+        device = self._keys.device
+        batch = torch.arange(self._keys.shape[0], device=device)[:, None]
+        head = torch.arange(self.num_heads, device=device)[None, :]
         old_keys = self._keys[batch, head, index]
         old_values = self._values[batch, head, index]
         demoted = write & ~has_empty
@@ -195,7 +200,7 @@ class SetAssociativeLandmarkBank(nn.Module):
         self._keys[wb, wh, selected] = self._pending_keys[write]
         self._values[wb, wh, selected] = self._pending_values[write]
         self._scores[wb, wh, selected] = score[write].unsqueeze(-1)
-        ages = self._step-self.block_size+1+torch.arange(self.block_size, device=key.device)
+        ages = self._step-self.block_size+1+torch.arange(self.block_size, device=device)
         self._ages[wb, wh, selected] = ages
         self._pending_count = 0
 
@@ -520,10 +525,19 @@ class SetAssociativeLandmarkBank(nn.Module):
             )
             output[:, :, start:end] = response
             partition[:, :, start:end] = log_z
-            for index in range(end - start):
+            if self.block_size > 1:
+                count = end - start
+                self._pending_keys[:, :, pending:pending + count] = keys
+                self._pending_values[:, :, pending:pending + count] = values
+                self._pending_scores[:, :, pending:pending + count] = admission_score[:, :, start:end]
+                self._step += count
+                self._pending_count += count
+                if self._pending_count == self.block_size:
+                    self._commit_pending_block()
+            else:
                 self.update(
-                    keys[:, :, index], values[:, :, index],
-                    admission_bias=admission_score[:, :, start + index],
+                    keys[:, :, 0], values[:, :, 0],
+                    admission_bias=admission_score[:, :, start],
                 )
             start = end
         return output, partition

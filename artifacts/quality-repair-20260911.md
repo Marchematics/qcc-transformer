@@ -1432,3 +1432,15 @@ causal; this interface does not make the existing future-tail scorer causal.
 Reads are batched up to logical commit boundaries; admission still uses the
 existing token loop. HF integration and GPU throughput are not established.
 The active four-task candidate is unchanged.
+
+### Batch pending writes at logical boundaries
+
+The new exact-bank chunk interface now fills pending K/V/scores in tensor
+slices and invokes the shared block replacement once per completed logical
+block. The token update API uses the same extracted commit implementation.
+All 22 CPU associative cases pass; the four block-commit cases additionally
+compare every stored K/V, score, age, pending item, step and background count
+against the original sequential token-update API, with exact equality.
+Background reservoir updates remain sequential within a committed block to
+preserve their RNG/event semantics. This removes foreground staging's token
+loop, not all maintenance loops; no GPU speedup has been measured.

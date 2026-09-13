@@ -113,6 +113,16 @@ def test_block_commit_reads_are_causal_and_independent_of_api_chunks(background_
     whole = make_bank()
     initial_bytes = whole.state_bytes()
     expected, expected_z = whole.update_read_chunk(keys, values, queries, admission_score=scores)
+    sequential = make_bank()
+    for index in range(keys.shape[2]):
+        sequential.update(keys[:, :, index], values[:, :, index], admission_bias=scores[:, :, index])
+    state_names = ['_keys', '_values', '_scores', '_ages', '_pending_keys', '_pending_values', '_pending_scores']
+    if background_size:
+        state_names += ['_background_keys', '_background_values', '_background_count']
+    for name in state_names:
+        torch.testing.assert_close(getattr(whole, name), getattr(sequential, name), rtol=0, atol=0)
+    assert whole._step == sequential._step
+    assert whole._pending_count == sequential._pending_count
     for boundaries in (list(range(1, 38)), [3, 9, 10, 24, 37]):
         split = make_bank()
         outputs, partitions = [], []
