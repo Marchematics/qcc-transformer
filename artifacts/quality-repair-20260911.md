@@ -1384,3 +1384,17 @@ now exercises a 0.2-to-0.9 within-block rise and verifies that 0.9 does not
 propagate indefinitely. It passes. The option remains disabled in all active
 experiments; no new propagation quality run is scheduled and old failures
 remain historical evidence for their original implementation.
+
+
+### Matched Phi3 prompt format passes row21
+
+The cap8192-phi3-v1 run completed on row21, using RULER's Phi3 role markers and
+answer_prefix identically for both models. Full-KV and QCC produce exactly
+": f9b81b81-b24d-4b46-bdba-f5f787343daf." and finish after 36 generated tokens.
+Both answer recall and completion score are 1. QCC request state remains
+4,996,355,072 bytes; peak allocated is 10,611,506,688 bytes. In the preceding
+bare-input pair, Full-KV reached 128 tokens while QCC ended at 86; the formatted
+pair resolves completion on this sample without candidate-specific stop rules.
+Prompt length changes from 16,156 to 16,205, so this is a format intervention,
+not the exact same token input. It remains one UUID sample, with future-query
+retention, and does not establish suite or serving targets.
