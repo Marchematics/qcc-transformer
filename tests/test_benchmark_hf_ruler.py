@@ -57,3 +57,15 @@ def test_chunked_causal_attention_matches_sdpa():
         query, key, value, is_causal=True
     )
     torch.testing.assert_close(actual, expected, atol=1e-6, rtol=1e-5)
+
+
+def test_phi3_record_template_applies_answer_prefix_once():
+    from benchmarks.benchmark_hf_ruler import _format_phi3_record
+    record = {"input": "Find the number.", "outputs": ["123"],
+              "answer_prefix": " The number is"}
+    formatted = _format_phi3_record(record)
+    assert formatted["input"] == (
+        "<|user|>\nFind the number.<|end|>\n<|assistant|>\n The number is")
+    assert _format_phi3_record(formatted) == formatted
+    assert record["input"] == "Find the number."
+    assert formatted["outputs"] == record["outputs"]

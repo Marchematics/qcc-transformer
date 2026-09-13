@@ -1322,3 +1322,16 @@ replacing them. The step counter still resets to zero; recurrence-using modes
 retain their existing reset. All 25 hybrid tests pass. This removes transient
 allocation work, not additional retained request bytes. The active 8192-slot
 run predates this reset-only edit.
+
+### RULER Phi3 input-format discrepancy
+
+The supplied subset contains unwrapped task text plus separate answer_prefix
+fields. Local NVIDIA RULER scripts/data/template.py defines Phi3 as user/end/
+assistant role markers, and scripts/pred/call_api.py appends answer_prefix to
+input. The current benchmark previously tokenized only record['input'].
+Added explicit --prompt-template phi3 to apply the same wrapper and prefix to
+both baseline and candidate, with already-formatted inputs left unduplicated.
+Default as-is preserves prior experimental inputs. Four runner tests pass.
+Existing bare-input failures and continuation behaviour remain observations of
+that format; no claim that chat formatting repairs retrieval or EOS is made.
+The running 8192-slot comparison still uses its original bare input.

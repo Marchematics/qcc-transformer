@@ -237,6 +237,17 @@ def patch_phi_full_attention_chunked(
     return patched
 
 
+def _format_phi3_record(record: dict) -> dict:
+    """Apply RULER's Phi3 chat wrapper and supplied answer prefix once."""
+    text = record["input"]
+    prefix = record.get("answer_prefix", "")
+    if not text.startswith("<|user|>\n"):
+        text = "<|user|>\n" + text + "<|end|>\n<|assistant|>\n"
+    if prefix and not text.endswith(prefix):
+        text += prefix
+    return {**record, "input": text}
+
+
 def _start_progress_log(path: Path, *, run_id: str | None, config: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("x", encoding="utf-8") as stream:
@@ -389,6 +400,8 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", required=True)
     parser.add_argument("--ruler-jsonl", type=Path, required=True)
+    parser.add_argument("--prompt-template", choices=("as-is", "phi3"), default="as-is",
+                        help="phi3 applies RULER's chat wrapper and answer_prefix to both models")
     parser.add_argument("--max-examples", type=int, default=None)
     parser.add_argument("--skip-examples", type=int, default=0)
     parser.add_argument("--max-new-tokens", type=int, default=128)
@@ -552,6 +565,8 @@ def main() -> None:
     if args.skip_examples < 0:
         raise ValueError("skip-examples must be non-negative")
     records = list(_records(args.ruler_jsonl, args.max_examples, args.skip_examples))
+    if args.prompt_template == "phi3":
+        records = [(line, _format_phi3_record(record)) for line, record in records]
     if not records:
         raise ValueError("RULER JSONL contains no records")
     progress_jsonl = args.progress_jsonl or args.output.with_suffix(".progress.jsonl")
@@ -795,6 +810,8 @@ def main() -> None:
         "matched_full_kv": True,
         "offload_full_kv": args.offload_full_kv,
         "full_kv_resident_layers": args.full_kv_resident_layers,
+        "prompt_template": args.prompt_template,
+        "answer_prefix_applied": args.prompt_template == "phi3",
         "scoring": "mean case-insensitive answer recall; output-limit and generation errors score zero",
         "attention_sink_size": args.attention_sink_size,
         "archive_mix_override": args.archive_mix,
