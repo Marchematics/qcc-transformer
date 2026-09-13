@@ -774,3 +774,28 @@ the prior mixed-dtype state plus 1,638,400 bytes of restored FP32 score and
 pending-score storage. This validates the storage-only interpretation for this
 row's end-to-end output; it remains a one-row quality result, not a general
 parity or performance claim.
+
+### Fixed-prefix Q/K/V cross-read diagnostic
+
+Added `--cross-read` to `diagnose_hf_archive.py` and ran row6 at layer17. The
+teacher was generated once; its prefix through the first answer digit was then
+fed identically to the student. The target is generation step 17, token `8`.
+The four remote-read variants use the same fixed capacity and teacher-selected
+positions where indicated; background and pending entries retain their actual
+counts and weights. Mean per-head cosine to the teacher Full-KV remote output
+was: A (student Q, student K/V, student positions) 0.6314; B (student Q,
+student K/V, teacher-selected positions) 0.5157; C (student Q, teacher K/V,
+teacher-selected positions) 0.5733; D (teacher Q, teacher K/V, teacher-selected
+positions) 0.8956. Mean relative squared errors were 2.4246, 5.0004, 2.1352,
+and 0.2447 respectively. These conditional read metrics are not task scores;
+they exclude free-generation feedback and do not decompose additively.
+
+For this row/layer/target, replacing student Q with teacher Q gives the largest
+improvement; replacing student positions with teacher-selected positions
+hurts A→B, and replacing student K/V on those positions gives only a partial
+recovery B→C. This ranks query drift as the strongest of the three measured
+factors for this probe, with selection and K/V representation still coupled.
+The artifact is `cross-read-row6-layer17.json`; it contains the fixed prefix
+metadata, top student token candidates, read metrics, positions, and state
+accounting. It is a diagnostic at one layer and one target, not a system-wide
+quality claim.

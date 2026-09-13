@@ -6,6 +6,7 @@ bounded-memory serving results. No answer labels enter the attention calculation
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import math
 import sys
@@ -32,6 +33,282 @@ def exact_prefill_output(module, inputs, kwargs, output):
         past_key_values=None,
     )
     return (exact, *output[1:])
+
+
+def _phi_qkv_with_rope(module, hidden, kwargs, *, heads, head_dim):
+    """Capture projected Q/K/V in both raw and rotary forms for one layer."""
+    qkv = module.qkv_proj(hidden)
+    query_width = heads * head_dim
+    q = qkv[..., :query_width]
+    k = qkv[..., query_width:query_width * 2]
+    v = qkv[..., query_width * 2:]
+    q = q.view(hidden.shape[0], hidden.shape[1], heads, head_dim).transpose(1, 2)
+    k = k.view(hidden.shape[0], hidden.shape[1], heads, head_dim).transpose(1, 2)
+    v = v.view(hidden.shape[0], hidden.shape[1], heads, head_dim).transpose(1, 2)
+    from transformers.models.phi3.modeling_phi3 import apply_rotary_pos_emb
+    cos, sin = kwargs['position_embeddings']
+    q_rot, k_rot = apply_rotary_pos_emb(q, k, cos, sin)
+    return q.detach(), k.detach(), v.detach(), q_rot.detach(), k_rot.detach()
+
+
+def _positions_in_bank(bank, event_keys, event_values, *, sink_size):
+    """Recover token positions for foreground, background, and pending slots."""
+    foreground = bank._ages - 1 + sink_size
+    foreground = foreground.clone()
+    valid = torch.isfinite(bank._scores)
+    foreground = torch.where(valid, foreground, torch.full_like(foreground, -1))
+    background = torch.full(
+        bank._background_keys.shape[:-1], -1, device=bank._background_keys.device,
+        dtype=torch.long,
+    )
+    if bank.background_size:
+        for head in range(bank.num_heads):
+            count = int(bank._background_count[0, head].clamp(max=bank.background_size))
+            for slot in range(count):
+                key = bank._background_keys[0, head, slot].float()
+                value = bank._background_values[0, head, slot].float()
+                matches = ((event_keys[0, head].float() - key).abs().amax(-1) < 1e-5)
+                matches &= ((event_values[0, head].float() - value).abs().amax(-1) < 1e-5)
+                indices = matches.nonzero().flatten()
+                if indices.numel():
+                    background[0, head, slot] = int(indices[0].item()) + sink_size
+    pending = torch.empty(
+        bank.num_heads, bank._pending_count, device=bank._keys.device, dtype=torch.long,
+    )
+    if bank._pending_count:
+        pending.copy_(torch.arange(
+            event_keys.shape[2] - bank._pending_count + sink_size,
+            event_keys.shape[2] + sink_size,
+            device=bank._keys.device,
+        ).view(1, -1).expand(bank.num_heads, -1))
+    return foreground, background, pending
+
+
+def _replace_bank_kv(bank, positions, keys, values):
+    """Copy another representation into a bank while preserving its selection."""
+    cloned = copy.deepcopy(bank)
+    foreground, background, pending = positions
+    length = keys.shape[2]
+    for head in range(bank.num_heads):
+        for set_index in range(bank.num_sets):
+            for way in range(bank.ways):
+                position = int(foreground[0, head, set_index, way].item())
+                if 0 <= position < length:
+                    cloned._keys[0, head, set_index, way] = keys[0, head, position]
+                    cloned._values[0, head, set_index, way] = values[0, head, position]
+        for slot in range(bank.background_size):
+            position = int(background[0, head, slot].item())
+            if 0 <= position < length:
+                cloned._background_keys[0, head, slot] = keys[0, head, position]
+                cloned._background_values[0, head, slot] = values[0, head, position]
+        for slot in range(bank._pending_count):
+            position = int(pending[head, slot].item())
+            if 0 <= position < length:
+                cloned._pending_keys[0, head, slot] = keys[0, head, position]
+                cloned._pending_values[0, head, slot] = values[0, head, position]
+    return cloned
+
+
+def cross_read_diagnostic(model, tokenizer, record, args):
+    """Compare position, K/V, and Q sources under one teacher-generated prefix."""
+    from qcc_transformer.hybrid_archive import HybridQCCArchive, patch_hf_model_hybrid
+    from qcc_transformer.retrofit import qcc_runtime_state_bytes
+
+    heads = int(model.config.num_attention_heads)
+    head_dim = int(getattr(model.config, 'head_dim', model.config.hidden_size // heads))
+    layer = int(args.cross_read_layer)
+    if layer < 0 or layer >= int(model.config.num_hidden_layers):
+        raise ValueError('cross-read-layer is outside the model')
+    target_module = model.model.layers[layer].self_attn
+    teacher = {}
+    generated_q = []
+    generated_q_rot = []
+    generated_k = []
+    generated_k_rot = []
+    generated_v = []
+    teacher_hook = None
+
+    def capture_teacher(module, inputs, kwargs):
+        hidden = kwargs.get('hidden_states', inputs[0] if inputs else None)
+        q, k, v, q_rot, k_rot = _phi_qkv_with_rope(
+            module, hidden, kwargs, heads=heads, head_dim=head_dim,
+        )
+        if hidden.shape[1] > 1:
+            teacher.update(raw_q=q, raw_k=k, values=v, rot_q=q_rot, rot_k=k_rot)
+        else:
+            generated_q.append(q)
+            generated_q_rot.append(q_rot)
+            generated_k.append(k)
+            generated_k_rot.append(k_rot)
+            generated_v.append(v)
+
+    teacher_hook = target_module.register_forward_pre_hook(capture_teacher, with_kwargs=True)
+    encoded = tokenizer(record['input'], return_tensors='pt', add_special_tokens=False).to('cuda')
+    from transformers.cache_utils import DynamicCache
+    class CrossReadCache(DynamicCache):
+        def offload(self, layer_idx, only_non_sliding=True):
+            if layer_idx >= 8:
+                super().offload(layer_idx, only_non_sliding)
+                torch.cuda.synchronize()
+    teacher_cache = CrossReadCache(offloading=True)
+    with torch.no_grad():
+        generated = model.generate(
+            **encoded, max_new_tokens=args.cross_read_max_new_tokens,
+            do_sample=False, use_cache=True, past_key_values=teacher_cache,
+            logits_to_keep=1,
+        )
+    teacher_hook.remove()
+    del teacher_cache
+    torch.cuda.empty_cache()
+    prompt_length = int(encoded['input_ids'].shape[1])
+    generated_ids = generated[0, prompt_length:].tolist()
+    answer_ids = tokenizer(record['outputs'][0], add_special_tokens=False)['input_ids']
+    while answer_ids and not tokenizer.decode(answer_ids[:1]).strip():
+        answer_ids = answer_ids[1:]
+    target_step = None
+    for candidate in (answer_ids, answer_ids[1:]):
+        if not candidate:
+            continue
+        for start in range(len(generated_ids) - len(candidate) + 1):
+            if generated_ids[start:start + len(candidate)] == candidate:
+                target_step = start
+                break
+        if target_step is not None:
+            break
+    if target_step is None:
+        raise RuntimeError('teacher generation did not contain the answer token sequence')
+    if target_step >= len(generated_q):
+        raise RuntimeError('teacher query capture ended before the first answer token')
+    teacher_raw_k = torch.cat([teacher['raw_k'], *generated_k[:target_step]], dim=2)
+    teacher_values = torch.cat([teacher['values'], *generated_v[:target_step]], dim=2)
+    teacher_rot_q = torch.cat([teacher['rot_q'], *generated_q_rot[:target_step]], dim=2)
+    teacher_rot_k = torch.cat([teacher['rot_k'], *generated_k_rot[:target_step]], dim=2)
+    teacher_q_target = generated_q_rot[target_step][:, :, 0]
+
+    model.requires_grad_(False)
+    names = patch_hf_model_hybrid(
+        model, window_size=args.window_size, attention_sink_size=args.sink_size,
+        num_codes=args.num_codes, max_position_embeddings=model.config.max_position_embeddings,
+        archive_position_invariant=True, kv_head_policy='reject', use_triton=False,
+        local_attention_backend='sdpa', prefill_chunk_size=args.prefill_chunk_size,
+        hybrid_kwargs=dict(
+            exact_num_sets=args.exact_num_sets, exact_ways=args.exact_ways,
+            background_size=args.background_size, block_size=args.block_size,
+            quality_first=True, exact_attention=True,
+            quality_query_tail=args.quality_query_tail,
+            exact_storage_dtype=torch.float32,
+        ),
+    )
+    student = {}
+
+    def capture_student(module, inputs, kwargs):
+        hidden = kwargs.get('hidden_states', inputs[0] if inputs else None)
+        q_proj, k_proj, v_proj, _ = module.qcc._project_qkv_gate(hidden)
+        q_raw = module.qcc._split_heads(q_proj)
+        k_raw = module.qcc._split_heads(k_proj)
+        values = module.qcc._split_heads(v_proj)
+        positions = torch.arange(hidden.shape[1], device=hidden.device).view(1, -1)
+        q_rot, k_rot = module.qcc._apply_rope(
+            q_raw, k_raw, positions, kwargs.get('position_embeddings'),
+        )
+        student.update(raw_q=q_raw.detach(), raw_k=k_raw.detach(),
+                       values=values.detach(), rot_q=q_rot.detach(), rot_k=k_rot.detach())
+
+    student_hook = model.get_submodule(names[layer]).register_forward_pre_hook(
+        capture_student, with_kwargs=True,
+    )
+    fixed_ids = torch.cat((encoded['input_ids'], generated[:, prompt_length:prompt_length + target_step]), dim=1)
+    with torch.no_grad():
+        student_output = model(input_ids=fixed_ids, use_cache=False, logits_to_keep=1)
+    student_hook.remove()
+    student_bank = model.get_submodule(names[layer]).qcc.archive.exact_bank
+    student_q_target = student['rot_q'][:, :, -1]
+    sequence_length = int(fixed_ids.shape[1])
+    event_count = sequence_length - args.window_size - args.sink_size
+    if event_count <= 0:
+        raise ValueError('fixed prefix is shorter than window plus sink')
+    event_slice = slice(args.sink_size, args.sink_size + event_count)
+    query_slice = slice(args.window_size + args.sink_size, sequence_length)
+    quality_start = max(args.window_size, sequence_length - args.quality_query_tail)
+    quality_query_start = max(0, quality_start - args.window_size)
+
+    teacher_archive = HybridQCCArchive(
+        heads, head_dim, num_codes=args.num_codes, window_size=args.window_size,
+        use_triton=False, exact_num_sets=args.exact_num_sets, exact_ways=args.exact_ways,
+        background_size=args.background_size, block_size=args.block_size,
+        quality_first=True, exact_attention=True, quality_query_tail=args.quality_query_tail,
+        quality_prefill_shadow_only=True, exact_storage_dtype=torch.float32,
+    ).to(device=teacher_raw_k.device)
+    teacher_archive.reset_state(1, device=teacher_raw_k.device)
+    teacher_archive._exact_chunk(
+        teacher_rot_k[:, :, event_slice], teacher_values[:, :, event_slice],
+        teacher_rot_q[:, :, query_slice],
+        teacher_archive.admission(teacher_raw_k[:, :, event_slice], teacher_values[:, :, event_slice]),
+        quality_query=teacher_rot_q[:, :, quality_start:], quality_key_start=0,
+        quality_query_start=quality_query_start,
+    )
+    teacher_bank = teacher_archive.exact_bank
+    student_event_keys = student['rot_k'][:, :, event_slice]
+    student_event_values = student['values'][:, :, event_slice]
+    teacher_event_keys = teacher_rot_k[:, :, event_slice]
+    teacher_event_values = teacher_values[:, :, event_slice]
+    student_positions = _positions_in_bank(
+        student_bank, student_event_keys, student_event_values, sink_size=args.sink_size,
+    )
+    teacher_positions = _positions_in_bank(
+        teacher_bank, teacher_event_keys, teacher_event_values, sink_size=args.sink_size,
+    )
+    teacher_as_student = _replace_bank_kv(
+        teacher_bank, teacher_positions, student['rot_k'], student['values'],
+    )
+    with torch.no_grad():
+        out_a, z_a = student_bank.read_attention(student_q_target)
+        out_b, z_b = teacher_as_student.read_attention(student_q_target)
+        out_c, z_c = teacher_bank.read_attention(student_q_target)
+        out_d, z_d = teacher_bank.read_attention(teacher_q_target)
+        remote_keys = teacher_rot_k[:, :, args.sink_size:sequence_length - args.window_size]
+        remote_values = teacher_values[:, :, args.sink_size:sequence_length - args.window_size]
+        logits = torch.einsum('bhd,bhtd->bht', teacher_q_target.float(), remote_keys.float()) / math.sqrt(head_dim)
+        remote_ref = torch.softmax(logits, dim=-1).unsqueeze(-1).mul(remote_values.float()).sum(2)
+
+    def metrics(output, partition):
+        error = (output.float() - remote_ref.float()).square().sum(-1)
+        energy = remote_ref.float().square().sum(-1).clamp_min(1e-12)
+        return dict(relative_squared_error=(error / energy).tolist(),
+                    cosine=torch.nn.functional.cosine_similarity(output.float(), remote_ref.float(), dim=-1).tolist(),
+                    log_partition=partition.tolist())
+
+    top = torch.topk(student_output.logits[0, -1].float(), 5)
+    result = dict(
+        record=args.record, layer=layer, target_step=target_step,
+        target_token_id=int(generated_ids[target_step]),
+        target_token=tokenizer.decode([generated_ids[target_step]]),
+        teacher_generated_prefix=tokenizer.decode(generated_ids[:target_step]),
+        student_top_token_ids=top.indices.tolist(),
+        student_top_tokens=[tokenizer.decode([int(x)]) for x in top.indices],
+        config=dict(window_size=args.window_size, sink_size=args.sink_size,
+                    exact_num_sets=args.exact_num_sets, exact_ways=args.exact_ways,
+                    background_size=args.background_size, block_size=args.block_size,
+                    quality_query_tail=args.quality_query_tail, sequence_length=sequence_length),
+    )
+    # Keep the four labels explicit in JSON while avoiding a generated label
+    # that could be mistaken for a Python identifier.
+    result['read_metrics'] = {
+        'A_QS_KS_IS': metrics(out_a, z_a),
+        'B_QS_KS_IT': metrics(out_b, z_b),
+        'C_QS_KT_IT': metrics(out_c, z_c),
+        'D_QT_KT_IT': metrics(out_d, z_d),
+    }
+    result['position_summary'] = dict(
+        student_foreground=student_positions[0].tolist(),
+        student_background=student_positions[1].tolist(),
+        teacher_foreground=teacher_positions[0].tolist(),
+        teacher_background=teacher_positions[1].tolist(),
+    )
+    result['state_bytes'] = qcc_runtime_state_bytes(model)
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(json.dumps(result, indent=2) + '\n')
+    print(json.dumps({k: result[k] for k in ('record', 'layer', 'target_step', 'target_token', 'read_metrics')}, indent=2), flush=True)
 
 
 def trace_candidate(model, tokenizer, record, args):
@@ -300,6 +577,10 @@ def main():
     parser.add_argument('--block-size', type=int, default=1)
     parser.add_argument('--quality-query-tail', type=int, default=32)
     parser.add_argument('--trace-candidate', action='store_true')
+    parser.add_argument('--cross-read', action='store_true',
+                        help='run fixed teacher-prefix Q/K/V source cross-read diagnostic')
+    parser.add_argument('--cross-read-layer', type=int, default=17)
+    parser.add_argument('--cross-read-max-new-tokens', type=int, default=64)
     parser.add_argument('--exact-prefill-intervention', action='store_true',
                         help='diagnostic only: exact prefill outputs followed by bounded QCC decode')
     parser.add_argument('--quality-block-propagation', action='store_true',
@@ -320,6 +601,9 @@ def main():
     with args.ruler_jsonl.open() as stream:
         record = next(json.loads(line) for i, line in enumerate(stream, 1) if i == args.record)
     model = load_hf_causal_lm(args.model, dtype=torch.bfloat16, device='cuda', attn_implementation='sdpa')
+    if args.cross_read:
+        cross_read_diagnostic(model, tokenizer, record, args)
+        return
     if args.trace_teacher_heads:
         trace_teacher_heads(model, tokenizer, record, args)
         return
