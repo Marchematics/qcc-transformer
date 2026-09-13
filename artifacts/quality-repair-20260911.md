@@ -1511,3 +1511,12 @@ in 38 tokens, ending normally. The target is
 sides. This is matching generated behavior, not successful retrieval, and
 the per-task relative ratio is undefined. QCC state remains4,996,355,072
 bytes; peak allocated10,619,932,160 bytes. Two QCC records remain pending.
+
+### Third completed 16K cross-task pair
+
+Source line42 (niah_single_1,16,234 tokens) completes with identical Full-KV
+and QCC output `4250981.`,10 generated tokens and normal termination. Both
+recall and completion score are1. QCC state is4,996,355,072 bytes and peak
+allocated10,619,796,480 bytes. The first three generated strings match their
+references (two correct records and one shared UUID failure). Variable
+tracking is the remaining QCC record; no four-task aggregate is claimed yet.
