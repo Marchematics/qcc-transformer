@@ -1,0 +1,47 @@
+{
+  "model": "/datasets/ComfyUI/models/LLM/Phi-3.5-mini-instruct",
+  "record": 5,
+  "layer": 17,
+  "window": 512,
+  "short_tokens": 3948,
+  "events": 3436,
+  "target_token_in_short": 2924,
+  "capacities": [
+    32,
+    64,
+    128
+  ],
+  "cases": [
+    {
+      "capacity": 32,
+      "seconds": 118.43982577323914,
+      "state_bytes": 897280,
+      "represented": 109952,
+      "mean_cosine": 0.015464913100004196,
+      "mean_relative_squared_error": 15.559983253479004,
+      "min_cosine": -0.3392738401889801,
+      "max_relative_squared_error": 293.0691223144531
+    },
+    {
+      "capacity": 64,
+      "seconds": 118.77067947387695,
+      "state_bytes": 1696000,
+      "represented": 109952,
+      "mean_cosine": 0.014924881979823112,
+      "mean_relative_squared_error": 19.42776870727539,
+      "min_cosine": -0.34523385763168335,
+      "max_relative_squared_error": 842.426513671875
+    },
+    {
+      "capacity": 128,
+      "seconds": 119.50669550895691,
+      "state_bytes": 3293440,
+      "represented": 109952,
+      "mean_cosine": 0.015231017954647541,
+      "mean_relative_squared_error": 20.355121612548828,
+      "min_cosine": -0.362495481967926,
+      "max_relative_squared_error": 846.167236328125
+    }
+  ],
+  "note": "Real Phi-3.5 teacher layer read diagnostic on a shortened RULER prompt; no generation/task score and no future-query selection."
+}

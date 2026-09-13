@@ -904,3 +904,18 @@ response candidates. Artifact `causal_coreset_cpu.json` records the exact
 stream and state bytes. This does not establish model quality; it is evidence
 against promoting the response objective without a real-trace gain and a
 bounded merge kernel.
+
+### Real Phi teacher-layer causal coreset probe
+
+A standalone layer17 probe used real Phi-3.5-mini projected rotary K/V from a
+shortened row6 prompt (3,948 tokens, 3,436 historical events; target fact and
+question retained). The causal Ward coreset was built online without future
+queries and compared with the teacher's full historical remote read at the
+final query. Mean per-head cosine was only 0.0155/0.0149/0.0152 for capacities
+32/64/128, with mean relative squared error 15.56/19.43/20.36. State bytes
+were 897,280/1,696,000/3,293,440 for one layer. The three capacities all
+represented the same 109,952 input head-events; increasing capacity in this
+range did not recover the response. Artifact
+`causal-coreset-phi-layer17.json` records the prompt construction and metrics.
+This is a real pretrained-layer diagnostic, not a task score or generation
+result, and it rules out promoting the simple Ward mean as the quality method.
