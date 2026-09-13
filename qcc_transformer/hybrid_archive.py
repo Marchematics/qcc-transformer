@@ -364,7 +364,6 @@ class HybridQCCArchive(QCCArchive):
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
     ) -> None:
-        super().reset_state(batch_size, device=device, dtype=dtype)
         if getattr(self, "exact_only", False):
             # Exact mass merging is the complete remote response in this
             # mode. Keep only a tiny shape/device sentinel for callers that
@@ -381,6 +380,9 @@ class HybridQCCArchive(QCCArchive):
             self._last_step = torch.zeros(
                 batch_size, 1, 1, 1, device=target_device, dtype=torch.long
             )
+            self._step = 0
+        else:
+            super().reset_state(batch_size, device=device, dtype=dtype)
         self._last_exact_gate = None
         self._last_exact_log_partition = None
         self._quality_previous_raw_score = None

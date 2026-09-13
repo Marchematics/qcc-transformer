@@ -1313,3 +1313,12 @@ L2 to Full attention is 2.31e-7 (supplied environment: 2.52e-7). State remains
 the specified global top-k set. Numerical outputs differ slightly across
 software environments; no pretrained quality or GPU performance is inferred.
 The 8192-slot real-model experiment remains separate and in progress.
+
+### Avoid obsolete allocation during exact-only reset
+
+Exact-only reset now allocates its small shape/device sentinels directly instead
+of first allocating the full recurrent numerator/denominator and immediately
+replacing them. The step counter still resets to zero; recurrence-using modes
+retain their existing reset. All 25 hybrid tests pass. This removes transient
+allocation work, not additional retained request bytes. The active 8192-slot
+run predates this reset-only edit.
