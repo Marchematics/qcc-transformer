@@ -892,3 +892,15 @@ predictor, exact blend, and attention gate at construction. Exact mass merging
 bypasses those parameters, so they are no longer counted as trainable capacity
 for this deployment mode. This keeps the causal operator aligned with the
 report's requirement that calibration parameters must affect the active output.
+
+A deterministic CPU stream compared the two causal merge policies on 256
+16-dimensional events from 16 key/value groups, with 8 causal query probes and
+held-out queries from the same group distribution. Relative held-out output
+L2 errors for Ward versus response-aware merging were 0.1900 versus 0.2184 at
+capacity 8, 0.0019125 versus 0.0019125 at capacity 16, and 0.0018012 versus
+0.0019009 at capacity 32. The response-aware reference was also substantially
+slower (19.1 s versus 0.15 s at capacity 16) because it evaluates pairwise
+response candidates. Artifact `causal_coreset_cpu.json` records the exact
+stream and state bytes. This does not establish model quality; it is evidence
+against promoting the response objective without a real-trace gain and a
+bounded merge kernel.

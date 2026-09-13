@@ -1,0 +1,62 @@
+{
+  "seed": 913,
+  "n": 256,
+  "groups": 16,
+  "cases": [
+    {
+      "capacity": 8,
+      "policy": "ward",
+      "seconds": 0.12860441207885742,
+      "relative_l2": 0.1899886131286621,
+      "max_abs": 0.06845013797283173,
+      "state_bytes": 1640,
+      "represented": 256
+    },
+    {
+      "capacity": 8,
+      "policy": "response",
+      "seconds": 0.21784019470214844,
+      "relative_l2": 0.21836279332637787,
+      "max_abs": 0.06570702791213989,
+      "state_bytes": 1640,
+      "represented": 256
+    },
+    {
+      "capacity": 16,
+      "policy": "ward",
+      "seconds": 0.14843130111694336,
+      "relative_l2": 0.001912505947984755,
+      "max_abs": 0.0004700906574726105,
+      "state_bytes": 2760,
+      "represented": 256
+    },
+    {
+      "capacity": 16,
+      "policy": "response",
+      "seconds": 19.098304986953735,
+      "relative_l2": 0.0019125058315694332,
+      "max_abs": 0.0004700906574726105,
+      "state_bytes": 2760,
+      "represented": 256
+    },
+    {
+      "capacity": 32,
+      "policy": "ward",
+      "seconds": 0.16522836685180664,
+      "relative_l2": 0.0018011993961408734,
+      "max_abs": 0.0004459656774997711,
+      "state_bytes": 5000,
+      "represented": 256
+    },
+    {
+      "capacity": 32,
+      "policy": "response",
+      "seconds": 0.40585756301879883,
+      "relative_l2": 0.0019008923554793,
+      "max_abs": 0.0005012527108192444,
+      "state_bytes": 5000,
+      "represented": 256
+    }
+  ],
+  "note": "Synthetic causal stream; no pretrained model or task score."
+}
