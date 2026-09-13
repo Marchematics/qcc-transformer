@@ -1273,3 +1273,14 @@ request totals of 2,350,797,824 / 1,985,893,376 / 4,996,355,072 bytes.
 The 8192 BF16 estimate is about 4.65 GiB, below the original 5.50 GiB request
 state. It is not a GPU peak or concurrency measurement. The allocation record
 is exact-storage-capacity-budget.json; forthcoming GPU runs check the estimate.
+
+### Same-capacity BF16 GPU comparison completed
+
+The scratch-bf16-v1 run returned exactly the FP32 scratch-release prediction,
+including normal termination after 30 tokens on row16. Owned request bytes are
+1,985,893,376 (1.85 GiB), exactly matching the allocation-derived estimate;
+peak CUDA allocated is 5,763,817,472 bytes. Foreground capacity remains 768
+with 128 background slots and FP32 replacement scores. This validates original
+BF16 K/V storage on this paired real run. It does not yet establish larger
+capacity quality. The queued row21 experiment with 8192 BF16 foreground slots
+has started after this process terminated, still using one GPU.
