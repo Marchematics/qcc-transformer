@@ -977,3 +977,13 @@ existing all-layer archive calibration reference. Artifact
 `artifacts/active-query-calibration/eval_lastquarter_activeq_held4k.json`.
 This small calibration does not support promoting active-Q correction; the
 feature remains available for later data-rich calibration only.
+
+A real Phi layer17 kernel-feature probe used mathematically scaled positive
+Gaussian softmax features on the same shortened teacher trace. Features 64,
+128, 256, 512, and 1024 reached mean remote-read cosine 0.5451, 0.5791,
+0.6051, 0.6462, and 0.6708, respectively; mean relative squared errors were
+11.31, 8.30, 5.67, 4.55, and 3.08. The feature-state bytes for one layer grew
+from 1.5 MiB to 24 MiB. This is a post-hoc attention-read diagnostic, not task
+quality, but it rules out treating correct random-feature scaling as a cheap
+replacement for the missing query-generalized response representation.
+Artifact: `phi-kernel-layer17.json`.

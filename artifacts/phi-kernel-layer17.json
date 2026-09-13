@@ -1,0 +1,52 @@
+{
+  "model": "/datasets/ComfyUI/models/LLM/Phi-3.5-mini-instruct",
+  "record": 5,
+  "layer": 17,
+  "window": 512,
+  "short_tokens": 3948,
+  "events": 3436,
+  "target_token_in_short": 2924,
+  "cases": [
+    {
+      "features": 64,
+      "mean_cosine": 0.5451185703277588,
+      "mean_relative_squared_error": 11.307809829711914,
+      "min_cosine": -0.2229551374912262,
+      "max_relative_squared_error": 84.25605773925781,
+      "state_bytes": 1572864
+    },
+    {
+      "features": 128,
+      "mean_cosine": 0.57914799451828,
+      "mean_relative_squared_error": 8.300848007202148,
+      "min_cosine": -0.034384436905384064,
+      "max_relative_squared_error": 77.06827545166016,
+      "state_bytes": 3145728
+    },
+    {
+      "features": 256,
+      "mean_cosine": 0.6051405072212219,
+      "mean_relative_squared_error": 5.668211936950684,
+      "min_cosine": -0.10606226325035095,
+      "max_relative_squared_error": 36.4877815246582,
+      "state_bytes": 6291456
+    },
+    {
+      "features": 512,
+      "mean_cosine": 0.6462092399597168,
+      "mean_relative_squared_error": 4.547208309173584,
+      "min_cosine": -0.038630906492471695,
+      "max_relative_squared_error": 44.88475036621094,
+      "state_bytes": 12582912
+    },
+    {
+      "features": 1024,
+      "mean_cosine": 0.6707951426506042,
+      "mean_relative_squared_error": 3.083634853363037,
+      "min_cosine": -0.08287501335144043,
+      "max_relative_squared_error": 24.724836349487305,
+      "state_bytes": 25165824
+    }
+  ],
+  "note": "Real Phi-3.5 teacher layer; mathematically scaled positive Gaussian softmax features, posthoc read diagnostic only."
+}
