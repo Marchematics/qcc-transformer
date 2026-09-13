@@ -26,6 +26,11 @@ from torch import Tensor, nn
 
 from .model import QCCSelfAttention
 
+try:  # Optional dependency: the core retrofit remains importable without HF.
+    from transformers.cache_utils import Cache as _HFCacheBase
+except ImportError:  # pragma: no cover - exercised only without transformers
+    _HFCacheBase = object
+
 
 def _hf_rope_kwargs(config: Any, max_position_embeddings: int) -> dict[str, Any]:
     """Extract HF RoPE frequencies, including Phi3/Phi4 LongRoPE.
@@ -184,8 +189,7 @@ class _FusedQKVProjection(nn.Module):
         return self._slices(self._base(hidden))[{"q": 0, "k": 1, "v": 2}[self._kind]]
 
 
-@dataclass
-class QCCCacheHandle:
+class QCCCacheHandle(_HFCacheBase):
     """Minimal cache protocol used by common HF generation loops.
 
     A handle contains no historical K/V tensors.  It points at one adapted
@@ -194,25 +198,68 @@ class QCCCacheHandle:
     pass the handle back unchanged as ``past_key_value``.
     """
 
-    attention: QCCSelfAttention
+    def __init__(self, attention: QCCSelfAttention | None = None) -> None:
+        # Do not call Cache.__init__: it allocates layer containers intended
+        # for physical K/V tensors. QCC keeps those tensors in its own
+        # bounded attention state and exposes only logical length here.
+        self.attention = attention
+        # Cache.__len__ is used by several legacy remote-code generation
+        # helpers as a truthiness check. One placeholder layer keeps that
+        # check true without allocating a physical K/V page.
+        self.layers = [None]
+        self._owners: list[QCCSelfAttention] = []
+        if attention is not None:
+            self._owners.append(attention)
+
+    def register(self, attention: QCCSelfAttention) -> None:
+        if all(owner is not attention for owner in self._owners):
+            self._owners.append(attention)
+        if self.attention is None:
+            self.attention = attention
+
+    def _logical_length(self) -> int:
+        if not self._owners and self.attention is not None:
+            self._owners.append(self.attention)
+        return max((int(owner._seen_tokens) for owner in self._owners), default=0)
 
     def get_seq_length(self, cache_position: Optional[int] = None) -> int:
         del cache_position
-        return int(self.attention._seen_tokens)
+        return self._logical_length()
 
     def get_usable_length(self, new_seq_length: int, layer_idx: int = 0) -> int:
         del new_seq_length, layer_idx
-        return int(self.attention._seen_tokens)
+        return self._logical_length()
 
-    def to_legacy_cache(self) -> tuple[tuple[None, None], ...]:
-        """Return a shape-compatible empty legacy entry.
+    def get_max_length(self) -> int | None:
+        return None
 
-        The QCC adapter does not expose physical K/V tensors.  Consumers that
-        require legacy tensors should use the adapter's own ``past_key_value``
-        handle and must not concatenate this placeholder.
+    @property
+    def seen_tokens(self) -> int:
+        return self._logical_length()
+
+    def update(
+        self,
+        key_states: Tensor,
+        value_states: Tensor,
+        layer_idx: int,
+        cache_kwargs: Optional[dict[str, Any]] = None,
+    ) -> tuple[Tensor, Tensor]:
+        # A framework caller should never need to update this handle because
+        # HFQCCAttention owns the bounded state. Returning the incoming views
+        # keeps the Cache protocol well-formed for incidental callers.
+        del layer_idx, cache_kwargs
+        return key_states, value_states
+
+    def to_legacy_cache(self) -> "QCCCacheHandle":
+        """Keep the logical Cache object across legacy model boundaries.
+
+        Some remote-code Phi models call ``to_legacy_cache`` after the first
+        request even though subsequent calls understand the modern Cache
+        protocol. Returning this handle preserves the logical length without
+        fabricating physical K/V tensors or triggering a ``None.shape`` error.
         """
 
-        return ((None, None),)
+        return self
 
 
 class HFQCCAttention(nn.Module):
@@ -584,10 +631,34 @@ class HFQCCAttention(nn.Module):
         # local-window model.  Request boundaries are explicit through
         # ``reset_hf_qcc_cache``; the internal counter is authoritative here.
         reset = seen == 0
-        if isinstance(cache, QCCCacheHandle) and cache.attention is not self.qcc:
-            raise ValueError("past_key_value belongs to a different QCC attention layer")
+        if isinstance(cache, QCCCacheHandle):
+            # A decoder model passes one shared cache object through every
+            # layer. Registering the current owner is what lets the handle
+            # report the common logical sequence length; a per-layer identity
+            # check would reject the normal multi-layer generation path.
+            cache.register(self.qcc)
         if modern_cache_call:
             self._bind_generation_cache(cache)
+        if use_cache:
+            if isinstance(cache, QCCCacheHandle):
+                cache_handle = cache
+            else:
+                cache_handle = None
+                if cache is not None:
+                    try:
+                        cache_handle = getattr(cache, "_qcc_cache_handle", None)
+                    except (AttributeError, TypeError):
+                        cache_handle = None
+                if not isinstance(cache_handle, QCCCacheHandle):
+                    cache_handle = QCCCacheHandle(self.qcc)
+                    if cache is not None:
+                        try:
+                            setattr(cache, "_qcc_cache_handle", cache_handle)
+                        except (AttributeError, TypeError):
+                            pass
+            cache_handle.register(self.qcc)
+        else:
+            cache_handle = None
         archive_hint = hidden_states if self.qcc.archive_lexical_landmark else None
         positions = self._positions(
             position_ids, batch, length, hidden_states.device, 0 if reset else seen
@@ -636,7 +707,7 @@ class HFQCCAttention(nn.Module):
                 archive_hint=archive_hint,
                 position_embeddings=position_embeddings,
             )
-        present = QCCCacheHandle(self.qcc) if use_cache else None
+        present = cache_handle
         # Attention weights are intentionally unavailable: QCC computes a
         # bounded approximation and cannot expose the exact historical matrix.
         del output_attentions

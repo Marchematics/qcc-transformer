@@ -1014,3 +1014,24 @@ with 16.98 GiB already resident, and the 32,030-token row would require about
 61 GiB. Offloading the KV cache does not bound this attention temporary. The
 partial progress files were removed because they contain no paired QCC result;
 no lexical quality claim is made.
+
+### Exact chunked Phi Full-KV reference and lexical landmark task probe
+
+The RULER runner now offers an exact online-softmax chunker for Phi's eager
+remote attention. It bounds the temporary logits by query/key tiles while
+preserving the full-KV softmax equation, and patches all 32 Phi attention
+layers only when `--chunked-full-attention` is requested. A regression against
+PyTorch causal SDPA passes. The loader also carries a logical Cache handle
+across legacy Phi generation calls, so QCC no longer fabricates empty
+`None`-valued legacy entries; the handle is shared by all layers and reports
+one logical sequence length without physical historical KV.
+
+A valid real-model run then evaluated the lexical hidden-state archive on RULER
+row16 (7,422 tokens, `niah_multikey_2`) with a matched chunked Full-KV reference
+and 4-bit weights. Full-KV returned the correct `6569343` (score 1.0); lexical
+QCC generated a degenerate 128-token continuation, answer recall 0, and score
+0. The QCC runtime state was 6,871,449,600 bytes and peak allocated memory
+10,653,569,024 bytes. Artifact `benchmark-lexical-row15-chunked-full-v4.json`
+contains the paired result. This real task result rules out promoting the
+current lexical landmark path as the quality repair; chunked Full-KV is a
+reference-memory fix, not a QCC quality gain.

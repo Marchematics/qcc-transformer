@@ -1,7 +1,10 @@
 import json
+import pytest
+import torch
 
 from benchmarks.benchmark_hf_ruler import (
     _append_progress,
+    _chunked_causal_attention,
     _start_progress_log,
     _supports_forward_argument,
 )
@@ -36,3 +39,21 @@ def test_ruler_forward_argument_probe_handles_remote_model_signatures():
 
     assert _supports_forward_argument(Model(), "logits_to_keep")
     assert not _supports_forward_argument(LegacyModel(), "logits_to_keep")
+
+
+def test_chunked_causal_attention_matches_sdpa():
+    torch.manual_seed(7)
+    query = torch.randn(2, 3, 11, 4)
+    key = torch.randn(2, 3, 11, 4)
+    value = torch.randn_like(key)
+    actual = _chunked_causal_attention(
+        query,
+        key,
+        value,
+        query_chunk_size=3,
+        key_chunk_size=4,
+    )
+    expected = torch.nn.functional.scaled_dot_product_attention(
+        query, key, value, is_causal=True
+    )
+    torch.testing.assert_close(actual, expected, atol=1e-6, rtol=1e-5)

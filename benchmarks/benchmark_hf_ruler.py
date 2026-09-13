@@ -16,9 +16,11 @@ import json
 import math
 import sys
 import traceback
+import types
 from pathlib import Path
 
 import torch
+import torch.nn.functional as F
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from qcc_transformer import patch_hf_model, reset_hf_qcc_cache
@@ -54,6 +56,185 @@ def _supports_forward_argument(model, name: str) -> bool:
         return name in inspect.signature(model.forward).parameters
     except (TypeError, ValueError):
         return False
+
+
+def _chunked_causal_attention(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    *,
+    query_offset: int = 0,
+    query_chunk_size: int = 256,
+    key_chunk_size: int = 1024,
+    attention_mask: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Compute exact causal attention with bounded logits temporaries.
+
+    The online max/denominator/numerator update is algebraically equivalent to
+    a full softmax over the key axis.  It exists for quality references whose
+    remote-code eager implementation materializes a quadratic attention
+    matrix; it is not intended as a faster kernel.
+    """
+
+    if (
+        query.ndim != 4
+        or key.ndim != 4
+        or value.shape != key.shape
+        or query.shape[:2] != key.shape[:2]
+        or query.shape[-1] != key.shape[-1]
+    ):
+        raise ValueError("query, key, and value must have compatible rank-4 shapes")
+    if query_chunk_size <= 0 or key_chunk_size <= 0:
+        raise ValueError("attention chunk sizes must be positive")
+    batch, heads, query_tokens, dim = query.shape
+    key_tokens = key.shape[2]
+    if query_offset < 0 or query_offset + query_tokens > key_tokens:
+        raise ValueError("query_offset must place queries inside the key sequence")
+    result = torch.empty_like(query)
+    key_positions = torch.arange(key_tokens, device=key.device)
+    for query_start in range(0, query_tokens, query_chunk_size):
+        query_end = min(query_tokens, query_start + query_chunk_size)
+        query_block = query[:, :, query_start:query_end]
+        block_tokens = query_end - query_start
+        query_positions = query_offset + torch.arange(
+            query_start, query_end, device=query.device
+        )
+        running_max = torch.full(
+            (batch, heads, block_tokens), -torch.inf,
+            device=query.device, dtype=torch.float32,
+        )
+        running_den = torch.zeros_like(running_max)
+        running_num = torch.zeros(
+            batch, heads, block_tokens, dim,
+            device=query.device, dtype=torch.float32,
+        )
+        for key_start in range(0, key_tokens, key_chunk_size):
+            key_end = min(key_tokens, key_start + key_chunk_size)
+            logits = torch.matmul(
+                query_block, key[:, :, key_start:key_end].transpose(-1, -2)
+            ).float() / math.sqrt(dim)
+            valid = key_positions[key_start:key_end][None, :] <= query_positions[:, None]
+            if attention_mask is not None:
+                mask = attention_mask[..., query_start:query_end, key_start:key_end]
+                if mask.dtype == torch.bool:
+                    logits = logits.masked_fill(~mask, -torch.inf)
+                else:
+                    logits = logits + mask.to(logits.dtype)
+            logits = logits.masked_fill(~valid[None, None], -torch.inf)
+            chunk_max = logits.amax(-1)
+            next_max = torch.maximum(running_max, chunk_max)
+            old_scale = torch.where(
+                torch.isfinite(running_max),
+                torch.exp(running_max - next_max),
+                torch.zeros_like(running_max),
+            )
+            chunk_weights = torch.exp(logits - next_max.unsqueeze(-1))
+            chunk_weights = torch.where(
+                torch.isfinite(logits), chunk_weights, torch.zeros_like(chunk_weights)
+            )
+            running_den = running_den * old_scale + chunk_weights.sum(-1)
+            running_num = (
+                running_num * old_scale.unsqueeze(-1)
+                + torch.matmul(chunk_weights, value[:, :, key_start:key_end].float())
+            )
+            running_max = next_max
+        result[:, :, query_start:query_end] = (
+            running_num / running_den.clamp_min(1e-12).unsqueeze(-1)
+        ).to(result.dtype)
+    return result
+
+
+def patch_phi_full_attention_chunked(
+    model: torch.nn.Module,
+    *,
+    query_chunk_size: int = 256,
+    key_chunk_size: int = 1024,
+) -> int:
+    """Patch Phi eager attention modules with the exact chunked reference."""
+
+    if query_chunk_size <= 0 or key_chunk_size <= 0:
+        raise ValueError("attention chunk sizes must be positive")
+    layers = getattr(getattr(model, "model", None), "layers", None)
+    if layers is None:
+        raise ValueError("chunked Phi attention requires model.model.layers")
+    patched = 0
+
+    def forward(
+        module,
+        hidden_states,
+        attention_mask=None,
+        position_ids=None,
+        past_key_value=None,
+        output_attentions=False,
+        use_cache=False,
+    ):
+        if output_attentions:
+            raise ValueError("chunked Phi reference does not return attention weights")
+        batch, q_len, _ = hidden_states.shape
+        qkv = module.qkv_proj(hidden_states)
+        query_width = module.num_heads * module.head_dim
+        kv_width = module.num_key_value_heads * module.head_dim
+        query_states = qkv[..., :query_width]
+        key_states = qkv[..., query_width:query_width + kv_width]
+        value_states = qkv[..., query_width + kv_width:]
+        query_states = query_states.view(
+            batch, q_len, module.num_heads, module.head_dim
+        ).transpose(1, 2)
+        key_states = key_states.view(
+            batch, q_len, module.num_key_value_heads, module.head_dim
+        ).transpose(1, 2)
+        value_states = value_states.view(
+            batch, q_len, module.num_key_value_heads, module.head_dim
+        ).transpose(1, 2)
+        past_length = 0
+        kv_seq_len = q_len
+        if past_key_value is not None:
+            past_length = past_key_value.get_usable_length(q_len, module.layer_idx)
+            kv_seq_len += past_length
+        cos, sin = module.rotary_emb(value_states, position_ids, seq_len=kv_seq_len)
+        from transformers.models.phi3.modeling_phi3 import apply_rotary_pos_emb
+
+        query_states, key_states = apply_rotary_pos_emb(
+            query_states, key_states, cos, sin, position_ids
+        )
+        if past_key_value is not None:
+            key_states, value_states = past_key_value.update(
+                key_states,
+                value_states,
+                module.layer_idx,
+                {"sin": sin, "cos": cos},
+            )
+        if module.num_key_value_groups > 1:
+            repeat = module.num_key_value_groups
+            key_states = key_states[:, :, None].expand(
+                batch, module.num_key_value_heads, repeat, key_states.shape[2], module.head_dim
+            ).reshape(batch, module.num_heads, key_states.shape[2], module.head_dim)
+            value_states = value_states[:, :, None].expand(
+                batch, module.num_key_value_heads, repeat, value_states.shape[2], module.head_dim
+            ).reshape(batch, module.num_heads, value_states.shape[2], module.head_dim)
+        attn_output = _chunked_causal_attention(
+            query_states,
+            key_states,
+            value_states,
+            query_offset=past_length,
+            query_chunk_size=query_chunk_size,
+            key_chunk_size=key_chunk_size,
+            attention_mask=attention_mask,
+        )
+        attn_output = attn_output.transpose(1, 2).contiguous().reshape(
+            batch, q_len, module.hidden_size
+        )
+        return module.o_proj(attn_output), None, past_key_value
+
+    for layer in layers:
+        attention = getattr(layer, "self_attn", None)
+        if attention is None or not hasattr(attention, "qkv_proj"):
+            continue
+        attention.forward = types.MethodType(forward, attention)
+        patched += 1
+    if not patched:
+        raise ValueError("no Phi fused attention modules found")
+    return patched
 
 
 def _start_progress_log(path: Path, *, run_id: str | None, config: dict) -> None:
@@ -226,6 +407,12 @@ def main() -> None:
         help="attention backend for both matched Full-KV and QCC models",
     )
     parser.add_argument(
+        "--chunked-full-attention", action="store_true",
+        help="use an exact chunked-softmax Full-KV reference for eager Phi attention",
+    )
+    parser.add_argument("--full-attention-query-chunk-size", type=int, default=256)
+    parser.add_argument("--full-attention-key-chunk-size", type=int, default=1024)
+    parser.add_argument(
         "--use-triton",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -358,6 +545,10 @@ def main() -> None:
         raise ValueError("max-new-tokens must be positive")
     if args.prefill_chunk_size is not None and args.prefill_chunk_size <= 0:
         raise ValueError("prefill-chunk-size must be positive when provided")
+    if args.full_attention_query_chunk_size <= 0 or args.full_attention_key_chunk_size <= 0:
+        raise ValueError("full-attention chunk sizes must be positive")
+    if args.chunked_full_attention and args.attn_implementation != "eager":
+        raise ValueError("chunked-full-attention requires --attn-implementation eager")
     if args.skip_examples < 0:
         raise ValueError("skip-examples must be non-negative")
     records = list(_records(args.ruler_jsonl, args.max_examples, args.skip_examples))
@@ -397,10 +588,17 @@ def main() -> None:
         raise RuntimeError("model does not declare a native context length")
     if args.min_native_context is not None and (
         native_context_tokens is None or native_context_tokens < args.min_native_context
-    ):
+        ):
         raise RuntimeError(
             f"model native context {native_context_tokens} is below requested "
             f"{args.min_native_context}"
+        )
+    chunked_full_attention_layers = 0
+    if args.chunked_full_attention:
+        chunked_full_attention_layers = patch_phi_full_attention_chunked(
+            baseline,
+            query_chunk_size=args.full_attention_query_chunk_size,
+            key_chunk_size=args.full_attention_key_chunk_size,
         )
     baseline_results = _run_model(
         baseline, tokenizer, records, model_device, args.max_new_tokens, qcc=False,
@@ -590,6 +788,10 @@ def main() -> None:
         "synthetic": False,
         "official": True,
         "attn_implementation": args.attn_implementation,
+        "chunked_full_attention": args.chunked_full_attention,
+        "full_attention_query_chunk_size": args.full_attention_query_chunk_size,
+        "full_attention_key_chunk_size": args.full_attention_key_chunk_size,
+        "chunked_full_attention_layers": chunked_full_attention_layers,
         "use_triton": args.use_triton,
         "local_attention_backend": args.local_attention_backend,
         "prefill_chunk_size": args.prefill_chunk_size,
