@@ -308,6 +308,8 @@ def _run_model(
             "answers": record["outputs"],
             "length_chars": len(record["input"]),
         }
+        if "source_line" in record:
+            result["source_line"] = record["source_line"]
         generated = encoded = generation_kwargs = cache = None
         try:
             # Each RULER record is an independent serving request.  The

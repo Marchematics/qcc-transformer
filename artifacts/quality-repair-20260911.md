@@ -1360,3 +1360,16 @@ suite-level quality nor 1M retrieval or speedups. Logical parameter accounting
 now reports the correct 3,821,079,552 backbone count; 6,589,440 parameters remain
 marked trainable (0.17245%), without implying that each affects this path.
 The same-capacity Phi3 prompt-format paired comparison has begun sequentially.
+
+### Preselected cross-task follow-up
+
+The next four records are original subset lines 2,22,42,62, preserved with
+source_line in ruler-cap8192-heldout16k-input.jsonl. With the explicit Phi3
+format their token lengths are 16,157 / 16,240 / 16,234 / 16,341, all exceeding
+window4096 + foreground8192. These therefore exercise eviction, unlike 8K
+inputs at this capacity. The numeric line2 answer is near the end according to
+source metadata, so that row alone cannot establish remote retrieval. These
+records are a candidate follow-up, not an untouched validation set for all
+historical project work, and not a 128K suite. They will use matched Full-KV,
+the same 8192 BF16 configuration and 128-token output budget after the current
+row21 template comparison terminates. No follow-up scores exist yet.
