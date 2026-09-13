@@ -561,6 +561,42 @@ def test_quality_prefill_shadow_only_keeps_recurrent_output_and_populates_bank()
     assert bool(torch.isfinite(hybrid.exact_bank._scores).any())
 
 
+def test_exact_query_correction_changes_the_active_exact_read_path():
+    base = QCCArchive(
+        num_heads=1,
+        head_dim=2,
+        num_codes=1,
+        decay_rates=(0.9,),
+        window_size=2,
+        use_triton=False,
+        query_correction_rank=1,
+    )
+    hybrid = HybridQCCArchive.from_archive(
+        base,
+        exact_num_sets=1,
+        exact_ways=2,
+        exact_attention=True,
+        exact_query_correction=True,
+    )
+    with torch.no_grad():
+        hybrid.query_correction_v.zero_()
+        hybrid.query_correction_u.zero_()
+        hybrid.query_correction_v[0, 0, 0] = 1.0
+        hybrid.query_correction_u[0, 0, 1] = 1.0
+        hybrid.exact_bank.update(
+            torch.tensor([[[1.0, 1.0]]]), torch.tensor([[[10.0, 0.0]]]),
+            admission_bias=torch.tensor([[1.0]]),
+        )
+        hybrid.exact_bank.update(
+            torch.tensor([[[-1.0, -1.0]]]), torch.tensor([[[0.0, 10.0]]]),
+            admission_bias=torch.tensor([[1.0]]),
+        )
+        query = torch.tensor([[[1.0, 0.0]]])
+        corrected = hybrid._read_exact(query)[0]
+        original = hybrid.exact_bank.read_attention(query)[0]
+    assert not torch.equal(corrected, original)
+
+
 def test_hybrid_exact_shadow_uses_rotary_side_channel():
     base = QCCArchive(
         num_heads=1,

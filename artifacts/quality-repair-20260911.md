@@ -811,3 +811,15 @@ success. The artifact is `cross-read-row21-layer17.json`. Together with row6,
 the evidence ranks Q drift as a strong contributor, but does not isolate it
 from later autoregressive feedback or prove that a Q-only repair reaches the
 task targets.
+
+### Active exact-query correction hook
+
+The existing low-rank `query_correction_*` parameters previously affected only
+the recurrent archive read; quality-first exact reads bypassed them. Added an
+opt-in `exact_query_correction` path that applies the same low-rank residual to
+the exact-tier query before its FP32 attention calculation. The benchmark and
+diagnostic expose the flag; it is disabled by default and no weights were
+trained. An existing hybrid test sets a nonzero rank-1 residual and confirms
+that the active exact read changes, so future calibration can target a parameter
+that actually contributes to the deployed quality path. All 109 focused tests
+pass. This is an effective-path plumbing change, not a quality result.

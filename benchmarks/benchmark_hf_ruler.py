@@ -265,6 +265,10 @@ def main() -> None:
         help="dtype for exact K/V storage; arithmetic remains float32",
     )
     parser.add_argument(
+        "--exact-query-correction", action="store_true",
+        help="apply the existing low-rank correction to exact-tier queries (diagnostic)",
+    )
+    parser.add_argument(
         "--archive-position-invariant",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -379,6 +383,7 @@ def main() -> None:
                     "quality_block_propagation": args.quality_block_propagation,
                     "quality_prefill_shadow_only": args.quality_prefill_shadow_only,
                     "exact_storage_dtype": exact_storage_dtype,
+                    "exact_query_correction": args.exact_query_correction,
                     "exact_attention": args.exact_attention,
                     "background_size": args.background_size,
                     "block_size": args.retention_block_size,
@@ -411,6 +416,7 @@ def main() -> None:
                 "quality_block_propagation": args.quality_block_propagation,
                 "quality_prefill_shadow_only": args.quality_prefill_shadow_only,
                 "exact_storage_dtype": exact_storage_dtype,
+                "exact_query_correction": args.exact_query_correction,
                 "exact_attention": args.exact_attention,
                 "background_size": args.background_size,
                 "block_size": args.retention_block_size,
@@ -498,6 +504,7 @@ def main() -> None:
         "quality_block_propagation": args.quality_block_propagation,
         "quality_prefill_shadow_only": args.quality_prefill_shadow_only,
         "exact_storage_dtype": args.exact_storage_dtype,
+        "exact_query_correction": args.exact_query_correction,
         "exact_attention": args.exact_attention,
         "background_size": args.background_size,
         "retention_block_size": args.retention_block_size,

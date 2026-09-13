@@ -116,6 +116,7 @@ class HybridQCCArchive(QCCArchive):
         exact_attention: bool = False,
         quality_prefill_shadow_only: bool = False,
         exact_storage_dtype: torch.dtype | None = None,
+        exact_query_correction: bool = False,
         background_size: int = 0,
         block_size: int = 1,
         quality_query_tail: int | None = None,
@@ -219,6 +220,7 @@ class HybridQCCArchive(QCCArchive):
         self.quality_block_propagation = bool(quality_block_propagation)
         self.exact_attention = bool(exact_attention)
         self.quality_prefill_shadow_only = bool(quality_prefill_shadow_only)
+        self.exact_query_correction = bool(exact_query_correction)
         # Global-table writes and weighted reads never consult set routing.
         if self.exact_attention and probes == exact_num_sets:
             self.exact_bank.set_codes.requires_grad_(False)
@@ -512,6 +514,19 @@ class HybridQCCArchive(QCCArchive):
             self._admit_one(key if exact_key is None else exact_key, value, score)
 
     def _read_exact(self, query: Tensor) -> tuple[Tensor, Tensor]:
+        if self.exact_query_correction and self.query_correction_rank:
+            query_f = query.float()
+            value_v = self.query_correction_v.to(device=query.device, dtype=torch.float32)
+            value_u = self.query_correction_u.to(device=query.device, dtype=torch.float32)
+            if query.ndim == 3:
+                latent = torch.einsum("bhd,hdr->bhr", query_f, value_v)
+                delta = torch.einsum("bhr,hrd->bhd", latent, value_u)
+            elif query.ndim == 4:
+                latent = torch.einsum("bhtd,hdr->bhtr", query_f, value_v)
+                delta = torch.einsum("bhtr,hrd->bhtd", latent, value_u)
+            else:
+                raise ValueError("query must have rank 3 or 4")
+            query = query + delta.to(query.dtype)
         if self.exact_attention:
             return self.exact_bank.read_attention(query)
         if query.ndim == 4:
