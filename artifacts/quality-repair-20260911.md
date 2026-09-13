@@ -799,3 +799,15 @@ The artifact is `cross-read-row6-layer17.json`; it contains the fixed prefix
 metadata, top student token candidates, read metrics, positions, and state
 accounting. It is a diagnostic at one layer and one target, not a system-wide
 quality claim.
+
+The same fixed-prefix cross-read then completed on row21 at layer17, targeting
+the first UUID token (`target_step=49`, token `f`). Mean per-head cosine to the
+teacher remote reference was A 0.7940, B 0.8085, C 0.8137, and D 0.9143;
+relative squared errors were 0.4273, 0.4183, 0.4095, and 0.2224. Position and
+historical K/V replacement provide small improvements on this probe, while
+teacher Q remains the largest single change. The student top token at the
+fixed target is `f`; this conditional prediction does not imply free-generation
+success. The artifact is `cross-read-row21-layer17.json`. Together with row6,
+the evidence ranks Q drift as a strong contributor, but does not isolate it
+from later autoregressive feedback or prove that a Q-only repair reaches the
+task targets.

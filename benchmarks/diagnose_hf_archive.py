@@ -176,6 +176,17 @@ def cross_read_diagnostic(model, tokenizer, record, args):
         if target_step is not None:
             break
     if target_step is None:
+        generated_text = tokenizer.decode(generated_ids, skip_special_tokens=False)
+        marker = record['outputs'][0][: min(8, len(record['outputs'][0]))]
+        if marker.lower() in generated_text.lower():
+            for index in range(len(generated_ids)):
+                prefix = tokenizer.decode(
+                    generated_ids[: index + 1], skip_special_tokens=False,
+                )
+                if marker.lower() in prefix.lower():
+                    target_step = index
+                    break
+    if target_step is None:
         raise RuntimeError('teacher generation did not contain the answer token sequence')
     if target_step >= len(generated_q):
         raise RuntimeError('teacher query capture ended before the first answer token')
