@@ -1035,3 +1035,17 @@ QCC generated a degenerate 128-token continuation, answer recall 0, and score
 contains the paired result. This real task result rules out promoting the
 current lexical landmark path as the quality repair; chunked Full-KV is a
 reference-memory fix, not a QCC quality gain.
+
+### Paired real RULER quality-first run with chunked Full-KV
+
+After adding the exact chunked-softmax Full-KV reference and shared legacy Cache
+handle, a paired Phi-3.5-mini NF4 run completed on row16 (7,422 tokens,
+`niah_multikey_2`). Full-KV returned the expected `6569343` after 30 tokens
+(score 1.0). The existing future-query quality-first exact table used 24×32
+foreground slots plus 128 background slots; QCC produced a punctuation-heavy
+128-token continuation, answer recall 0, score 0. QCC runtime state was
+5,899,964,928 bytes (including RNG state), with peak allocated
+9,680,987,648 bytes. The artifact is
+`benchmark-quality-first-row16-chunked-full-v1.json`. This is an independent
+real task failure for the current quality-first path; it does not support
+promoting larger exact capacity or the lexical variant as a general repair.
