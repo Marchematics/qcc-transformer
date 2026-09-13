@@ -1106,3 +1106,9 @@ small additional gains on this probe. The student top token at the fixed
 prefix is `6`, matching the target. Artifact
 `cross-read-row16-layer17-postrope.json`. This is a conditional one-layer
 metric, not a task score or an additive error decomposition.
+
+The earlier row6/row21 layer17 and row6 layer31 cross-read artifacts were
+collected before the LongRoPE factor-selection repair. Their Q/K source
+comparisons include the pre-fix rotary mismatch and must not be used as current
+factor rankings. They remain retained for debugging history; the row16
+post-repair cross-read is the current diagnostic reference.
