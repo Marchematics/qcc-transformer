@@ -43,5 +43,7 @@
       "max_relative_squared_error": 846.167236328125
     }
   ],
-  "note": "Real Phi-3.5 teacher layer read diagnostic on a shortened RULER prompt; no generation/task score and no future-query selection."
+  "note": "Real Phi-3.5 teacher layer read diagnostic on a shortened RULER prompt; no generation/task score and no future-query selection.",
+  "read_metrics_valid": false,
+  "invalid_reason": "read_attention received rank-4 query and returned [1,32,1,96]; reference was [1,32,96]. Broadcasting compared different heads. Squeeze the singleton query dimension before computing metrics. Reported cosine and relative errors cannot support method conclusions."
 }

@@ -1165,3 +1165,21 @@ modes still retain raw keys because their admission predictor may consume them.
 The archive/attention/HF focused suite passes (97 cases). The corrected real
 model run remains outstanding. Shared scratch and the 8192-slot BF16 comparison
 are not implemented by this change.
+
+
+### Correction of two diagnostic comparisons (2026-09-14)
+
+Inspection of the actual generating scripts found two metric defects. In
+`prefill-cache-isolation-row16.json`, next_step_logits compares the student's
+next prediction against the teacher's previous prompt prediction. The 0.988135
+cosine is not a matched cached-decode fidelity measurement. Prompt-logit metrics
+are unaffected. No teacher decode reference was collected by that script.
+
+In `causal-coreset-phi-layer17.json`, read_attention returned [1,32,1,96]
+while the reference had shape [1,32,96]. Subtraction and cosine broadcast across
+heads. The reported ~0.015 cosine and relative errors are invalid and do not
+rule out Ward compression. The singleton query dimension must be removed and
+same-head shapes asserted before recomputing. Original values are preserved,
+with explicit validity annotations. The separate synthetic counterexamples
+remain separate evidence. These corrections retract the earlier conclusions
+based on these two numbers; they do not establish new quality results.

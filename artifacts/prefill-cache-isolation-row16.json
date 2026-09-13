@@ -25,7 +25,9 @@
       7423,
       7423,
       7423
-    ]
+    ],
+    "comparison_valid": false,
+    "invalid_reason": "Student after consuming one generated token was compared with teacher prompt logits. Prediction positions differ; no matched teacher decode logits were collected."
   },
   "note": "Isolation diagnostic. Prompt is shorter than the QCC window; next-step comparison uses the reference argmax token. This is not a task score."
 }
