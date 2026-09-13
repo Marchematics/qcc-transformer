@@ -269,6 +269,10 @@ def main() -> None:
         help="apply the existing low-rank correction to exact-tier queries (diagnostic)",
     )
     parser.add_argument(
+        "--active-query-correction", action="store_true",
+        help="apply the low-rank correction to the live Q used by attention (calibration path)",
+    )
+    parser.add_argument(
         "--causal-coreset", action="store_true",
         help="use the causal counted-KV coreset reference in place of future-query retention",
     )
@@ -301,6 +305,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.causal_coreset and args.quality_first:
         raise ValueError("causal-coreset is causal and cannot use future-query quality-first selection")
+    if args.active_query_correction and args.exact_query_correction:
+        raise ValueError("active-query-correction and exact-query-correction are mutually exclusive")
     if args.causal_coreset and args.background_size:
         raise ValueError("causal-coreset does not support background sampling")
     if args.coreset_capacity is not None and not args.causal_coreset:
@@ -403,6 +409,7 @@ def main() -> None:
                 num_codes=args.num_codes,
                 max_position_embeddings=native_context_tokens,
                 archive_position_invariant=args.archive_position_invariant,
+                active_query_correction=args.active_query_correction,
                 kv_head_policy=args.kv_head_policy,
                 use_triton=args.use_triton,
                 local_attention_backend=args.local_attention_backend,
@@ -416,6 +423,7 @@ def main() -> None:
                     "quality_prefill_shadow_only": args.quality_prefill_shadow_only,
                     "exact_storage_dtype": exact_storage_dtype,
                     "exact_query_correction": args.exact_query_correction,
+                    "active_query_correction": args.active_query_correction,
                     "exact_attention": args.exact_attention,
                     "background_size": args.background_size,
                     "block_size": args.retention_block_size,
@@ -431,6 +439,7 @@ def main() -> None:
                 num_codes=args.num_codes,
                 max_position_embeddings=native_context_tokens,
                 archive_position_invariant=args.archive_position_invariant,
+                active_query_correction=args.active_query_correction,
                 kv_head_policy=args.kv_head_policy,
                 use_triton=args.use_triton,
                 local_attention_backend=args.local_attention_backend,
@@ -454,6 +463,7 @@ def main() -> None:
                 num_codes=args.num_codes,
                 max_position_embeddings=native_context_tokens,
                 archive_position_invariant=args.archive_position_invariant,
+                active_query_correction=args.active_query_correction,
                 kv_head_policy=args.kv_head_policy,
                 use_triton=args.use_triton,
                 local_attention_backend=args.local_attention_backend,
@@ -472,6 +482,7 @@ def main() -> None:
                 "quality_prefill_shadow_only": args.quality_prefill_shadow_only,
                 "exact_storage_dtype": exact_storage_dtype,
                 "exact_query_correction": args.exact_query_correction,
+                "active_query_correction": args.active_query_correction,
                 "exact_attention": args.exact_attention,
                 "background_size": args.background_size,
                 "block_size": args.retention_block_size,
@@ -565,6 +576,7 @@ def main() -> None:
         "quality_prefill_shadow_only": args.quality_prefill_shadow_only,
         "exact_storage_dtype": args.exact_storage_dtype,
         "exact_query_correction": args.exact_query_correction,
+        "active_query_correction": args.active_query_correction,
         "causal_coreset": args.causal_coreset,
         "coreset_capacity": args.coreset_capacity,
         "coreset_merge_policy": args.coreset_merge_policy,

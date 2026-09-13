@@ -623,6 +623,28 @@ def test_exact_query_correction_changes_the_active_exact_read_path():
     assert not torch.equal(corrected, original)
 
 
+def test_active_query_correction_changes_live_attention_query():
+    attention = QCCSelfAttention(
+        8,
+        2,
+        window_size=2,
+        num_codes=1,
+        use_triton=False,
+        rope_theta=10000,
+        archive_query_correction_rank=1,
+        active_query_correction=True,
+    )
+    query = torch.tensor([[[1.0, 2.0, 3.0, 4.0], [2.0, 1.0, 0.0, -1.0]]])
+    with torch.no_grad():
+        original = attention._apply_active_query_correction(query)
+        attention.archive.query_correction_v.zero_()
+        attention.archive.query_correction_u.zero_()
+        attention.archive.query_correction_v[0, 0, 0] = 1.0
+        attention.archive.query_correction_u[0, 0, 1] = 2.0
+        corrected = attention._apply_active_query_correction(query)
+    assert not torch.equal(corrected, original)
+
+
 def test_hybrid_exact_shadow_uses_rotary_side_channel():
     base = QCCArchive(
         num_heads=1,

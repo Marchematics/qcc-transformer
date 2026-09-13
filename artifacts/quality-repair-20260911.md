@@ -932,3 +932,15 @@ the artifact is `causal-selection-phi-layer17.json`. The gap between causal
 static selection and the query oracle shows that preserving original K/V avoids
 the Ward-mean failure but does not by itself solve unknown-future-query
 selection.
+
+### Active query correction plumbing
+
+The existing rank-limited query factors can now optionally correct the live
+projected Q before RoPE, local attention, archive addressing, and exact reads
+(`active_query_correction=True`). The previous archive residual only changed a
+returned archive vector, so it could not repair the Q drift observed by the
+fixed-prefix probes. The new path is zero-initialized, mutually exclusive with
+the exact-read-only correction to prevent double application, and exposed by
+both calibration CLIs and the RULER benchmark. A focused test confirms that a
+nonzero factor changes the live query; the full local suite remains green. No
+weights have been trained and no quality improvement is claimed yet.

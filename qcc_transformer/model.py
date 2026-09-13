@@ -1357,6 +1357,7 @@ class QCCSelfAttention(nn.Module):
         archive_kernel_features: bool = False,
         archive_global_normalization: bool = True,
         archive_query_correction_rank: int = 8,
+        active_query_correction: bool = False,
         archive_lexical_landmark: bool = False,
         archive_position_invariant: bool = False,
         local_attention_backend: str = "sdpa",
@@ -1473,6 +1474,7 @@ class QCCSelfAttention(nn.Module):
             global_normalization=archive_global_normalization,
             query_correction_rank=archive_query_correction_rank,
         )
+        self.active_query_correction = bool(active_query_correction)
         self.archive_read_stride = archive_read_stride
         self.archive_lexical_landmark = archive_lexical_landmark
         # RoPE is required for exact local attention, but an archive response
@@ -1711,6 +1713,35 @@ class QCCSelfAttention(nn.Module):
                 repeat, dim=-2
             ).reshape(*v.shape[:-1], self.d_model)
         return q, k, v, gate
+
+    def _apply_active_query_correction(self, query: Tensor) -> Tensor:
+        """Apply the optional low-rank correction to the live attention query.
+
+        The archive-level residual historically corrected only a returned
+        archive value.  This opt-in path changes the actual Q used by local,
+        archive, and exact attention, which makes its calibration target match
+        the deployed computation.  Zero-initialized output factors preserve
+        the pretrained path before calibration.
+        """
+
+        if not self.active_query_correction or not self.archive.query_correction_rank:
+            return query
+        query_f = query.float()
+        value_v = self.archive.query_correction_v.to(
+            device=query.device, dtype=torch.float32
+        )
+        value_u = self.archive.query_correction_u.to(
+            device=query.device, dtype=torch.float32
+        )
+        if query.ndim == 3:
+            latent = torch.einsum("bhd,hdr->bhr", query_f, value_v)
+            delta = torch.einsum("bhr,hrd->bhd", latent, value_u)
+        elif query.ndim == 4:
+            latent = torch.einsum("bhtd,hdr->bhtr", query_f, value_v)
+            delta = torch.einsum("bhtr,hrd->bhtd", latent, value_u)
+        else:
+            raise ValueError("query must have rank 3 or 4")
+        return query + delta.to(query.dtype)
 
     def _local_window_attention(
         self, query: Tensor, keys: Tensor, values: Tensor, *, old_length: int
@@ -2224,6 +2255,7 @@ class QCCSelfAttention(nn.Module):
             self.reset_cache(bsz, device=hidden.device)
         q_proj, k_proj, v_proj, gate_proj = self._project_qkv_gate(hidden[:, None])
         q_raw = self._split_heads(q_proj)[:, :, 0]
+        q_raw = self._apply_active_query_correction(q_raw)
         key_raw = self._split_heads(k_proj)[:, :, 0]
         value = self._split_heads(v_proj)[:, :, 0]
         lexical_q, lexical_k, lexical_v = self._lexical_archive_triplet(archive_hint)
@@ -2436,6 +2468,7 @@ class QCCSelfAttention(nn.Module):
             self.reset_cache(bsz, device=hidden.device)
         q_proj, k_proj, v_proj, gate_proj = self._project_qkv_gate(hidden)
         q_raw = self._split_heads(q_proj)
+        q_raw = self._apply_active_query_correction(q_raw)
         k_raw = self._split_heads(k_proj)
         v = self._split_heads(v_proj)
         lexical_q, lexical_k, lexical_v = self._lexical_archive_triplet(archive_hint)
@@ -3108,6 +3141,7 @@ class QCCSelfAttention(nn.Module):
         bsz, length, _ = hidden.shape
         q_proj, k_proj, v_proj, gate_proj = self._project_qkv_gate(hidden)
         q_raw = self._split_heads(q_proj)
+        q_raw = self._apply_active_query_correction(q_raw)
         k_raw = self._split_heads(k_proj)
         v = self._split_heads(v_proj)
         if position_ids is None:

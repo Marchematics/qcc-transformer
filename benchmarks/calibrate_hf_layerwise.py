@@ -821,6 +821,10 @@ def main() -> None:
         default=8,
         help="rank of the zero-initialized query-conditioned archive residual",
     )
+    parser.add_argument(
+        "--active-query-correction", action="store_true",
+        help="apply the low-rank residual to the live Q used by attention",
+    )
     parser.add_argument("--max-tokens", type=int, default=2048)
     parser.add_argument(
         "--archive-scan-block-size",
@@ -1088,6 +1092,7 @@ def main() -> None:
         archive_scan_block_size=args.archive_scan_block_size,
         archive_global_normalization=args.archive_global_normalization,
         archive_query_correction_rank=args.archive_query_correction_rank,
+        active_query_correction=args.active_query_correction,
         kv_head_policy=args.kv_head_policy,
         gate_bias_init=args.gate_bias_init,
     )
@@ -1423,6 +1428,7 @@ def main() -> None:
             "archive_scan_block_size": args.archive_scan_block_size,
             "archive_global_normalization": args.archive_global_normalization,
             "archive_query_correction_rank": args.archive_query_correction_rank,
+            "active_query_correction": args.active_query_correction,
             "archive_query_scale_selector": args.archive_query_correction_rank > 0,
             "archive_position_invariant": args.archive_position_invariant,
             "patched_layers": replaced,
@@ -1476,6 +1482,7 @@ def main() -> None:
         "archive_scan_block_size": args.archive_scan_block_size,
         "archive_global_normalization": args.archive_global_normalization,
         "archive_query_correction_rank": args.archive_query_correction_rank,
+        "active_query_correction": args.active_query_correction,
         "archive_query_scale_selector": args.archive_query_correction_rank > 0,
         "train_mean_logit_cosine": float(train_cosine.item()),
         "train_top1_agreement": float(train_agreement.item()),

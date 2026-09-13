@@ -118,6 +118,7 @@ class HybridQCCArchive(QCCArchive):
         quality_prefill_shadow_only: bool = False,
         exact_storage_dtype: torch.dtype | None = None,
         exact_query_correction: bool = False,
+        active_query_correction: bool = False,
         causal_coreset: bool = False,
         coreset_capacity: int | None = None,
         coreset_merge_policy: str = "ward",
@@ -148,6 +149,8 @@ class HybridQCCArchive(QCCArchive):
                 raise ValueError("coreset_capacity must be positive")
         elif coreset_capacity is not None:
             raise ValueError("coreset_capacity requires causal_coreset")
+        if active_query_correction and exact_query_correction:
+            raise ValueError("active_query_correction and exact_query_correction cannot both be enabled")
         self.quality_query_tail = quality_query_tail
         if active_codes is not None or lazy_decay:
             raise ValueError(
@@ -257,6 +260,7 @@ class HybridQCCArchive(QCCArchive):
         self.exact_attention = bool(exact_attention)
         self.quality_prefill_shadow_only = bool(quality_prefill_shadow_only)
         self.exact_query_correction = bool(exact_query_correction)
+        self.active_query_correction = bool(active_query_correction)
         if self.causal_coreset:
             # The causal coreset is a parameter-free response operator.  The
             # recurrent codebook, admission predictor, and learned blend are
@@ -568,7 +572,7 @@ class HybridQCCArchive(QCCArchive):
             self._admit_one(key if exact_key is None else exact_key, value, score)
 
     def _read_exact(self, query: Tensor) -> tuple[Tensor, Tensor]:
-        if self.exact_query_correction and self.query_correction_rank:
+        if self.exact_query_correction and not self.active_query_correction and self.query_correction_rank:
             query_f = query.float()
             value_v = self.query_correction_v.to(device=query.device, dtype=torch.float32)
             value_u = self.query_correction_u.to(device=query.device, dtype=torch.float32)

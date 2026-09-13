@@ -158,6 +158,10 @@ def main() -> None:
         help="rank of the zero-initialized query-conditioned archive residual",
     )
     parser.add_argument(
+        "--active-query-correction", action="store_true",
+        help="apply the low-rank residual to the live Q used by attention",
+    )
+    parser.add_argument(
         "--archive-scan-block-size",
         type=int,
         default=256,
@@ -288,6 +292,7 @@ def main() -> None:
         archive_scan_block_size=args.archive_scan_block_size,
         archive_global_normalization=args.archive_global_normalization,
         archive_query_correction_rank=args.archive_query_correction_rank,
+        active_query_correction=args.active_query_correction,
         kv_head_policy=args.kv_head_policy,
         gate_bias_init=args.gate_bias_init,
     )
@@ -398,6 +403,7 @@ def main() -> None:
             "archive_scan_block_size": args.archive_scan_block_size,
             "archive_global_normalization": args.archive_global_normalization,
             "archive_query_correction_rank": args.archive_query_correction_rank,
+            "active_query_correction": args.active_query_correction,
             "archive_query_scale_selector": args.archive_query_correction_rank > 0,
             "code_init": args.code_init,
             "code_init_tokens": args.code_init_tokens,
