@@ -35167,5 +35167,7 @@
     },
     "rng_state_bytes": 512,
     "total_bytes": 5606289920
-  }
+  },
+  "query_alignment_valid": false,
+  "query_alignment_error": "Teacher Q was generated_q_rot[target_step], after consuming target token; student Q was from the prefix before that token. Teacher Q and reference must instead use teacher_rot_q[:,:,-1]. Existing read metrics cannot rank Q versus KV versus selection causes."
 }

@@ -224,13 +224,16 @@ def cross_read_diagnostic(model, tokenizer, record, args):
                     break
     if target_step is None:
         raise RuntimeError('teacher generation did not contain the answer token sequence')
-    if target_step >= len(generated_q):
+    if target_step > len(generated_q):
         raise RuntimeError('teacher query capture ended before the first answer token')
     teacher_raw_k = torch.cat([teacher['raw_k'], *generated_k[:target_step]], dim=2)
     teacher_values = torch.cat([teacher['values'], *generated_v[:target_step]], dim=2)
     teacher_rot_q = torch.cat([teacher['rot_q'], *generated_q_rot[:target_step]], dim=2)
     teacher_rot_k = torch.cat([teacher['rot_k'], *generated_k_rot[:target_step]], dim=2)
-    teacher_q_target = generated_q_rot[target_step][:, :, 0]
+    # The prompt query predicts generated token 0; generated query j is
+    # produced after consuming token j and predicts token j+1. Use the last
+    # query in the exact shared input prefix, before consuming the target.
+    teacher_q_target = teacher_rot_q[:, :, -1]
 
     model.requires_grad_(False)
     names = patch_hf_model_hybrid(
@@ -332,6 +335,8 @@ def cross_read_diagnostic(model, tokenizer, record, args):
     top = torch.topk(student_output.logits[0, -1].float(), 5)
     result = dict(
         record=args.record, layer=layer, target_step=target_step,
+        query_absolute_position=prompt_length + target_step - 1,
+        teacher_query_alignment="last position of the shared input prefix",
         target_token_id=int(generated_ids[target_step]),
         target_token=tokenizer.decode([generated_ids[target_step]]),
         teacher_generated_prefix=tokenizer.decode(generated_ids[:target_step]),

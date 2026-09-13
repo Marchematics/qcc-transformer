@@ -1284,3 +1284,17 @@ with 128 background slots and FP32 replacement scores. This validates original
 BF16 K/V storage on this paired real run. It does not yet establish larger
 capacity quality. The queued row21 experiment with 8192 BF16 foreground slots
 has started after this process terminated, still using one GPU.
+
+
+### Fixed-prefix teacher-query index correction
+
+The cross-read diagnostic selected generated_q_rot[target_step], whose input
+already includes the target token, whereas the student was fed only the prefix
+before it. The teacher query and its reference output were one position late.
+It now uses teacher_rot_q[:, :, -1], the last query of the same constructed
+input prefix used for student collection, including target_step=0. Reports
+record the absolute query position. All existing cross-read artifacts, including
+the post-LongRoPE row16 probe, are annotated query_alignment_valid=false;
+claims ranking Q drift from those metrics are withdrawn pending aligned replay.
+Raw metrics are retained. This bug concerns diagnostics, not the separate
+free-generation RULER records or measured reclamation bytes.
