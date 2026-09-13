@@ -1544,3 +1544,13 @@ No128K/1M or serving metric is measured by this run.
 The original process completed successfully. The queued native Phi causal
 block comparison has now started on the same GPU, loading the checkpoint
 with its prespecified row16/row21 inputs and configuration.
+
+### Native Phi causal-block all-fit row16 passes
+
+The causal-block candidate completed source row16 (7,441 Phi3-formatted
+tokens). Full-KV and QCC both output `6569343.` and terminate after10 tokens;
+recall and completion are1. This length fits window4096 plus8192 foreground
+slots, so it checks the native all-fit inference path rather than retention
+quality under eviction. QCC owned state is4,995,568,640 bytes, peak allocated
+8,893,238,784 bytes. Matching generation does not establish identical logits
+at every prediction position. The eviction-case row21 remains running.
