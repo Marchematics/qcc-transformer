@@ -737,7 +737,7 @@ def main() -> None:
     baseline_by_line = {item["line"]: item for item in baseline_results}
     qcc_by_line = {item["line"]: item for item in qcc_results}
 
-    def paired_ratios(field: str) -> dict[str, float]:
+    def paired_ratios(field: str, metric: str = "score") -> dict[str, float | None]:
         full_counts: dict[str, list[float]] = {}
         qcc_counts: dict[str, list[float]] = {}
         for line, full_row in baseline_by_line.items():
@@ -751,12 +751,12 @@ def main() -> None:
             full_counts.setdefault(key, [0, 0])
             qcc_counts.setdefault(key, [0, 0])
             full_counts[key][0] += 1
-            full_counts[key][1] += full_row["score"]
-            qcc_counts[key][1] += qcc_row["score"]
-        ratios: dict[str, float] = {}
+            full_counts[key][1] += full_row.get(metric, 0.0)
+            qcc_counts[key][1] += qcc_row.get(metric, 0.0)
+        ratios: dict[str, float | None] = {}
         for key, (count, correct) in full_counts.items():
             if correct <= 0:
-                ratios[key] = 0.0
+                ratios[key] = None
             else:
                 ratios[key] = (qcc_counts[key][1] / count) / (correct / count)
         return ratios
@@ -768,8 +768,17 @@ def main() -> None:
             for key, value in paired_ratios("length_bucket").items()
         },
     }
+    full_recall = sum(row.get("answer_recall", 0.0) for row in baseline_results)
+    qcc_recall = sum(row.get("answer_recall", 0.0) for row in qcc_results)
     result = {
         "schema": "qcc-ruler-v1",
+        "answer_recall_summary": {
+            "full_kv": full_recall / len(records),
+            "qcc": qcc_recall / len(records),
+            "retention": qcc_recall / full_recall if full_recall > 0 else None,
+            "retention_by_task": paired_ratios("task", "answer_recall"),
+            "retention_by_length": paired_ratios("length_bucket", "answer_recall"),
+        },
         "pretrained_parameters": pretrained_parameter_count,
         "pretrained_storage_elements": pretrained_storage_elements,
         "parameter_count_method": "transformers.num_parameters",

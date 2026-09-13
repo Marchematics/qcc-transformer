@@ -1213,3 +1213,16 @@ for Phi, 6,589,440 / 3,821,079,552 is approximately 0.17245%, not the fraction
 obtained using 2,009,140,224 packed elements. This does not establish that all
 reported trainable parameters contribute to the active inference output.
 The running state-reclaim-v2 process predates this metadata correction.
+
+### Corrected reclamation real-model result
+
+The row16 state-reclaim-v2 paired run completed: both Full-KV and QCC return
+6569343 and finish normally after 30 generated tokens. QCC owns 4,162,737,152
+bytes, compared with 5,899,964,928 previously (29.44% less). Peak allocated
+is 7,944,146,944 bytes. This validates recurrence/raw-key reclamation on one
+NF4 record with unchanged 768+128 capacity. It does not validate the subsequent
+scratch release, BF16 bank storage, larger capacity, or suite-level quality.
+
+RULER reports now additionally summarize answer recall and its paired ratios by
+task and length. Existing completion-weighted score fields remain distinct.
+A zero Full-KV denominator yields null rather than a misleading zero ratio.
