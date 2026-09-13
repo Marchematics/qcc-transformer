@@ -1501,3 +1501,13 @@ Full-KV and quality-first 8192 BF16 QCC output exactly `5528843.`, finish at
 the input end, so this paired success is not evidence of reliable distant
 retrieval. Three QCC records remain pending. The partial progress and log
 are preserved as an ongoing run; no four-task aggregate is available.
+
+### Second completed 16K cross-task pair: matching UUID failure
+
+Source line22 (niah_multikey_3, 16,240 tokens) completed. Full-KV and QCC
+produce the identical wrong string `: b4cec493-2f7f-4f6e-9d30-80e4d2f0030a.`
+in 38 tokens, ending normally. The target is
+`41004534-dab4-440d-8a49-0d5b1afba8f8`; recall and completion are zero on both
+sides. This is matching generated behavior, not successful retrieval, and
+the per-task relative ratio is undefined. QCC state remains4,996,355,072
+bytes; peak allocated10,619,932,160 bytes. Two QCC records remain pending.
