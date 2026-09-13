@@ -85,6 +85,8 @@ def test_causal_coreset_matches_full_kv_before_capacity_is_reached() -> None:
     torch.testing.assert_close(actual, expected, atol=1e-6, rtol=1e-5)
     assert attention.archive.causal_coreset is True
     assert attention.archive.exact_bank.state_bytes() == attention.archive.exact_state_bytes()
+    assert not any(parameter.requires_grad for parameter in attention.archive.parameters())
+    assert not any(parameter.requires_grad for parameter in attention.gate.parameters())
 
 
 @pytest.mark.parametrize('block_size', [1, 2])

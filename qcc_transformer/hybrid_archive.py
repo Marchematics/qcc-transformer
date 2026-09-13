@@ -255,6 +255,13 @@ class HybridQCCArchive(QCCArchive):
         self.exact_attention = bool(exact_attention)
         self.quality_prefill_shadow_only = bool(quality_prefill_shadow_only)
         self.exact_query_correction = bool(exact_query_correction)
+        if self.causal_coreset:
+            # The causal coreset is a parameter-free response operator.  The
+            # recurrent codebook, admission predictor, and learned blend are
+            # obsolete in this mode; keeping them trainable would report
+            # adapter capacity for a path that cannot affect its output.
+            for parameter in self.parameters():
+                parameter.requires_grad_(False)
         # Global-table writes and weighted reads never consult set routing.
         if (
             not self.causal_coreset
@@ -823,6 +830,12 @@ def upgrade_qcc_attention(
         raise TypeError("attention must be QCCSelfAttention")
     archive = HybridQCCArchive.from_archive(attention.archive, **hybrid_kwargs)
     attention.archive = archive
+    if archive.causal_coreset:
+        # Exact mass merging bypasses the learned local/archive gate.  Freeze
+        # it alongside the obsolete recurrent parameters so calibration counts
+        # only parameters that can change this deployment path.
+        for parameter in attention.gate.parameters():
+            parameter.requires_grad_(False)
     return archive
 
 

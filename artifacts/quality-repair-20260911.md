@@ -886,3 +886,9 @@ probes; `merge_policy="ward"` remains the default transparent geometric
 reference. Both policies keep the same state bound and are chunk invariant. A
 past/current-query objective cannot guarantee an unseen future query, so this is
 an experimental comparison hook, not a claim of future-query quality.
+
+The causal path now freezes the obsolete recurrent codebook, admission
+predictor, exact blend, and attention gate at construction. Exact mass merging
+bypasses those parameters, so they are no longer counted as trainable capacity
+for this deployment mode. This keeps the causal operator aligned with the
+report's requirement that calibration parameters must affect the active output.
