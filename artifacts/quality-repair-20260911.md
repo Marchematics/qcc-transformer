@@ -1134,3 +1134,14 @@ synchronizes QCC state only when a native Phi prepare call explicitly drops an
 existing cache. CPU tests cover both behaviours; the full suite passes. The
 model-level cache-rebuild path still needs a real crossing test before it is
 used as a production compatibility guarantee.
+
+### Real Phi cache-rebuild boundary check
+
+A real Phi-3.5 NF4 QCC generation with a 4,096-token prompt and two requested
+new tokens crossed the native short-to-long transition. The installed Phi
+prepare path was wrapped, explicitly discarded its existing cache once, and
+all 32 QCC layers ended at logical length 4,097 (rather than retaining the old
+4,096-token state and appending a second full prefix). This verifies the reset
+control flow in the current environment. The check measures state continuity,
+not task quality or Full-KV parity; the generated continuation was not used as
+a benchmark result. Artifact `cache-rebuild-phi-4096.json`.

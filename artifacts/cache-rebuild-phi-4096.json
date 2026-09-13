@@ -1,0 +1,13 @@
+{
+  "model": "/datasets/ComfyUI/models/LLM/Phi-3.5-mini-instruct",
+  "prompt_tokens": 4096,
+  "generated_tokens": 2,
+  "length_min": 4097,
+  "length_max": 4097,
+  "unique_lengths": [
+    4097
+  ],
+  "expected_after_two_tokens": 4098,
+  "patch_wrapped_prepare": true,
+  "note": "Real Phi QCC generation crossing the native 4096 LongRoPE rebuild boundary; no Full-KV comparison or task score."
+}
