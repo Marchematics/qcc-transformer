@@ -97,6 +97,54 @@ def test_attention_current_block_normalizes_with_empty_and_populated_heads():
     torch.testing.assert_close(log_z, expected_z)
 
 
+@pytest.mark.parametrize('background_size', [0, 3])
+@pytest.mark.parametrize('dtype', [torch.float32, torch.bfloat16])
+def test_block_commit_reads_are_causal_and_independent_of_api_chunks(background_size, dtype):
+    torch.manual_seed(712)
+    def make_bank(sets=2):
+        return SetAssociativeLandmarkBank(
+            2, 4, num_sets=sets, ways=4, probe_sets=sets, block_size=4,
+            background_size=background_size, storage_dtype=dtype,
+        )
+    keys = torch.randn(1, 2, 37, 4)
+    values = torch.randn_like(keys)
+    queries = torch.randn_like(keys)
+    scores = torch.randn(1, 2, 37)
+    whole = make_bank()
+    initial_bytes = whole.state_bytes()
+    expected, expected_z = whole.update_read_chunk(keys, values, queries, admission_score=scores)
+    for boundaries in (list(range(1, 38)), [3, 9, 10, 24, 37]):
+        split = make_bank()
+        outputs, partitions = [], []
+        start = 0
+        for end in boundaries:
+            out, z = split.update_read_chunk(
+                keys[:, :, start:end], values[:, :, start:end], queries[:, :, start:end],
+                admission_score=scores[:, :, start:end],
+            )
+            outputs.append(out)
+            partitions.append(z)
+            start = end
+        torch.testing.assert_close(torch.cat(outputs, 2), expected)
+        torch.testing.assert_close(torch.cat(partitions, 2), expected_z)
+        torch.testing.assert_close(split._keys, whole._keys)
+        torch.testing.assert_close(split._scores, whole._scores)
+        assert split.state_bytes() == initial_bytes
+    changed = make_bank()
+    changed_keys, changed_values, changed_scores = keys.clone(), values.clone(), scores.clone()
+    changed_keys[:, :, 19:] *= -5
+    changed_values[:, :, 19:] += 50
+    changed_scores[:, :, 19:] += 100
+    out, _ = changed.update_read_chunk(changed_keys, changed_values, queries, admission_score=changed_scores)
+    torch.testing.assert_close(out[:, :, :19], expected[:, :, :19])
+    all_fit = make_bank(10)
+    out, _ = all_fit.update_read_chunk(keys, values, queries, admission_score=scores)
+    reference = torch.nn.functional.scaled_dot_product_attention(
+        queries, keys.to(dtype).float(), values.to(dtype).float(), is_causal=True,
+    )
+    torch.testing.assert_close(out, reference, atol=1e-6, rtol=1e-5)
+
+
 def test_background_reservoir_sampling_is_independent_per_batch_request():
     def make_bank():
         return SetAssociativeLandmarkBank(

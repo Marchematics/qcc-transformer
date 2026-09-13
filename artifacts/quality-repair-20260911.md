@@ -1413,3 +1413,22 @@ parameters before comparing request states. No new test file was introduced.
 This fixes the existing extra-KV interface for causal block reads; it does
 not establish HF causal-writer integration or a generation improvement.
 The running four-task experiment retains its already loaded implementation.
+
+### Causal block commit in the existing exact bank
+
+SetAssociativeLandmarkBank.update_read_chunk now reads the retained bank,
+existing pending entries and the causally visible incoming entries before
+committing a completed retention block. It reuses the existing pending
+K/V/scores and counter, introducing no new persistent state object. Commit
+boundaries follow pending_count across calls. Incoming entries use the same
+storage precision as pending entries, preventing API splits from changing
+when storage rounding occurs.
+
+Four CPU configurations (FP32/BF16 storage, zero/three background slots) pass
+comparisons for one-token and irregular API chunks, suffix independence,
+bounded state bytes, and all-fit equality to direct causal SDPA. Tests remain
+in test_associative.py. Scores are caller-supplied and must themselves be
+causal; this interface does not make the existing future-tail scorer causal.
+Reads are batched up to logical commit boundaries; admission still uses the
+existing token loop. HF integration and GPU throughput are not established.
+The active four-task candidate is unchanged.

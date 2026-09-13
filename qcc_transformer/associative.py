@@ -489,6 +489,45 @@ class SetAssociativeLandmarkBank(nn.Module):
             return response.squeeze(2), partition.squeeze(2)
         return response, partition
 
+    @torch.no_grad()
+    def update_read_chunk(
+        self, key: Tensor, value: Tensor, query: Tensor, *,
+        admission_score: Tensor,
+    ) -> tuple[Tensor, Tensor]:
+        """Read evicted KV causally, then commit at fixed block boundaries.
+
+        Scores must come from information available when each event arrives.
+        Pending KV remain exact until the logical block's final query has read
+        them. External call boundaries do not trigger retention decisions.
+        """
+        if key.shape != value.shape or key.shape != query.shape or key.ndim != 4:
+            raise ValueError("key, value and query must share [batch, heads, tokens, dim]")
+        if admission_score.shape != key.shape[:-1]:
+            raise ValueError("admission_score must have shape [batch, heads, tokens]")
+        if key.shape[2]:
+            self._ensure_state(key[:, :, 0])
+        output = torch.empty_like(query)
+        partition = torch.empty(query.shape[:-1], device=query.device, dtype=torch.float32)
+        start = 0
+        while start < key.shape[2]:
+            pending = self._pending_count if self.block_size > 1 else 0
+            end = min(key.shape[2], start + self.block_size - pending)
+            # Match the precision of already-pending entries across API calls.
+            keys = key[:, :, start:end].to(self._keys.dtype)
+            values = value[:, :, start:end].to(self._values.dtype)
+            response, log_z = self.read_attention(
+                query[:, :, start:end], extra_keys=keys, extra_values=values,
+            )
+            output[:, :, start:end] = response
+            partition[:, :, start:end] = log_z
+            for index in range(end - start):
+                self.update(
+                    keys[:, :, index], values[:, :, index],
+                    admission_bias=admission_score[:, :, start + index],
+                )
+            start = end
+        return output, partition
+
     def read(self, query: Tensor, *, hard: bool = False) -> tuple[Tensor, Tensor]:
         """Read top routed sets; return response and best cosine confidence."""
 
