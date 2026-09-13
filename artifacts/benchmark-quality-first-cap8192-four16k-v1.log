@@ -12,3 +12,142 @@ past_key_values should not be None in from_legacy_cache()
 {"event": "record", "run_id": "quality-first-cap8192-four16k-v1", "mode": "qcc", "line": 1, "answers": ["5528843"], "length_chars": 43911, "source_line": 2, "tokens": 16157, "task": "niah_multikey_2", "length_bucket": "8-32K", "prediction": "5528843.", "generated_tokens": 10, "reached_output_limit": false, "answer_recall": 1.0, "score": 1.0, "correct": true, "qcc_runtime_state": {"tensor_storage_by_device": {"cuda:0": 4996354560}, "rng_state_bytes": 512, "total_bytes": 4996355072}, "peak_cuda_allocated_bytes": 10601467904}
 {"event": "record", "run_id": "quality-first-cap8192-four16k-v1", "mode": "qcc", "line": 2, "answers": ["41004534-dab4-440d-8a49-0d5b1afba8f8"], "length_chars": 23159, "source_line": 22, "tokens": 16240, "task": "niah_multikey_3", "length_bucket": "8-32K", "prediction": ": b4cec493-2f7f-4f6e-9d30-80e4d2f0030a.", "generated_tokens": 38, "reached_output_limit": false, "answer_recall": 0.0, "score": 0.0, "correct": false, "qcc_runtime_state": {"tensor_storage_by_device": {"cuda:0": 4996354560}, "rng_state_bytes": 512, "total_bytes": 4996355072}, "peak_cuda_allocated_bytes": 10619932160}
 {"event": "record", "run_id": "quality-first-cap8192-four16k-v1", "mode": "qcc", "line": 3, "answers": ["4250981"], "length_chars": 58522, "source_line": 42, "tokens": 16234, "task": "niah_single_1", "length_bucket": "8-32K", "prediction": "4250981.", "generated_tokens": 10, "reached_output_limit": false, "answer_recall": 1.0, "score": 1.0, "correct": true, "qcc_runtime_state": {"tensor_storage_by_device": {"cuda:0": 4996354560}, "rng_state_bytes": 512, "total_bytes": 4996355072}, "peak_cuda_allocated_bytes": 10619796480}
+{"event": "record", "run_id": "quality-first-cap8192-four16k-v1", "mode": "qcc", "line": 4, "answers": ["KVFHW", "FERDZ", "NGIIT", "GQUVY", "HEEBD"], "length_chars": 58627, "source_line": 62, "tokens": 16341, "task": "vt", "length_bucket": "8-32K", "prediction": "KVFHW NGIIT GQUVY HEEBD\n\nNote: The variable OPU is not listed among the variables assigned the value 12859, but it is mentioned in the assignment to AMQ. OPU is assigned the value of VAR HGM, which is not explicitly given a value in the text. Therefore, based on the provided text, we cannot determine the value of OPU. The variables assigned the value 12859 are: KVFHW NGIIT GQUVY HEEBD\n\nIf OPU is indeed assigned the value", "generated_tokens": 128, "reached_output_limit": true, "answer_recall": 0.8, "score": 0.0, "correct": false, "qcc_runtime_state": {"tensor_storage_by_device": {"cuda:0": 4996354560}, "rng_state_bytes": 512, "total_bytes": 4996355072}, "peak_cuda_allocated_bytes": 10639253504}
+{
+  "model": "/datasets/ComfyUI/models/LLM/Phi-3.5-mini-instruct",
+  "records": 4,
+  "patched_layers": [
+    "model.layers.0.self_attn",
+    "model.layers.1.self_attn",
+    "model.layers.2.self_attn",
+    "model.layers.3.self_attn",
+    "model.layers.4.self_attn",
+    "model.layers.5.self_attn",
+    "model.layers.6.self_attn",
+    "model.layers.7.self_attn",
+    "model.layers.8.self_attn",
+    "model.layers.9.self_attn",
+    "model.layers.10.self_attn",
+    "model.layers.11.self_attn",
+    "model.layers.12.self_attn",
+    "model.layers.13.self_attn",
+    "model.layers.14.self_attn",
+    "model.layers.15.self_attn",
+    "model.layers.16.self_attn",
+    "model.layers.17.self_attn",
+    "model.layers.18.self_attn",
+    "model.layers.19.self_attn",
+    "model.layers.20.self_attn",
+    "model.layers.21.self_attn",
+    "model.layers.22.self_attn",
+    "model.layers.23.self_attn",
+    "model.layers.24.self_attn",
+    "model.layers.25.self_attn",
+    "model.layers.26.self_attn",
+    "model.layers.27.self_attn",
+    "model.layers.28.self_attn",
+    "model.layers.29.self_attn",
+    "model.layers.30.self_attn",
+    "model.layers.31.self_attn"
+  ],
+  "baseline_full_kv": {
+    "correct": 2,
+    "score_sum": 2.0,
+    "accuracy": 0.5,
+    "records": [
+      {
+        "line": 1,
+        "answers": [
+          "5528843"
+        ],
+        "length_chars": 43911,
+        "source_line": 2,
+        "tokens": 16157,
+        "task": "niah_multikey_2",
+        "length_bucket": "8-32K",
+        "prediction": "5528843.",
+        "generated_tokens": 10,
+        "reached_output_limit": false,
+        "answer_recall": 1.0,
+        "score": 1.0,
+        "correct": true,
+        "peak_cuda_allocated_bytes": 7069100032
+      },
+      {
+        "line": 2,
+        "answers": [
+          "41004534-dab4-440d-8a49-0d5b1afba8f8"
+        ],
+        "length_chars": 23159,
+        "source_line": 22,
+        "tokens": 16240,
+        "task": "niah_multikey_3",
+        "length_bucket": "8-32K",
+        "prediction": ": b4cec493-2f7f-4f6e-9d30-80e4d2f0030a.",
+        "generated_tokens": 38,
+        "reached_output_limit": false,
+        "answer_recall": 0.0,
+        "score": 0.0,
+        "correct": false,
+        "peak_cuda_allocated_bytes": 7093868032
+      },
+      {
+        "line": 3,
+        "answers": [
+          "4250981"
+        ],
+        "length_chars": 58522,
+        "source_line": 42,
+        "tokens": 16234,
+        "task": "niah_single_1",
+        "length_bucket": "8-32K",
+        "prediction": "4250981.",
+        "generated_tokens": 10,
+        "reached_output_limit": false,
+        "answer_recall": 1.0,
+        "score": 1.0,
+        "correct": true,
+        "peak_cuda_allocated_bytes": 7092452352
+      },
+      {
+        "line": 4,
+        "answers": [
+          "KVFHW",
+          "FERDZ",
+          "NGIIT",
+          "GQUVY",
+          "HEEBD"
+        ],
+        "length_chars": 58627,
+        "source_line": 62,
+        "tokens": 16341,
+        "task": "vt",
+        "length_bucket": "8-32K",
+        "prediction": "KVFHW NGIIT GQUVY HEEBD\n\n\n\nHere is the chain of assignment for these variables:\n\n1. KVFHW is assigned the value 12859.\n2. NGIIT is assigned the value of the variable KVFHW, which is 12859.\n3. GQUVY is assigned the value of the variable NGIIT, which is 12859.\n4. HEEBD is assigned the value of the variable GQUVY, which is 128",
+        "generated_tokens": 128,
+        "reached_output_limit": true,
+        "answer_recall": 0.8,
+        "score": 0.0,
+        "correct": false,
+        "peak_cuda_allocated_bytes": 7123853312
+      }
+    ]
+  },
+  "qcc_retrofit": {
+    "correct": 2,
+    "score_sum": 2.0,
+    "accuracy": 0.5,
+    "records": [
+      {
+        "line": 1,
+        "answers": [
+          "5528843"
+        ],
+        "length_chars": 43911,
+        "source_line": 2,
+        "tokens": 16157,
+        "task": "niah_multikey_2",
+        "length_bucket": "8-32K",
+        "prediction": "5528843.",
+        "generated_tokens": 10,
+        "reac

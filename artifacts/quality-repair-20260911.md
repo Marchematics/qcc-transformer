@@ -1520,3 +1520,27 @@ recall and completion score are1. QCC state is4,996,355,072 bytes and peak
 allocated10,619,796,480 bytes. The first three generated strings match their
 references (two correct records and one shared UUID failure). Variable
 tracking is the remaining QCC record; no four-task aggregate is claimed yet.
+
+### Completed four-task 16K enlarged-table comparison
+
+All four paired records completed without generation exceptions. In task
+order multikey-number / UUID / single-number / variable-tracking, answer
+recall is [1,0,1,0.8] on both Full-KV and quality-first QCC. Macro recall is
+0.70 on both; its aggregate retention ratio is1.0. Completion-weighted mean
+is0.50 on both. UUID's zero-reference task ratio remains undefined.
+
+The first three generated strings are identical. Variable tracking differs
+in its explanatory continuation, although both list KVFHW/NGIIT/GQUVY/HEEBD,
+miss FERDZ and reach128 generated tokens. Thus neither exact output identity
+for all four nor complete variable-tracking success is established.
+All four QCC owned-state measurements are4,996,355,072 bytes.
+
+This is evidence that enlarged original-KV storage preserves these four
+16K task scores under ordinary prefill. It is not a99% suite result: there
+is one example per task, two shared failures/partial failures, a zero
+reference denominator, and the policy still uses future-tail queries.
+No128K/1M or serving metric is measured by this run.
+
+The original process completed successfully. The queued native Phi causal
+block comparison has now started on the same GPU, loading the checkpoint
+with its prespecified row16/row21 inputs and configuration.
