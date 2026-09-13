@@ -966,3 +966,14 @@ adapter is retained locally but is ignored by Git because it is a binary
 checkpoint. This is a targeted calibration diagnostic, not a task score.
 The active Q hook is effective, but this small probe does not justify
 promoting it or claiming that query correction alone solves the quality gap.
+
+A larger active-Q calibration probe selected layers24–31 (rank8, window512,
+16 codes, one 1,024-token train chunk, one held-out chunk, 10 steps). It used
+1,597,696 trainable parameters (0.04174%). Best held-out chunk metrics were
+cosine 0.999222 and top-1 0.786132; the gate remained false. On the independent
+4,096-token `held_4k` prompt, the adapter reached cosine 0.982642 and top-1
+0.650391, below the layer31-only probe's 0.987627/0.650391 and below the
+existing all-layer archive calibration reference. Artifact
+`artifacts/active-query-calibration/eval_lastquarter_activeq_held4k.json`.
+This small calibration does not support promoting active-Q correction; the
+feature remains available for later data-rich calibration only.
