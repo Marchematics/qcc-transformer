@@ -1466,3 +1466,13 @@ be held fixed when comparing externally split prompts.
 
 The four-task 8192 quality-first GPU comparison remains running on its loaded
 code and original policy; it has not been restarted for these changes.
+
+### Direct token API shares causal block semantics
+
+Moved causal single-token dispatch into QCCSelfAttention.step, eliminating
+the HF-specific dispatch exception. Direct token calls, HF cached decode and
+chunked prefill now reach the same read-before-commit implementation. Token
+position IDs and native position embeddings are adapted to one-token chunks;
+internal RoPE receives the total seen length. The existing small-model test
+now compares direct token calls as well as mixed HF calls, with and without
+eviction. Both configurations and the scratch-lifetime regression pass.

@@ -528,9 +528,13 @@ def test_causal_block_hf_prefill_and_decode_share_commit_semantics(sets):
         exact_attention=True, exact_num_sets=sets, exact_ways=2, block_size=2))
     split = copy.deepcopy(model)
     changed = copy.deepcopy(model)
+    token = copy.deepcopy(model)
     hidden = torch.randn(1, 29, 16)
     with torch.no_grad():
         expected = model.attn(hidden, use_cache=True)[0]
+        token_outputs = [token.attn.qcc.step(hidden[:, i], reset_cache=i == 0,
+            position_ids=torch.tensor([i])) for i in range(hidden.shape[1])]
+        torch.testing.assert_close(torch.stack(token_outputs, 1), expected, atol=1e-6, rtol=1e-5)
         outputs = []
         start = 0
         for end in (3, 11, 12, 17, 28, 29):

@@ -2262,6 +2262,19 @@ class QCCSelfAttention(nn.Module):
 
         if hidden.ndim != 2 or hidden.shape[-1] != self.d_model:
             raise ValueError("hidden must have shape [batch, d_model]")
+        if bool(getattr(self.archive, "causal_block_retention", False)):
+            positions = position_ids
+            if positions is not None and positions.ndim == 1:
+                positions = positions.unsqueeze(-1)
+            embeddings = position_embeddings
+            if embeddings is not None:
+                embeddings = tuple(angle.unsqueeze(-2) if angle.ndim == 2 else angle for angle in embeddings)
+            return self.step_chunk(
+                hidden.unsqueeze(1), reset_cache=reset_cache,
+                position_ids=positions, archive_hint=archive_hint,
+                position_embeddings=embeddings,
+                rope_sequence_length=(0 if reset_cache else self._seen_tokens) + 1,
+            ).squeeze(1)
         bsz = hidden.shape[0]
         if (
             reset_cache
