@@ -151,6 +151,13 @@ class HybridQCCArchive(QCCArchive):
             raise ValueError("coreset_capacity requires causal_coreset")
         if active_query_correction and exact_query_correction:
             raise ValueError("active_query_correction and exact_query_correction cannot both be enabled")
+        self.exact_only = bool(
+            exact_attention
+            and not quality_prefill_shadow_only
+            and not persistent_landmark
+            and (quality_first or causal_coreset)
+        )
+        self.causal_coreset = bool(causal_coreset)
         self.quality_query_tail = quality_query_tail
         if active_codes is not None or lazy_decay:
             raise ValueError(
@@ -213,7 +220,6 @@ class HybridQCCArchive(QCCArchive):
         # salient record in an unprobed bucket.  Deployments with a measured
         # latency budget may still set ``exact_probe_sets`` explicitly.
         probes = exact_num_sets if exact_probe_sets is None else exact_probe_sets
-        self.causal_coreset = bool(causal_coreset)
         if self.causal_coreset:
             self.exact_bank = CausalWeightedKVBank(
                 num_heads=num_heads,
@@ -330,10 +336,17 @@ class HybridQCCArchive(QCCArchive):
 
         # Preserve in-flight recurrent state when the upgrade is applied at an
         # explicit request boundary or during a diagnostic.
-        upgraded._numerator = archive._numerator.clone()
-        upgraded._denominator = archive._denominator.clone()
-        upgraded._last_step = archive._last_step.clone()
-        upgraded._step = int(archive._step)
+        if upgraded.exact_only:
+            upgraded.reset_state(
+                archive._numerator.shape[0],
+                device=archive._numerator.device,
+                dtype=archive._numerator.dtype,
+            )
+        else:
+            upgraded._numerator = archive._numerator.clone()
+            upgraded._denominator = archive._denominator.clone()
+            upgraded._last_step = archive._last_step.clone()
+            upgraded._step = int(archive._step)
         if archive.persistent_landmark:
             upgraded._landmark_count = int(archive._landmark_count)
             upgraded._prefix_pending_slot = int(archive._prefix_pending_slot)
@@ -352,6 +365,22 @@ class HybridQCCArchive(QCCArchive):
         dtype: torch.dtype | None = None,
     ) -> None:
         super().reset_state(batch_size, device=device, dtype=dtype)
+        if getattr(self, "exact_only", False):
+            # Exact mass merging is the complete remote response in this
+            # mode. Keep only a tiny shape/device sentinel for callers that
+            # inspect the legacy recurrent state; no obsolete codebook-sized
+            # numerator/denominator is allocated or updated.
+            state_dtype = dtype if dtype in (torch.float32, torch.float64) else torch.float32
+            target_device = device or self.codes.device
+            self._numerator = torch.zeros(
+                batch_size, 1, 1, 1, 1, device=target_device, dtype=state_dtype
+            )
+            self._denominator = torch.zeros(
+                batch_size, 1, 1, 1, device=target_device, dtype=state_dtype
+            )
+            self._last_step = torch.zeros(
+                batch_size, 1, 1, 1, device=target_device, dtype=torch.long
+            )
         self._last_exact_gate = None
         self._last_exact_log_partition = None
         self._quality_previous_raw_score = None
@@ -561,6 +590,20 @@ class HybridQCCArchive(QCCArchive):
                 query=exact_query,
             )
             return
+        if self.exact_only:
+            with torch.no_grad():
+                if self.quality_first and exact_key is not None and exact_query is not None:
+                    score = F.cosine_similarity(
+                        exact_key.float(), exact_query.float(), dim=-1
+                    )
+                else:
+                    score = self.admission(key, value)
+                self._admit_one(
+                    key if exact_key is None else exact_key,
+                    value,
+                    score,
+                )
+            return
         super().update(key, value)
         with torch.no_grad():
             if self.quality_first and exact_key is not None and exact_query is not None:
@@ -592,6 +635,11 @@ class HybridQCCArchive(QCCArchive):
         return self.exact_bank.read(query, hard=self.exact_hard_read)
 
     def read(self, query: Tensor, *, exact_query: Tensor | None = None) -> Tensor:
+        if self.exact_only:
+            exact, partition = self._read_exact(
+                query if exact_query is None else exact_query
+            )
+            return self._blend_exact(torch.zeros_like(exact), exact, partition)
         recurrent = super().read(query)
         exact, confidence = self._read_exact(query if exact_query is None else exact_query)
         return self._blend_exact(recurrent, exact, confidence)
@@ -789,6 +837,24 @@ class HybridQCCArchive(QCCArchive):
                 self.admission(key, value),
             )
             result = self._blend_exact(torch.zeros_like(exact), exact, partition)
+            if output is not None:
+                if output.shape != result.shape or output.device != result.device:
+                    raise ValueError("output must match query shape and device")
+                output.copy_(result)
+                return output
+            return result
+
+        if self.exact_only:
+            exact, confidence = self._exact_chunk(
+                exact_key,
+                value,
+                exact_query,
+                self.admission(key, value) if admission_score is None else admission_score,
+                quality_query=quality_query,
+                quality_key_start=quality_key_start,
+                quality_query_start=quality_query_start,
+            )
+            result = self._blend_exact(torch.zeros_like(exact), exact, confidence)
             if output is not None:
                 if output.shape != result.shape or output.device != result.device:
                     raise ValueError("output must match query shape and device")

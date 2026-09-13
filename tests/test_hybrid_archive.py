@@ -692,3 +692,34 @@ def test_upgrade_qcc_attention_is_idempotent() -> None:
     second = upgrade_qcc_attention(attention, exact_num_sets=4, exact_ways=2)
     assert first is second
     assert isinstance(attention.archive, HybridQCCArchive)
+
+
+def test_exact_only_reclaim_preserves_future_query_selection():
+    torch.manual_seed(803)
+    compact = HybridQCCArchive(
+        2, 4, num_codes=2, window_size=4, use_triton=False,
+        exact_num_sets=2, exact_ways=2, block_size=2, background_size=3,
+        quality_first=True, exact_attention=True,
+    )
+    assert compact.exact_only
+    assert compact._numerator.numel() == 1
+    legacy = copy.deepcopy(compact)
+    legacy.exact_only = False
+    legacy.reset_state(1)
+    key = torch.randn(1, 2, 18, 4)
+    value = torch.randn_like(key)
+    query = torch.randn_like(key)
+    tail = torch.randn(1, 2, 5, 4)
+    with torch.no_grad():
+        for start in (0, 6, 12):
+            kwargs = dict(quality_query=tail, quality_query_start=13,
+                          quality_key_start=start)
+            a = compact.update_read_chunk(key[:, :, start:start+6],
+                value[:, :, start:start+6], query[:, :, start:start+6], **kwargs)
+            b = legacy.update_read_chunk(key[:, :, start:start+6],
+                value[:, :, start:start+6], query[:, :, start:start+6], **kwargs)
+            torch.testing.assert_close(a, b, atol=0, rtol=0)
+            for name in ('_keys', '_values', '_scores', '_ages',
+                         '_background_keys', '_background_values'):
+                torch.testing.assert_close(getattr(compact.exact_bank, name),
+                    getattr(legacy.exact_bank, name), atol=0, rtol=0)

@@ -2290,7 +2290,11 @@ class QCCSelfAttention(nn.Module):
                 shape = (bsz, self.num_heads, self.window_size, self.head_dim)
                 self._local_key_cache = torch.empty(shape, device=key.device, dtype=key.dtype)
                 self._local_value_cache = torch.empty(shape, device=value.device, dtype=value.dtype)
-                if self.archive_position_invariant and lexical_k is None:
+                if (
+                    self.archive_position_invariant
+                    and lexical_k is None
+                    and not bool(getattr(self.archive, "exact_only", False))
+                ):
                     self._archive_key_cache = torch.empty(
                         shape, device=key_raw.device, dtype=key_raw.dtype
                     )
@@ -2313,7 +2317,9 @@ class QCCSelfAttention(nn.Module):
                     assert self._lexical_key_cache is not None and self._lexical_value_cache is not None
                     archive_key = self._lexical_key_cache[:, :, write_index]
                     archive_value = self._lexical_value_cache[:, :, write_index]
-                elif self.archive_position_invariant:
+                elif self.archive_position_invariant and not bool(
+                    getattr(self.archive, "exact_only", False)
+                ):
                     assert self._archive_key_cache is not None
                     archive_key = self._archive_key_cache[:, :, write_index]
                 if self._seen_tokens >= self.window_size + self.attention_sink_size:
@@ -2333,7 +2339,11 @@ class QCCSelfAttention(nn.Module):
                 self._cache_start = (self._cache_start + 1) % self.window_size
             self._local_key_cache[:, :, write_index] = key
             self._local_value_cache[:, :, write_index] = value
-            if self.archive_position_invariant and lexical_k is None:
+            if (
+                self.archive_position_invariant
+                and lexical_k is None
+                and not bool(getattr(self.archive, "exact_only", False))
+            ):
                 assert self._archive_key_cache is not None
                 self._archive_key_cache[:, :, write_index] = archive_key_current
             if lexical_k is not None:
@@ -2512,7 +2522,11 @@ class QCCSelfAttention(nn.Module):
                 shape = (bsz, self.num_heads, self.window_size, self.head_dim)
                 self._local_key_cache = torch.empty(shape, device=k.device, dtype=k.dtype)
                 self._local_value_cache = torch.empty(shape, device=v.device, dtype=v.dtype)
-                if self.archive_position_invariant and lexical_k is None:
+                if (
+                    self.archive_position_invariant
+                    and lexical_k is None
+                    and not bool(getattr(self.archive, "exact_only", False))
+                ):
                     self._archive_key_cache = torch.empty(
                         shape, device=k_raw.device, dtype=k_raw.dtype
                     )
@@ -2522,7 +2536,11 @@ class QCCSelfAttention(nn.Module):
             combined_k, combined_v, old_length = self._combined_local_chunk(k, v)
             combined_archive_k = (
                 self._combined_archive_key_chunk(archive_k_current)
-                if self.archive_position_invariant and lexical_k is None
+                if (
+                    self.archive_position_invariant
+                    and lexical_k is None
+                    and not bool(getattr(self.archive, "exact_only", False))
+                )
                 else None
             )
             if lexical_k is not None:

@@ -1145,3 +1145,23 @@ all 32 QCC layers ended at logical length 4,097 (rather than retaining the old
 control flow in the current environment. The check measures state continuity,
 not task quality or Full-KV parity; the generated continuation was not used as
 a benchmark result. Artifact `cache-rebuild-phi-4096.json`.
+
+### State reclamation: measured reduction and selection regression corrected
+
+The first reclamation run completed on row16: runtime state fell from
+5,899,964,928 to 4,162,737,152 bytes (1,737,227,776 bytes reclaimed), but the
+candidate returned 6920437 instead of 6569343. The raw result is retained in
+`benchmark-quality-first-row16-state-reclaim-v1.json`; it is not evidence of
+quality-preserving memory reduction.
+
+Inspection found that the exact-only chunk branch omitted quality_query,
+quality_key_start and quality_query_start, changing retention scores. These
+arguments, and explicit admission_score, are now forwarded. A regression
+compares the reclaimed and recurrence-maintaining paths across three successive
+chunks using the same future query tail: outputs, retained keys/values/scores/
+ages and background entries are bit-identical. The reclamation is restricted
+to quality-first exact attention and causal coreset configurations; predictor
+modes still retain raw keys because their admission predictor may consume them.
+The archive/attention/HF focused suite passes (97 cases). The corrected real
+model run remains outstanding. Shared scratch and the 8192-slot BF16 comparison
+are not implemented by this change.
