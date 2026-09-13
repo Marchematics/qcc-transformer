@@ -1200,3 +1200,16 @@ decode after eviction. Outputs match exactly and owned runtime bytes decrease;
 all 33 HF retrofit tests pass. Actual GPU peak/reserved-memory and throughput
 changes remain unmeasured. The currently running row16 state-reclaim-v2 job
 was launched before this scratch-lifetime edit and does not test this change.
+
+### Logical parameter denominator for NF4
+
+The RULER runner now calls the loaded model's Transformers num_parameters()
+method before patching. Its Params4bit handling counts logical weights rather
+than packed storage elements. Reports retain pretrained_storage_elements
+separately and identify the counting method. A real CPU NF4 Linear4bit(32,16)
+check counted 272 packed elements and the correct 528 logical parameters
+(including bias). Existing historical reports retain their original numbers;
+for Phi, 6,589,440 / 3,821,079,552 is approximately 0.17245%, not the fraction
+obtained using 2,009,140,224 packed elements. This does not establish that all
+reported trainable parameters contribute to the active inference output.
+The running state-reclaim-v2 process predates this metadata correction.

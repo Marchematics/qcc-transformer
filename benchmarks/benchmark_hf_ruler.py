@@ -607,7 +607,10 @@ def main() -> None:
         progress_jsonl=progress_jsonl,
         run_id=args.run_id,
     )
-    pretrained_parameter_count = sum(parameter.numel() for parameter in baseline.parameters())
+    pretrained_storage_elements = sum(parameter.numel() for parameter in baseline.parameters())
+    # HF accounts for packed Params4bit weights using their logical size.
+    # Raw numel counts packed storage and would inflate the adapter fraction.
+    pretrained_parameter_count = baseline.num_parameters()
     baseline.requires_grad_(False)
     patched = baseline
     del baseline
@@ -768,6 +771,8 @@ def main() -> None:
     result = {
         "schema": "qcc-ruler-v1",
         "pretrained_parameters": pretrained_parameter_count,
+        "pretrained_storage_elements": pretrained_storage_elements,
+        "parameter_count_method": "transformers.num_parameters",
         "trainable_parameters": sum(p.numel() for p in patched.parameters() if p.requires_grad),
         "trainable_fraction_of_pretrained": (
             sum(p.numel() for p in patched.parameters() if p.requires_grad)
