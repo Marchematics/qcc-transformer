@@ -140,6 +140,8 @@ class HybridQCCArchive(QCCArchive):
                 raise ValueError("causal_coreset cannot use future-query quality_first selection")
             if background_size or block_size != 1:
                 raise ValueError("causal_coreset does not support background or block retention")
+            if exact_storage_dtype not in (None, torch.float32):
+                raise ValueError("causal_coreset representative statistics require float32 storage")
             if coreset_capacity is None:
                 coreset_capacity = exact_num_sets * exact_ways
             if coreset_capacity <= 0:
