@@ -1094,3 +1094,15 @@ until the 128-token limit. State was 5,160,566,784 bytes and peak allocated
 8,931,024,896 bytes. Artifact `benchmark-ordinary-row16-longrope-fix-v1.json`.
 This separates the resolved rotary implementation error from the remaining
 recurrent archive quality loss.
+
+### Post-LongRoPE fixed-prefix cross-read
+
+The fixed-prefix Q/K/V cross-read was repeated on row16 after the LongRoPE
+repair (layer17, first answer digit at teacher step20). Mean per-head remote
+read cosine for A/B/C/D was 0.9284/0.9317/0.9318/0.9890, with relative squared
+error 0.2310/0.2179/0.2172/0.0264. Replacing student Q with teacher Q remains
+the dominant improvement; teacher-selected positions and teacher K/V provide
+small additional gains on this probe. The student top token at the fixed
+prefix is `6`, matching the target. Artifact
+`cross-read-row16-layer17-postrope.json`. This is a conditional one-layer
+metric, not a task score or an additive error decomposition.
