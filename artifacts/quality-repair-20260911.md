@@ -834,3 +834,25 @@ trained. An existing hybrid test sets a nonzero rank-1 residual and confirms
 that the active exact read changes, so future calibration can target a parameter
 that actually contributes to the deployed quality path. All 109 focused tests
 pass. This is an effective-path plumbing change, not a quality result.
+
+### Fixed-prefix cross-read at the final Phi layer
+
+A second fixed-prefix cross-read completed for row6 at layer31 (the final
+attention layer), using the same teacher-generated prefix and 768+128
+quality-first configuration as the layer17 probe. The first answer digit is
+still step17 (`8`); the student is evaluated on exactly the teacher prefix
+through the token before that prediction. Mean per-head cosine to the teacher
+Full-KV remote output is A (student Q, student K/V, student positions) 0.8675,
+B (student Q, student K/V, teacher-selected positions) 0.8584, C (student Q,
+teacher K/V, teacher-selected positions) 0.8413, D (teacher Q, teacher K/V,
+teacher-selected positions) 0.9257. Mean relative squared errors are 0.6519,
+0.8016, 1.3704, and 0.8160 respectively. The artifact is
+`cross-read-row6-layer31.json`.
+
+At this late layer, replacing student Q with teacher Q remains the largest
+single improvement (A→D), while replacing positions or historical K/V alone
+is harmful on this probe. This differs in magnitude from layer17 but preserves
+the main conclusion: Q, K/V representation, and selection are coupled, and a
+one-layer conditional read cannot assign a system-wide share of responsibility.
+The result is a diagnostic read metric, not a free-generation score or evidence
+that a Q-only adapter will meet the target.
