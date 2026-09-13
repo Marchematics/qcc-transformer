@@ -1,0 +1,24 @@
+{
+  "scope": "CPU allocated bank tensor sizes with 32 layers; total request estimates derived from measured FP32 row16 state, holding other buffers and CUDA RNG constant. Not GPU peaks or throughput.",
+  "reference_request_bytes": 2350797824,
+  "cases": [
+    {
+      "capacity_per_head": 768,
+      "dtype": "torch.float32",
+      "allocated_bank_tensor_bytes_per_layer": 23105792,
+      "estimated_request_bytes": 2350797824
+    },
+    {
+      "capacity_per_head": 768,
+      "dtype": "torch.bfloat16",
+      "allocated_bank_tensor_bytes_per_layer": 11702528,
+      "estimated_request_bytes": 1985893376
+    },
+    {
+      "capacity_per_head": 8192,
+      "dtype": "torch.bfloat16",
+      "allocated_bank_tensor_bytes_per_layer": 105779456,
+      "estimated_request_bytes": 4996355072
+    }
+  ]
+}

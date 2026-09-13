@@ -1262,3 +1262,14 @@ scratch geometry. Peak CUDA allocated is 6,131,671,040
 bytes. These measurements concern one NF4 row16 request, with FP32 bank K/V;
 they do not establish concurrency or serving speedups. Same-capacity BF16
 validation has started sequentially and is still pending.
+
+### Capacity budget from allocated bank tensors
+
+Actual CPU allocations for the current bank geometry are 23,105,792 bytes per
+layer at 768 FP32 foreground slots, 11,702,528 at 768 BF16, and 105,779,456
+at 8192 BF16, including background/pending tensors, scores and ages. Holding
+all other measured request buffers and CUDA RNG bytes fixed gives estimated
+request totals of 2,350,797,824 / 1,985,893,376 / 4,996,355,072 bytes.
+The 8192 BF16 estimate is about 4.65 GiB, below the original 5.50 GiB request
+state. It is not a GPU peak or concurrency measurement. The allocation record
+is exact-storage-capacity-budget.json; forthcoming GPU runs check the estimate.
