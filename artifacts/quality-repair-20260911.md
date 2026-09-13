@@ -997,3 +997,20 @@ and the final query for evaluation, so it is neither causal nor a task score.
 Artifact: `phi-kmeans-layer17.json`. It does not justify adding a k-means
 writer to the serving path without a query-domain objective and better
 initialization.
+
+### HF cache compatibility and lexical benchmark attempt
+
+The current Phi-3.5 remote-code snapshot calls `DynamicCache.get_max_length`,
+which Transformers 5 no longer provides. The loader now supplies a `None`
+compatibility method, and the RULER runner probes `forward` before passing
+`logits_to_keep`; this removes two setup failures encountered while wiring the
+lexical-addressing diagnostic. The corresponding cache compatibility test
+passes.
+
+A real lexical-landmark RULER run could not produce a paired score on this
+A10G. Phi's remote eager attention materializes the full `[heads, query,
+key]` matrix: the 7,422-token NF4 row attempted another 6.57 GiB allocation
+with 16.98 GiB already resident, and the 32,030-token row would require about
+61 GiB. Offloading the KV cache does not bound this attention temporary. The
+partial progress files were removed because they contain no paired QCC result;
+no lexical quality claim is made.

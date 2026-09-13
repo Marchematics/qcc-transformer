@@ -63,6 +63,14 @@ def _ensure_remote_code_compat() -> None:
             return self.get_seq_length(layer_idx)
 
         DynamicCache.get_usable_length = get_usable_length
+    if not hasattr(DynamicCache, "get_max_length"):
+        # Older remote-code Phi snapshots ask the cache for a finite maximum
+        # length while current Transformers' DynamicCache has no such method.
+        # Returning ``None`` preserves the unbounded dynamic-cache semantics.
+        def get_max_length(self):
+            return None
+
+        DynamicCache.get_max_length = get_max_length
     if not hasattr(DynamicCache, "seen_tokens"):
         # Phi-3 remote code still reads the pre-4.36 cache counter directly.
         DynamicCache.seen_tokens = property(lambda self: self.get_seq_length())

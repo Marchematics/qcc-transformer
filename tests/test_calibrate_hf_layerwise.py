@@ -294,18 +294,28 @@ def test_hf_loader_supplies_phi_remote_code_loss_kwargs():
     from qcc_transformer.hf_loading import _ensure_remote_code_compat
 
     utils = transformers.utils
+    cache_cls = transformers.cache_utils.DynamicCache
     had_symbol = hasattr(utils, "LossKwargs")
     previous = getattr(utils, "LossKwargs", None)
+    had_max_length = hasattr(cache_cls, "get_max_length")
+    previous_max_length = getattr(cache_cls, "get_max_length", None)
     try:
         if had_symbol:
             delattr(utils, "LossKwargs")
+        if had_max_length:
+            delattr(cache_cls, "get_max_length")
         _ensure_remote_code_compat()
         assert hasattr(utils, "LossKwargs")
+        assert cache_cls().get_max_length() is None
     finally:
         if had_symbol:
             setattr(utils, "LossKwargs", previous)
         else:
             delattr(utils, "LossKwargs")
+        if had_max_length:
+            setattr(cache_cls, "get_max_length", previous_max_length)
+        else:
+            delattr(cache_cls, "get_max_length")
 
 
 @pytest.mark.skipif(not __import__("torch").cuda.is_available(), reason="CUDA unavailable")

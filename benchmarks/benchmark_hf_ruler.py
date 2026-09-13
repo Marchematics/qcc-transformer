@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import gc
+import inspect
 import json
 import math
 import sys
@@ -44,6 +45,15 @@ def length_bucket(tokens: int) -> str:
     if tokens < 128_000:
         return "32-128K"
     return "128K+"
+
+
+def _supports_forward_argument(model, name: str) -> bool:
+    """Return whether a model explicitly advertises a forward argument."""
+
+    try:
+        return name in inspect.signature(model.forward).parameters
+    except (TypeError, ValueError):
+        return False
 
 
 def _start_progress_log(path: Path, *, run_id: str | None, config: dict) -> None:
@@ -142,8 +152,12 @@ def _run_model(
                     # cache at the first long prompt and silently disables
                     # offloading by constructing a new default cache.
                     "past_key_values": cache,
-                    "logits_to_keep": 1,
                 }
+                # Phi-3 remote-code snapshots in the current environment do
+                # not expose ``logits_to_keep``. Passing it unconditionally
+                # makes the matched Full-KV reference fail before inference.
+                if _supports_forward_argument(model, "logits_to_keep"):
+                    generation_kwargs["logits_to_keep"] = 1
             generated = model.generate(
                 **encoded,
                 max_new_tokens=max_new_tokens,
@@ -271,6 +285,10 @@ def main() -> None:
     parser.add_argument(
         "--active-query-correction", action="store_true",
         help="apply the low-rank correction to the live Q used by attention (calibration path)",
+    )
+    parser.add_argument(
+        "--archive-lexical-landmark", action="store_true",
+        help="use position-free hidden-state keys for the recurrent archive diagnostic",
     )
     parser.add_argument(
         "--causal-coreset", action="store_true",
@@ -410,6 +428,7 @@ def main() -> None:
                 max_position_embeddings=native_context_tokens,
                 archive_position_invariant=args.archive_position_invariant,
                 active_query_correction=args.active_query_correction,
+                archive_lexical_landmark=args.archive_lexical_landmark,
                 kv_head_policy=args.kv_head_policy,
                 use_triton=args.use_triton,
                 local_attention_backend=args.local_attention_backend,
@@ -440,6 +459,7 @@ def main() -> None:
                 max_position_embeddings=native_context_tokens,
                 archive_position_invariant=args.archive_position_invariant,
                 active_query_correction=args.active_query_correction,
+                archive_lexical_landmark=args.archive_lexical_landmark,
                 kv_head_policy=args.kv_head_policy,
                 use_triton=args.use_triton,
                 local_attention_backend=args.local_attention_backend,
@@ -464,6 +484,7 @@ def main() -> None:
                 max_position_embeddings=native_context_tokens,
                 archive_position_invariant=args.archive_position_invariant,
                 active_query_correction=args.active_query_correction,
+                archive_lexical_landmark=args.archive_lexical_landmark,
                 kv_head_policy=args.kv_head_policy,
                 use_triton=args.use_triton,
                 local_attention_backend=args.local_attention_backend,
@@ -499,6 +520,7 @@ def main() -> None:
             num_codes=args.num_codes,
             max_position_embeddings=native_context_tokens,
             archive_position_invariant=args.archive_position_invariant,
+            archive_lexical_landmark=args.archive_lexical_landmark,
             kv_head_policy=args.kv_head_policy,
             use_triton=args.use_triton,
             local_attention_backend=args.local_attention_backend,
@@ -577,6 +599,7 @@ def main() -> None:
         "exact_storage_dtype": args.exact_storage_dtype,
         "exact_query_correction": args.exact_query_correction,
         "active_query_correction": args.active_query_correction,
+        "archive_lexical_landmark": args.archive_lexical_landmark,
         "causal_coreset": args.causal_coreset,
         "coreset_capacity": args.coreset_capacity,
         "coreset_merge_policy": args.coreset_merge_policy,
