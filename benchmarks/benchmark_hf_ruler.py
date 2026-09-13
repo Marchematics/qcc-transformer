@@ -522,7 +522,11 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--progress-jsonl", type=Path, default=None)
     parser.add_argument("--trust-remote-code", action="store_true")
+    parser.add_argument("--causal-block-retention", action="store_true",
+        help="retain original KV with causal scores and read-before-commit blocks")
     args = parser.parse_args()
+    if args.causal_block_retention and (args.quality_first or args.causal_coreset or not args.exact_attention):
+        raise ValueError("causal-block-retention requires standalone --exact-attention")
     if args.causal_coreset and args.quality_first:
         raise ValueError("causal-coreset is causal and cannot use future-query quality-first selection")
     if args.active_query_correction and args.exact_query_correction:
@@ -537,11 +541,11 @@ def main() -> None:
         raise ValueError("coreset-query-probes requires --causal-coreset")
     if args.coreset_partition_weight != 1.0 and not args.causal_coreset:
         raise ValueError("coreset-partition-weight requires --causal-coreset")
-    if args.exact_attention and not (args.quality_first or args.adapter or args.causal_coreset):
+    if args.exact_attention and not (args.quality_first or args.adapter or args.causal_coreset or args.causal_block_retention):
         raise ValueError("exact-attention requires a hybrid archive (--quality-first, --causal-coreset, or --adapter)")
     if args.background_size and not args.exact_attention:
         raise ValueError("background-size requires --exact-attention")
-    if args.retention_block_size > 1 and not args.background_size:
+    if args.retention_block_size > 1 and not args.background_size and not args.causal_block_retention:
         raise ValueError('retention-block-size requires --background-size')
     if args.quality_query_tail is not None and not args.quality_first:
         raise ValueError("quality-query-tail requires --quality-first")
@@ -636,7 +640,7 @@ def main() -> None:
         torch.cuda.empty_cache()
     patched_device = model_input_device(patched, device)
     if args.adapter is None:
-        if args.quality_first:
+        if args.quality_first or args.causal_block_retention:
             replaced = patch_hf_model_hybrid(
                 patched,
                 window_size=args.window_size,
@@ -655,7 +659,8 @@ def main() -> None:
                     "exact_num_sets": args.exact_num_sets,
                     "exact_ways": args.exact_ways,
                     "exact_probe_sets": args.exact_probe_sets,
-                    "quality_first": True,
+                    "quality_first": args.quality_first,
+                    "causal_block_retention": args.causal_block_retention,
                     "quality_block_propagation": args.quality_block_propagation,
                     "quality_prefill_shadow_only": args.quality_prefill_shadow_only,
                     "exact_storage_dtype": exact_storage_dtype,
@@ -727,6 +732,7 @@ def main() -> None:
                 "block_size": args.retention_block_size,
                 "quality_query_tail": args.quality_query_tail,
                 "causal_coreset": args.causal_coreset,
+                "causal_block_retention": args.causal_block_retention,
                 "coreset_capacity": args.coreset_capacity,
                 "coreset_merge_policy": args.coreset_merge_policy,
                 "coreset_query_probes": args.coreset_query_probes,
@@ -836,6 +842,7 @@ def main() -> None:
         "active_query_correction": args.active_query_correction,
         "archive_lexical_landmark": args.archive_lexical_landmark,
         "causal_coreset": args.causal_coreset,
+        "causal_block_retention": args.causal_block_retention,
         "coreset_capacity": args.coreset_capacity,
         "coreset_merge_policy": args.coreset_merge_policy,
         "coreset_query_probes": args.coreset_query_probes,

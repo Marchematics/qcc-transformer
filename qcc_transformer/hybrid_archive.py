@@ -120,6 +120,7 @@ class HybridQCCArchive(QCCArchive):
         exact_query_correction: bool = False,
         active_query_correction: bool = False,
         causal_coreset: bool = False,
+        causal_block_retention: bool = False,
         coreset_capacity: int | None = None,
         coreset_merge_policy: str = "ward",
         coreset_query_probes: int = 8,
@@ -130,8 +131,13 @@ class HybridQCCArchive(QCCArchive):
     ) -> None:
         if background_size and not exact_attention:
             raise ValueError("background sampling requires exact_attention")
-        if block_size > 1 and not background_size:
+        if block_size > 1 and not background_size and not causal_block_retention:
             raise ValueError('hybrid block retention requires background sampling to process every eviction')
+        if causal_block_retention and (
+            not exact_attention or quality_first or causal_coreset
+            or quality_prefill_shadow_only or persistent_landmark
+        ):
+            raise ValueError('causal block retention requires the standalone exact attention path')
         if quality_query_tail is not None and quality_query_tail <= 0:
             raise ValueError("quality_query_tail must be positive")
         if causal_coreset:
@@ -155,8 +161,9 @@ class HybridQCCArchive(QCCArchive):
             exact_attention
             and not quality_prefill_shadow_only
             and not persistent_landmark
-            and (quality_first or causal_coreset)
+            and (quality_first or causal_coreset or causal_block_retention)
         )
+        self.causal_block_retention = bool(causal_block_retention)
         self.causal_coreset = bool(causal_coreset)
         self.quality_query_tail = quality_query_tail
         if active_codes is not None or lazy_decay:
@@ -663,6 +670,10 @@ class HybridQCCArchive(QCCArchive):
     ) -> tuple[Tensor, Tensor]:
         """Causally read a block with a bounded number of admission events."""
 
+        if self.causal_block_retention:
+            return self.exact_bank.update_read_chunk(
+                key, value, query, admission_score=score,
+            )
         if self.causal_coreset:
             # The counted coreset commits each event immediately before the
             # matching query.  It deliberately ignores all future-query
@@ -850,6 +861,11 @@ class HybridQCCArchive(QCCArchive):
             return result
 
         if self.exact_only:
+            if self.causal_block_retention and admission_score is None:
+                # Initial causal baseline: the native logit of the evicted
+                # key for the query at its eviction event. A trained writer
+                # can supply admission_score through this same interface.
+                admission_score = (exact_key.float() * exact_query.float()).sum(-1) / math.sqrt(self.head_dim)
             exact, confidence = self._exact_chunk(
                 exact_key,
                 value,

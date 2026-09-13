@@ -516,3 +516,40 @@ def test_exact_hf_releases_scratch_without_changing_continuation():
             assert model.attn.qcc._chunk_value_scratch is None
             assert model.attn.qcc._archive_key_cache is None
     assert qcc_runtime_state_bytes(model)['total_bytes'] < qcc_runtime_state_bytes(reference)['total_bytes']
+
+
+@pytest.mark.parametrize('sets', [2, 16])
+def test_causal_block_hf_prefill_and_decode_share_commit_semantics(sets):
+    import copy
+    torch.manual_seed(913)
+    model = _Model().eval()
+    patch_hf_model_hybrid(model, window_size=4, prefill_chunk_size=5,
+        use_triton=False, hybrid_kwargs=dict(causal_block_retention=True,
+        exact_attention=True, exact_num_sets=sets, exact_ways=2, block_size=2))
+    split = copy.deepcopy(model)
+    changed = copy.deepcopy(model)
+    hidden = torch.randn(1, 29, 16)
+    with torch.no_grad():
+        expected = model.attn(hidden, use_cache=True)[0]
+        outputs = []
+        start = 0
+        for end in (3, 11, 12, 17, 28, 29):
+            outputs.append(split.attn(hidden[:, start:end], use_cache=True)[0])
+            start = end
+        torch.testing.assert_close(torch.cat(outputs, 1), expected, atol=1e-6, rtol=1e-5)
+        other = hidden.clone()
+        other[:, 19:] += 10
+        actual = changed.attn(other, use_cache=True)[0]
+        torch.testing.assert_close(actual[:, :19], expected[:, :19], atol=1e-6, rtol=1e-5)
+        torch.testing.assert_close(model.attn.qcc.archive.exact_bank._keys,
+                                   split.attn.qcc.archive.exact_bank._keys)
+        if sets == 16:
+            qcc = model.attn.qcc
+            q, k, v, _ = qcc._project_qkv_gate(hidden)
+            q, k = qcc._apply_rope(qcc._split_heads(q), qcc._split_heads(k),
+                torch.arange(29).view(1, -1), sequence_length=29)
+            head = torch.nn.functional.scaled_dot_product_attention(q, k, qcc._split_heads(v), is_causal=True)
+            full = qcc.out_proj(head.transpose(1, 2).reshape(1, 29, 16))
+            torch.testing.assert_close(expected, full, atol=1e-6, rtol=1e-5)
+    assert model.attn.qcc._archive_key_cache is None
+    assert model.attn.qcc._chunk_key_scratch is None

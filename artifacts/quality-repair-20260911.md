@@ -1444,3 +1444,25 @@ against the original sequential token-update API, with exact equality.
 Background reservoir updates remain sequential within a committed block to
 preserve their RNG/event semantics. This removes foreground staging's token
 loop, not all maintenance loops; no GPU speedup has been measured.
+
+### HF integration of causal original-KV block retention
+
+The opt-in causal_block_retention mode now uses the existing exact bank's
+read-before-commit interface from HybridQCCArchive. It skips obsolete
+recurrence and future-tail query selection. Initial scores are the native
+scaled dot products between each evicted key and its contemporaneous query;
+explicit admission_score can replace this baseline for a trained writer.
+This proxy is causal but has no demonstrated retrieval advantage.
+
+HF single-token continuation uses the same chunk entry as prefill, preserving
+read-before-commit at block boundaries. Existing small-model tests cover
+actual eviction and all-fit capacity, mixed multi-token/single-token calls,
+suffix independence and agreement with full causal attention when all KV fit.
+Five targeted retrofit/hybrid cases and five benchmark-runner cases pass.
+The RULER runner exposes --causal-block-retention with --exact-attention and
+records the mode. This is inference integration; no training claim or real
+Phi score is available for it yet. Native LongRoPE regime metadata must still
+be held fixed when comparing externally split prompts.
+
+The four-task 8192 quality-first GPU comparison remains running on its loaded
+code and original policy; it has not been restarted for these changes.

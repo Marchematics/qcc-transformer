@@ -696,7 +696,7 @@ class HFQCCAttention(nn.Module):
                     archive_hint=archive_hint,
                     position_embeddings=position_embeddings,
                 )
-        elif length == 1 and not reset:
+        elif length == 1 and not reset and not bool(getattr(self.qcc.archive, "causal_block_retention", False)):
             output = self.qcc.step(
                 hidden_states[:, 0],
                 reset_cache=False,
