@@ -1298,3 +1298,18 @@ the post-LongRoPE row16 probe, are annotated query_alignment_valid=false;
 claims ranking Q drift from those metrics are withdrawn pending aligned replay.
 Raw metrics are retained. This bug concerns diagnostics, not the separate
 free-generation RULER records or measured reclamation bytes.
+
+
+### Supplied post-LongRoPE CPU study reproduced locally
+
+Executed all 13 groups from the supplied preexperiment.py in a fresh directory,
+keeping the supplied results untouched. Source, new results and execution log
+are archived in post-longrope-cpu-reproduction/. The causal block operator has
+zero token-versus-external-chunk difference and zero changed-suffix effect on
+the common prefix under fixed position regime. When all history fits, relative
+L2 to Full attention is 2.31e-7 (supplied environment: 2.52e-7). State remains
+8072 bytes at 128 and 512 events, with 62 commits for 496 evictions. The
+1,048,576-event fixed-slot test keeps 40,968 bytes at both lengths and matches
+the specified global top-k set. Numerical outputs differ slightly across
+software environments; no pretrained quality or GPU performance is inferred.
+The 8192-slot real-model experiment remains separate and in progress.
