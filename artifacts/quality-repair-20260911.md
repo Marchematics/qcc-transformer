@@ -1238,3 +1238,14 @@ The stream exceeds both capacities and ends with an incomplete block. All 19
 associative tests pass. This confirms the storage-only property under these
 controlled BF16-source conditions; it does not substitute for the forthcoming
 real-model capacity/storage pair.
+
+### Sequential storage validation in progress
+
+The scratch-release row16 FP32-table run remains the active GPU experiment.
+A follow-up process waits for that exact process to terminate and requires its
+final paired report to show correct, completed answers before launching
+`benchmark-quality-first-row16-scratch-bf16-v1.json`. The follow-up keeps the
+768+128 capacity and all other recorded settings; only exact_storage_dtype
+changes to bfloat16. Its stdout/stderr are preserved in the matching .log file.
+If the first run fails or produces no report, the follow-up stops without
+starting another GPU workload. No result is claimed for either pending run.
