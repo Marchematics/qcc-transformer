@@ -109,6 +109,42 @@ def _replace_bank_kv(bank, positions, keys, values):
     return cloned
 
 
+def _fit_low_rank_query_map(student_query, teacher_query, target_query, rank):
+    """Fit a diagnostic low-rank residual from student Q to teacher Q."""
+    if rank <= 0:
+        return target_query, None
+    if student_query.shape != teacher_query.shape or student_query.ndim != 4:
+        raise ValueError('student and teacher query tensors must have the same rank-4 shape')
+    heads, tokens, dim = student_query.shape[1], student_query.shape[2], student_query.shape[3]
+    rank = min(int(rank), dim)
+    fit_tokens = max(1, tokens - min(256, tokens // 4))
+    corrected = target_query.float().clone()
+    train_errors = []
+    holdout_errors = []
+    factors = []
+    eye = torch.eye(dim, device=student_query.device, dtype=torch.float32)
+    for head in range(heads):
+        x = student_query[0, head, :fit_tokens].float()
+        y = teacher_query[0, head, :fit_tokens].float() - x
+        gram = x.transpose(0, 1) @ x / max(1, fit_tokens)
+        cross = x.transpose(0, 1) @ y / max(1, fit_tokens)
+        weight = torch.linalg.solve(gram + 1e-4 * eye, cross)
+        left, singular, right = torch.linalg.svd(weight, full_matrices=False)
+        weight = (left[:, :rank] * singular[:rank]) @ right[:rank]
+        corrected[0, head] += target_query[0, head].float() @ weight
+        train_pred = x @ weight
+        train_errors.append(float((train_pred - y).square().mean().sqrt().item()))
+        if fit_tokens < tokens:
+            x_hold = student_query[0, head, fit_tokens:].float()
+            y_hold = teacher_query[0, head, fit_tokens:].float() - x_hold
+            holdout_errors.append(float(((x_hold @ weight) - y_hold).square().mean().sqrt().item()))
+        factors.append(dict(head=head, singular_values=singular[:rank].tolist()))
+    return corrected.to(target_query.dtype), dict(
+        rank=rank, fit_tokens=fit_tokens, train_rmse=train_errors,
+        holdout_rmse=holdout_errors, factors=factors,
+    )
+
+
 def cross_read_diagnostic(model, tokenizer, record, args):
     """Compare position, K/V, and Q sources under one teacher-generated prefix."""
     from qcc_transformer.hybrid_archive import HybridQCCArchive, patch_hf_model_hybrid
@@ -234,6 +270,9 @@ def cross_read_diagnostic(model, tokenizer, record, args):
     student_hook.remove()
     student_bank = model.get_submodule(names[layer]).qcc.archive.exact_bank
     student_q_target = student['rot_q'][:, :, -1]
+    fitted_query, query_fit = _fit_low_rank_query_map(
+        student['rot_q'], teacher_rot_q, student_q_target, args.fit_query_rank,
+    )
     sequence_length = int(fixed_ids.shape[1])
     event_count = sequence_length - args.window_size - args.sink_size
     if event_count <= 0:
@@ -277,6 +316,7 @@ def cross_read_diagnostic(model, tokenizer, record, args):
         out_b, z_b = teacher_as_student.read_attention(student_q_target)
         out_c, z_c = teacher_bank.read_attention(student_q_target)
         out_d, z_d = teacher_bank.read_attention(teacher_q_target)
+        out_e, z_e = student_bank.read_attention(fitted_query)
         remote_keys = teacher_rot_k[:, :, args.sink_size:sequence_length - args.window_size]
         remote_values = teacher_values[:, :, args.sink_size:sequence_length - args.window_size]
         logits = torch.einsum('bhd,bhtd->bht', teacher_q_target.float(), remote_keys.float()) / math.sqrt(head_dim)
@@ -300,7 +340,8 @@ def cross_read_diagnostic(model, tokenizer, record, args):
         config=dict(window_size=args.window_size, sink_size=args.sink_size,
                     exact_num_sets=args.exact_num_sets, exact_ways=args.exact_ways,
                     background_size=args.background_size, block_size=args.block_size,
-                    quality_query_tail=args.quality_query_tail, sequence_length=sequence_length),
+                    quality_query_tail=args.quality_query_tail, sequence_length=sequence_length,
+                    fit_query_rank=args.fit_query_rank),
     )
     # Keep the four labels explicit in JSON while avoiding a generated label
     # that could be mistaken for a Python identifier.
@@ -309,7 +350,9 @@ def cross_read_diagnostic(model, tokenizer, record, args):
         'B_QS_KS_IT': metrics(out_b, z_b),
         'C_QS_KT_IT': metrics(out_c, z_c),
         'D_QT_KT_IT': metrics(out_d, z_d),
+        'E_QfitS_KS_IS': metrics(out_e, z_e),
     }
+    result['query_correction_fit'] = query_fit
     result['position_summary'] = dict(
         student_foreground=student_positions[0].tolist(),
         student_background=student_positions[1].tolist(),
@@ -593,6 +636,8 @@ def main():
                         help='run fixed teacher-prefix Q/K/V source cross-read diagnostic')
     parser.add_argument('--cross-read-layer', type=int, default=17)
     parser.add_argument('--cross-read-max-new-tokens', type=int, default=64)
+    parser.add_argument('--fit-query-rank', type=int, default=0,
+                        help='diagnostic low-rank student-to-teacher Q residual rank')
     parser.add_argument('--exact-prefill-intervention', action='store_true',
                         help='diagnostic only: exact prefill outputs followed by bounded QCC decode')
     parser.add_argument('--quality-block-propagation', action='store_true',

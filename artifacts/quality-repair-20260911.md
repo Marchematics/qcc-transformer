@@ -812,6 +812,17 @@ the evidence ranks Q drift as a strong contributor, but does not isolate it
 from later autoregressive feedback or prove that a Q-only repair reaches the
 task targets.
 
+The same row6/layer17 diagnostic fitted a rank-8 linear residual from student
+Q to teacher Q using the common prefix (holding out the final 256 prefix
+tokens). Applying it only to the student-query/student-state read raised mean
+cosine A 0.6314→E 0.6605 and lowered mean relative squared error 2.4246→2.2122;
+it remained far below teacher-Q D 0.8956. Query residual RMSE was 0.3819 on
+the fit segment and 0.5305 on the holdout segment. Artifact
+`cross-read-row6-layer17-qfit8.json` records the rank, fit split, factors,
+and conditional read metrics. This is a fixed-prefix, teacher-informed
+diagnostic; its coefficients are not a deployable adapter and no task score
+improvement is claimed.
+
 ### Active exact-query correction hook
 
 The existing low-rank `query_correction_*` parameters previously affected only
