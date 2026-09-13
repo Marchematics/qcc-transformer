@@ -1554,3 +1554,20 @@ slots, so it checks the native all-fit inference path rather than retention
 quality under eviction. QCC owned state is4,995,568,640 bytes, peak allocated
 8,893,238,784 bytes. Matching generation does not establish identical logits
 at every prediction position. The eviction-case row21 remains running.
+
+### Native Phi causal original-KV pair completes successfully
+
+Both prespecified causal-block records pass recall and completion. Row21
+(16,205 tokens, actual eviction) outputs the complete target
+`f9b81b81-b24d-4b46-bdba-f5f787343daf.` in35 tokens and ends normally.
+Full-KV outputs the same UUID with a leading colon in36 tokens. Row16
+already matched Full-KV exactly. Both QCC request-state measurements are
+4,995,568,640 bytes; row21 peak allocated is10,629,317,120 bytes.
+
+This is the first successful real Phi eviction-case result for the causal
+original-KV block path. It uses neither future-tail selection nor teacher
+prefill. It demonstrates feasibility on these two diagnostic records, not
+suite-level99% quality,1M retrieval or serving speed. The next comparison
+uses exactly the four prespecified16K records from the preceding quality-first
+run, with the same model/template/capacity/dtype and causal scoring/commit.
+No writer training or capacity sweep is introduced.

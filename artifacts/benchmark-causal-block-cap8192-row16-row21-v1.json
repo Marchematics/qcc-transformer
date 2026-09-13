@@ -1,16 +1,83 @@
-/root/miniconda3/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
-  import pynvml  # type: ignore[import]
-`torch_dtype` is deprecated! Use `dtype` instead!
-`flash-attention` package not found, consider installing for better performance: No module named 'flash_attn'.
-Current `flash-attention` does not support `window_size`. Either upgrade or use `attn_implementation='eager'`.
-Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards:  50%|█████     | 1/2 [00:05<00:05,  5.19s/it]Loading checkpoint shards: 100%|██████████| 2/2 [00:08<00:00,  4.01s/it]Loading checkpoint shards: 100%|██████████| 2/2 [00:08<00:00,  4.18s/it]
-{"event": "record", "run_id": "causal-block-cap8192-row16-row21-v1", "mode": "full_kv", "line": 1, "answers": ["6569343"], "length_chars": 20384, "source_line": 16, "tokens": 7441, "task": "niah_multikey_2", "length_bucket": "0-8K", "prediction": "6569343.", "generated_tokens": 10, "reached_output_limit": false, "answer_recall": 1.0, "score": 1.0, "correct": true, "peak_cuda_allocated_bytes": 4482342400}
-{"event": "record", "run_id": "causal-block-cap8192-row16-row21-v1", "mode": "full_kv", "line": 2, "answers": ["f9b81b81-b24d-4b46-bdba-f5f787343daf"], "length_chars": 23159, "source_line": 21, "tokens": 16205, "task": "niah_multikey_3", "length_bucket": "8-32K", "prediction": ": f9b81b81-b24d-4b46-bdba-f5f787343daf.", "generated_tokens": 36, "reached_output_limit": false, "answer_recall": 1.0, "score": 1.0, "correct": true, "peak_cuda_allocated_bytes": 7083409920}
-past_key_values should not be None in from_legacy_cache()
-{"event": "record", "run_id": "causal-block-cap8192-row16-row21-v1", "mode": "qcc", "line": 1, "answers": ["6569343"], "length_chars": 20384, "source_line": 16, "tokens": 7441, "task": "niah_multikey_2", "length_bucket": "0-8K", "prediction": "6569343.", "generated_tokens": 10, "reached_output_limit": false, "answer_recall": 1.0, "score": 1.0, "correct": true, "qcc_runtime_state": {"tensor_storage_by_device": {"cuda:0": 4995568128}, "rng_state_bytes": 512, "total_bytes": 4995568640}, "peak_cuda_allocated_bytes": 8893238784}
-{"event": "record", "run_id": "causal-block-cap8192-row16-row21-v1", "mode": "qcc", "line": 2, "answers": ["f9b81b81-b24d-4b46-bdba-f5f787343daf"], "length_chars": 23159, "source_line": 21, "tokens": 16205, "task": "niah_multikey_3", "length_bucket": "8-32K", "prediction": "f9b81b81-b24d-4b46-bdba-f5f787343daf.", "generated_tokens": 35, "reached_output_limit": false, "answer_recall": 1.0, "score": 1.0, "correct": true, "qcc_runtime_state": {"tensor_storage_by_device": {"cuda:0": 4995568128}, "rng_state_bytes": 512, "total_bytes": 4995568640}, "peak_cuda_allocated_bytes": 10629317120}
 {
+  "schema": "qcc-ruler-v1",
+  "answer_recall_summary": {
+    "full_kv": 1.0,
+    "qcc": 1.0,
+    "retention": 1.0,
+    "retention_by_task": {
+      "niah_multikey_2": 1.0,
+      "niah_multikey_3": 1.0
+    },
+    "retention_by_length": {
+      "0-8K": 1.0,
+      "8-32K": 1.0
+    }
+  },
+  "pretrained_parameters": 3821079552,
+  "pretrained_storage_elements": 2009140224,
+  "parameter_count_method": "transformers.num_parameters",
+  "trainable_parameters": 11504640,
+  "trainable_fraction_of_pretrained": 0.0030108349861437274,
+  "benchmark": "ruler",
   "model": "/datasets/ComfyUI/models/LLM/Phi-3.5-mini-instruct",
+  "model_id": "/datasets/ComfyUI/models/LLM/Phi-3.5-mini-instruct",
+  "run_id": "causal-block-cap8192-row16-row21-v1",
+  "progress_jsonl": "artifacts/benchmark-causal-block-cap8192-row16-row21-v1.progress.jsonl",
+  "matched_full_kv": true,
+  "offload_full_kv": true,
+  "full_kv_resident_layers": 8,
+  "prompt_template": "phi3",
+  "answer_prefix_applied": true,
+  "scoring": "mean case-insensitive answer recall; output-limit and generation errors score zero",
+  "attention_sink_size": 0,
+  "archive_mix_override": null,
+  "real_model": true,
+  "synthetic": false,
+  "official": true,
+  "attn_implementation": "eager",
+  "chunked_full_attention": true,
+  "full_attention_query_chunk_size": 128,
+  "full_attention_key_chunk_size": 1024,
+  "chunked_full_attention_layers": 32,
+  "use_triton": true,
+  "local_attention_backend": "sdpa",
+  "prefill_chunk_size": 512,
+  "quality_first": false,
+  "quality_block_propagation": false,
+  "quality_prefill_shadow_only": false,
+  "exact_storage_dtype": "bfloat16",
+  "exact_query_correction": false,
+  "active_query_correction": false,
+  "archive_lexical_landmark": false,
+  "causal_coreset": false,
+  "causal_block_retention": true,
+  "coreset_capacity": null,
+  "coreset_merge_policy": "ward",
+  "coreset_query_probes": 8,
+  "coreset_partition_weight": 1.0,
+  "exact_attention": true,
+  "background_size": 128,
+  "retention_block_size": 32,
+  "quality_query_tail": null,
+  "exact_num_sets": null,
+  "exact_ways": null,
+  "full_suite": false,
+  "qcc_only": false,
+  "qcc_score": 1.0,
+  "full_kv_score": 1.0,
+  "quality_retention": 1.0,
+  "generation_errors": {
+    "full_kv": 0,
+    "qcc": 0
+  },
+  "task_ratios": {
+    "task:niah_multikey_2": 1.0,
+    "task:niah_multikey_3": 1.0,
+    "length:0-8K": 1.0,
+    "length:8-32K": 1.0
+  },
+  "quality_score": 1.0,
+  "native_context_tokens": 131072,
   "records": 2,
   "patched_layers": [
     "model.layers.0.self_attn",
@@ -145,5 +212,6 @@ past_key_values should not be None in from_legacy_cache()
         "peak_cuda_allocated_bytes": 10629317120
       }
     ]
-  }
+  },
+  "note": "Official RULER record scoring; generation failures count as incorrect and no quality claim is made beyond this split."
 }
