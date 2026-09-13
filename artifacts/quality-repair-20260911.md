@@ -1049,3 +1049,40 @@ foreground slots plus 128 background slots; QCC produced a punctuation-heavy
 `benchmark-quality-first-row16-chunked-full-v1.json`. This is an independent
 real task failure for the current quality-first path; it does not support
 promoting larger exact capacity or the lexical variant as a general repair.
+
+### LongRoPE boundary repair and causal parity verification
+
+A real Phi-3.5 layer isolation found the source of the long-window failure:
+raw Q/K/V projections matched the teacher exactly, but Q/K rotary outputs had
+cosines 0.6781/0.6658 because the retrofit selected long factors per absolute
+token position. Phi LongRoPE selects short or long factors from the current
+sequence length and applies that table to every position in the call. The
+retrofit now accepts an explicit sequence-length context and the HF bounded
+prefill passes the complete request length to every chunk. This preserves the
+semantics when a request crosses the 4,096-token original limit.
+
+After the repair, the same layer17 real-trace attention output reached cosine
+0.999984 for both one-call and 512-token chunked execution, with relative RMSE
+0.00557/0.00558. The prompt/cache isolation on row16 reached prompt-logit
+cosine 0.999992 and matching top-1; the one-token cached decode reached
+cosine 0.988135 with matching top-1. Artifacts are
+`phi-qkv-compare-row16-layer17.json`, `phi-layer17-local-isolation-row16.json`,
+and `prefill-cache-isolation-row16.json`. These are implementation fidelity
+checks, not aggregate task scores.
+
+The corrected paired row16 quality-first run now returns the exact answer
+(`6569343`) normally at 30 tokens, score 1.0. Artifact
+`benchmark-quality-first-row16-chunked-full-v3.json` supersedes the pre-fix
+row16 failure. The fixed-window row16 control also returns score 1.0 in
+`benchmark-full-window-row16-chunked-v2.json`.
+
+A four-record cross-task 8K probe (one each from niah_multikey_2,
+naire_multikey_3, niah_single_1, and variable tracking) completed after the
+repair. Full-KV completed 3/4 under the 128-token completion rule (the variable
+tracking reference itself hit the limit). QCC completed 1/4 by the same score:
+the niah_multikey_2 record finished correctly; the UUID and single-number
+records contained the correct answer but continued into extra text until the
+limit, and variable tracking likewise hit the limit. QCC answer recall was
+1.0 on all four records. This is a four-record, 0–8K diagnostic, not a suite
+result; artifact `benchmark-quality-first-selected8k-v1.json` records both
+recall and completion scores.

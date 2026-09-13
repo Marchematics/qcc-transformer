@@ -535,6 +535,7 @@ class HFQCCAttention(nn.Module):
                 q_raw,
                 positions[:, query_token_start:],
                 query_embeddings,
+                sequence_length=length,
             )
             quality_query = q_rotary
             quality_query_start = max(0, query_token_start - self.qcc.window_size)
@@ -547,6 +548,7 @@ class HFQCCAttention(nn.Module):
                 position_embeddings=position_embeddings,
                 quality_query=quality_query,
                 quality_query_start=quality_query_start,
+                rope_sequence_length=length,
             )
         outputs: list[Tensor] = []
         for start in range(0, length, chunk_size):
@@ -567,6 +569,7 @@ class HFQCCAttention(nn.Module):
                     position_embeddings=piece_embeddings,
                     quality_query=quality_query,
                     quality_query_start=quality_query_start,
+                    rope_sequence_length=length,
                 )
             )
         return torch.cat(outputs, dim=1)

@@ -63,6 +63,35 @@ def test_attention_sinks_match_prefix_union_window_and_reset() -> None:
         torch.testing.assert_close(attention.archive._numerator, reference.archive._numerator)
 
 
+def test_longrope_uses_one_factor_table_for_a_chunked_long_request() -> None:
+    attention = QCCSelfAttention(
+        8,
+        2,
+        window_size=8,
+        num_codes=2,
+        use_triton=False,
+        rope_theta=10000,
+        rope_inv_freq=torch.tensor([1.0, 0.1]),
+        rope_inv_freq_long=torch.tensor([0.7, 0.07]),
+        rope_original_max_position_embeddings=4,
+        rope_attention_scaling=1.2,
+    )
+    query = torch.randn(1, 2, 8, 4)
+    key = torch.randn_like(query)
+    positions = torch.arange(8).view(1, -1)
+    full_q, full_k = attention._apply_rope(
+        query, key, positions, sequence_length=8
+    )
+    first_q, first_k = attention._apply_rope(
+        query[:, :, :4], key[:, :, :4], positions[:, :4], sequence_length=8
+    )
+    second_q, second_k = attention._apply_rope(
+        query[:, :, 4:], key[:, :, 4:], positions[:, 4:], sequence_length=8
+    )
+    torch.testing.assert_close(full_q, torch.cat((first_q, second_q), dim=2))
+    torch.testing.assert_close(full_k, torch.cat((first_k, second_k), dim=2))
+
+
 def test_local_attention_promotes_large_qk_logits_before_softmax() -> None:
     """Large projected activations must not turn the fp16 softmax into NaN."""
 

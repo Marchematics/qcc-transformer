@@ -1843,6 +1843,7 @@ class QCCSelfAttention(nn.Module):
         key: Tensor,
         positions: Optional[Tensor],
         position_embeddings: Optional[tuple[Tensor, Tensor]] = None,
+        sequence_length: Optional[int] = None,
     ) -> tuple[Tensor, Tensor]:
         """Apply rotary phases to q/k for an optional relative-position path."""
 
@@ -1939,10 +1940,20 @@ class QCCSelfAttention(nn.Module):
                 long_angles = position_values * self.rope_inv_freq_long.to(
                     device=query.device
                 )
-                use_long = (
-                    positions >= self._rope_original_max_position_embeddings
-                ).unsqueeze(-1)
-                angles = torch.where(use_long, long_angles, short_angles)
+                # Phi LongRoPE selects its factor table from the *current
+                # sequence length*, so once a request crosses the original
+                # context limit every position in that call uses long factors.
+                # Selecting per-position factors leaves the prefix on short
+                # phases and makes Q/K diverge sharply after the boundary.
+                context_length = (
+                    int(sequence_length)
+                    if sequence_length is not None
+                    else int(positions.max().item() + 1)
+                )
+                if context_length <= 0:
+                    raise ValueError("sequence_length must be positive")
+                use_long = context_length > self._rope_original_max_position_embeddings
+                angles = long_angles if bool(use_long) else short_angles
             else:
                 angles = position_values * self.rope_inv_freq.to(device=query.device)
             # Keep the trigonometric values in fp32 until the optional HF
@@ -1963,10 +1974,15 @@ class QCCSelfAttention(nn.Module):
                 long_angles = position_values * self.rope_inv_freq_long.to(
                     device=query.device
                 )
-                use_long = (
-                    positions >= self._rope_original_max_position_embeddings
-                ).unsqueeze(-1)
-                angles = torch.where(use_long, long_angles, short_angles)
+                context_length = (
+                    int(sequence_length)
+                    if sequence_length is not None
+                    else int(positions.max().item() + 1)
+                )
+                if context_length <= 0:
+                    raise ValueError("sequence_length must be positive")
+                use_long = context_length > self._rope_original_max_position_embeddings
+                angles = long_angles if bool(use_long) else short_angles
             else:
                 angles = position_values * self.rope_inv_freq.to(device=query.device)
             # See the rank-4 path above: match HF's fp32 RoPE scaling order.
@@ -2447,6 +2463,7 @@ class QCCSelfAttention(nn.Module):
         position_embeddings: Optional[tuple[Tensor, Tensor]] = None,
         quality_query: Optional[Tensor] = None,
         quality_query_start: int = 0,
+        rope_sequence_length: Optional[int] = None,
     ) -> Tensor:
         """Decode a causal block while preserving the persistent cache.
 
@@ -2478,7 +2495,13 @@ class QCCSelfAttention(nn.Module):
             position_ids = self._seen_tokens + torch.arange(
                 length, device=hidden.device, dtype=torch.long
             )
-        q, k = self._apply_rope(q_raw, k_raw, position_ids, position_embeddings)
+        q, k = self._apply_rope(
+            q_raw,
+            k_raw,
+            position_ids,
+            position_embeddings,
+            sequence_length=rope_sequence_length,
+        )
         self._retain_attention_sinks(k, v)
         if not self.archive_position_invariant:
             archive_q = q

@@ -1,0 +1,31 @@
+{
+  "model": "/datasets/ComfyUI/models/LLM/Phi-3.5-mini-instruct",
+  "record": 15,
+  "tokens": 7422,
+  "window": 8192,
+  "prefill_chunk_size": 512,
+  "chunked_full_layers": 32,
+  "prompt_logits": {
+    "cosine": 0.9999923706054688,
+    "top1_equal": true,
+    "student_token": 13,
+    "reference_token": 13,
+    "state_lengths": [
+      7422,
+      7422,
+      7422
+    ]
+  },
+  "next_step_logits": {
+    "cosine": 0.9881347417831421,
+    "top1_equal": true,
+    "student_token": 13,
+    "reference_token": 13,
+    "state_lengths": [
+      7423,
+      7423,
+      7423
+    ]
+  },
+  "note": "Isolation diagnostic. Prompt is shorter than the QCC window; next-step comparison uses the reference argmax token. This is not a task score."
+}
