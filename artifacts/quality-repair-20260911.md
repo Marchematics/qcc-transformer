@@ -1249,3 +1249,16 @@ final paired report to show correct, completed answers before launching
 changes to bfloat16. Its stdout/stderr are preserved in the matching .log file.
 If the first run fails or produces no report, the follow-up stops without
 starting another GPU workload. No result is claimed for either pending run.
+
+
+### Scratch release verified on real row16
+
+The scratch-release-v1 run completed with the same correct 30-token prediction
+as the pre-reclamation quality-first 768+128 run. Owned runtime state is
+2,350,797,824 bytes (2.1894 GiB), down from 5,899,964,928 bytes
+(60.16% reduction). Relative to recurrence/raw-key reclamation alone,
+this releases another 1,811,939,328 bytes, exactly the retained per-layer K/V
+scratch geometry. Peak CUDA allocated is 6,131,671,040
+bytes. These measurements concern one NF4 row16 request, with FP32 bank K/V;
+they do not establish concurrency or serving speedups. Same-capacity BF16
+validation has started sequentially and is still pending.
