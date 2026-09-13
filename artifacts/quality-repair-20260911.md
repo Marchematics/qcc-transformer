@@ -1226,3 +1226,15 @@ scratch release, BF16 bank storage, larger capacity, or suite-level quality.
 RULER reports now additionally summarize answer recall and its paired ratios by
 task and length. Existing completion-weighted score fields remain distinct.
 A zero Full-KV denominator yields null rather than a misleading zero ratio.
+
+### BF16 storage comparison through replacement and reservoir updates
+
+Expanded the existing precision regression from a not-yet-full table to a
+43-event, two-request/two-head stream with close FP32 scores, both token and
+four-token block retention, and a three-slot background reservoir. After every
+write, BF16-source K/V stored in BF16 or FP32 yield identical foreground ages,
+scores, K/V, background contents/counts, attention outputs, and log partitions.
+The stream exceeds both capacities and ends with an incomplete block. All 19
+associative tests pass. This confirms the storage-only property under these
+controlled BF16-source conditions; it does not substitute for the forthcoming
+real-model capacity/storage pair.
