@@ -1491,3 +1491,13 @@ contemporaneous-logit scoring, with future-tail scoring disabled.
 The waiter owns no GPU state and waits for the preceding process to exit;
 no causal Phi result is available yet. This is a quality experiment, not a
 serving benchmark (Full-KV offloading is retained for memory feasibility).
+
+### First completed 16K cross-task QCC pair
+
+Source line2 (niah_multikey_2, 16,157 formatted tokens) now has both sides:
+Full-KV and quality-first 8192 BF16 QCC output exactly `5528843.`, finish at
+10 tokens, and receive recall1/completion1. QCC request state is
+4,996,355,072 bytes and peak allocated10,601,467,904 bytes. The target is near
+the input end, so this paired success is not evidence of reliable distant
+retrieval. Three QCC records remain pending. The partial progress and log
+are preserved as an ongoing run; no four-task aggregate is available.
