@@ -987,3 +987,13 @@ from 1.5 MiB to 24 MiB. This is a post-hoc attention-read diagnostic, not task
 quality, but it rules out treating correct random-feature scaling as a cheap
 replacement for the missing query-generalized response representation.
 Artifact: `phi-kernel-layer17.json`.
+
+An offline upper-bound probe ran six Lloyd iterations of per-head k-means over
+the full real Phi teacher history, then used count-weighted centroid K/V in the
+same final query. Mean cosine was 0.5054/0.5288/0.9019/0.6627 for 32/64/128/256
+centroids; the non-monotonic result reflects centroid initialization and shows
+that key-space clustering alone is unstable. This uses the complete history
+and the final query for evaluation, so it is neither causal nor a task score.
+Artifact: `phi-kmeans-layer17.json`. It does not justify adding a k-means
+writer to the serving path without a query-domain objective and better
+initialization.
