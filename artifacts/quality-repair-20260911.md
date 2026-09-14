@@ -1970,3 +1970,16 @@ logical pretrained backbone) and measured QCC state `5,031,220,224` bytes
 but correcting it did not recover unknown remote multi-key retrieval. This
 rules out the old deployment mismatch as the primary explanation for those
 failures; further full-head writer expansion is not supported by this result.
+
+### Sparse-core 5% first diagnostic result
+
+After fixing the attention-function output layout, the sparse-core simulation ran
+one 32K `niah_multikey_2` record with 52 of 1,024 Phi layer/head units (5%)
+allowed to read full remote history; all other units used the exact local
+4,096-token Triton window. The selected units were ranked from normalized
+teacher answer-mass traces for two other records, so this is an independent
+cross-task diagnostic rather than an oracle for the target row. The target
+`9116227` was not recovered and the 16-token diagnostic generation produced
+no answer (`answer_recall=0`, `score=0`). A 10% run on the same row is pending;
+the temporary failed simulations caused by the original dense-mask and output
+layout bugs are not quality evidence.
