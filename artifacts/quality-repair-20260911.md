@@ -1629,3 +1629,14 @@ or answer is read. A focused regression verifies the stored score against
 the native scaled dot product. The causal HF tests and this regression pass.
 The currently running32K job was loaded before this change and retains its
 original code; its result will be labeled accordingly.
+
+### 32K causal-block first retrieval failure
+
+The first QCC record in the fixed32K follow-up is source line7,
+niah_multikey_2, with the target at metadata position5080. At8192 foreground
+slots, causal contemporaneous-QK retention outputs `9486799.` for target
+`9116227`, so answer recall is0. It terminates normally after10 tokens and
+uses4,995,568,640 bytes of QCC state. This is a genuine eviction case
+(the target lies beyond the4096 local window). It provides a concrete failure
+of the untrained instantaneous-QK writer for unknown future queries. The
+remaining three QCC records are still running; no aggregate is reported.
