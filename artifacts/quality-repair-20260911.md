@@ -1694,3 +1694,10 @@ retain arbitrary unknown remote needles at32K with8192 slots.
 The run used the pre-freeze implementation snapshot and its recorded marked
 trainable count is0.3010835%; subsequent causal constructions freeze bypassed
 parameters.
+### JSONL input support for causal admission calibration
+
+The admission calibration helper now accepts RULER JSONL files directly. It
+extracts each record's `input` (or `text`) field and joins records into the
+calibration stream, preserving the existing plain-text path. This avoids
+training on serialized metadata. Python compilation remains clean. No
+checkpoint has been produced by this helper change yet.

@@ -50,6 +50,19 @@ def _read_text(path: Path) -> str:
     text = path.read_text(encoding="utf-8")
     if not text.strip():
         raise ValueError(f"calibration file is empty: {path}")
+    if path.suffix == ".jsonl":
+        records = []
+        for line in text.splitlines():
+            if not line.strip():
+                continue
+            record = json.loads(line)
+            value = record.get("input", record.get("text"))
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"JSONL calibration record has no input/text: {path}")
+            records.append(value)
+        if not records:
+            raise ValueError(f"calibration JSONL is empty: {path}")
+        return "\n\n".join(records)
     return text
 
 
