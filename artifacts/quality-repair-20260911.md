@@ -1737,3 +1737,14 @@ which records survive. Focused causal tests pass. The already-running
 causal-admission-all-v2-four32k-v2 process was instantiated before this change
 and retains threshold0; its eventual output will be labeled as the pre-correction
 control. Subsequent evaluations will use the corrected threshold.
+### First trained-causal-predictor 32K evaluation result
+
+The corrected adapter evaluation has completed all four Full-KV baselines and
+its first QCC record. Source line7 (niah_multikey_2, 32,097 tokens, target
+position5080) still fails: target9116227, prediction9703933, recall0. QCC
+state is4,995,568,640 bytes. This is a genuine remote retrieval case and
+shows that the predictor trained on short hidden-state chunks did not recover
+the held-out 32K needle. The remaining three QCC records are still running;
+no aggregate is claimed. The evaluation uses the adapter with num_codes16,
+causal admission predictor enabled, and the pre-threshold-correction loaded
+configuration; later runs will use the all-score threshold correction.
