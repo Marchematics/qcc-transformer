@@ -2086,3 +2086,17 @@ QCC state was `5,247,226,880` bytes (`4.887 GiB`) with five bounded full-history
 unit caches enabled. This one-row result does not decide the number of units,
 but it shows that five selected full-history units do not repair the current
 remote retrieval path.
+
+### Causal secondary-bank core10 real-model probe
+
+A one-row 32K probe extended the integrated design to 103 target-ranked
+full-history layer/head units (10%) while retaining the existing 8,192-slot
+causal exact bank for all other units. Full-KV returned `9116227`; the
+combined path returned `not explicitly stated.` after five tokens, with zero
+answer recall and score. The measured state was `10,179,728,384` bytes
+(`9.48 GiB`) per request and peak CUDA allocation was `18,950,910,464` bytes.
+The 10% full-history addition therefore did not recover this remote needle,
+and its state cost already exceeds the all-head 8,192-bank path. This is a
+single-row diagnostic; it does not rule out a different head selection or a
+non-disruptive prefill implementation, but it removes the simple core10 plus
+current-bank candidate from the leading path.
