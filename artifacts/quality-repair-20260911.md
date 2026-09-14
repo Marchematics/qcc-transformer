@@ -1993,3 +1993,14 @@ score 0). Together with the 5% result, this particular cross-task ranking did
 not recover the remote needle at either tested fraction. The result is only a
 head-mask simulation; it does not establish that 10% is insufficient when the
 core is selected from the target task or when oracle retention is used.
+
+### Sparse-core mask sanity and corrected 5% result
+
+The sparse-core diagnostic was first run with all 1,024 layer/head units marked
+as long-range. With the Phi-3 prompt template applied, the 32K multi-key row
+reproduced the Full-KV target `9116227` in 10 generated tokens, validating the
+attention-function layout and prompt formatting. The corrected 5% mask (52
+units ranked from normalized answer-mass traces of two other records) then
+failed the same target in a 16-token run; it produced the distractor
+`7289247`. The earlier 5%/10% files without the Phi-3 template were discarded
+as invalid diagnostics.
