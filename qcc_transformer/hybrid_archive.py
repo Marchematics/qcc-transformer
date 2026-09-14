@@ -818,6 +818,34 @@ class HybridQCCArchive(QCCArchive):
                     selected_positions.any(dim=0), as_tuple=False
                 ).flatten()
 
+            # The normal quality-first configuration keeps a reservoir for
+            # every observed event and commits fixed blocks.  Feed that whole
+            # tile through the bank's causal batched path instead of calling
+            # _admit_one once per token.  The triangular extra-KV mask gives
+            # each query the same read-before-commit view as the scalar loop;
+            # -inf scores preserve the existing admission mask and reservoir
+            # sampling for non-selected head/position pairs.
+            if (
+                self.quality_first
+                and not self.quality_prefill_shadow_only
+                and self.exact_bank.background_size
+                and self.exact_bank.block_size > 1
+            ):
+                write_scores = torch.where(
+                    eligible & selected_positions.unsqueeze(1),
+                    admission_score,
+                    torch.full_like(admission_score, -torch.inf),
+                )
+                result, conf = self.exact_bank.update_read_chunk(
+                    key[:, :, tile_start:tile_end],
+                    value[:, :, tile_start:tile_end],
+                    query[:, :, tile_start:tile_end],
+                    admission_score=write_scores,
+                )
+                exact[:, :, tile_start:tile_end] = result
+                confidence[:, :, tile_start:tile_end] = conf
+                continue
+
             if self.quality_prefill_shadow_only:
                 # Populate the bounded tier without reading it back into the
                 # prefill representation. Admission remains ordered so block
