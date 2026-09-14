@@ -2051,3 +2051,14 @@ that the earlier cross-task ranking was not the only issue. It still does not
 prove a 5% core is insufficient for the final design, because non-core units
 were given no bounded exact bank and the ranking uses attention mass rather
 than causal deletion impact.
+
+### Target-derived sparse-core 10% diagnostic
+
+The target row's own Full-KV decode remote-mass ranking was expanded to 103
+units (10%) and rerun with the same local-only non-core intervention. Full-KV
+again returned `9116227`, while the masked run returned the distractor
+`7289247` in 10 tokens (`answer_recall=0`, `score=0`). This makes it unlikely
+that the earlier 5% failure is explained only by cross-task head ranking. The
+intervention still removes all non-core bounded remote state, so it remains a
+diagnostic bound rather than a verdict on a combined sparse-core plus bounded
+bank design.
