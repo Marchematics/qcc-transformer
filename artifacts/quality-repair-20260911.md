@@ -2028,3 +2028,14 @@ selection from context dependence: the intervention also removes every other
 remote block, so it is not evidence that retaining the correct block inside an
 otherwise complete remote state would fail. The oracle positions were
 `5056–5087` after the Phi-3 prompt formatting.
+
+### Sparse-core evidence correction
+
+The earlier sparse-core entry that described a 5% run before the Phi-3 template
+was applied is superseded and must not be used as quality evidence. Its invalid
+artifacts were removed. The interpretable sequence is the later all-unit sanity
+(run with the Phi-3 template, which reproduced the Full-KV target), followed by
+5% and 10% runs with the same template and corrected HF output transpose; both
+of those cross-task masks failed `niah_multikey_2`. The 5%/10% masks still
+replace all non-core remote history with a local window, so they test a
+stronger intervention than adding a core to the current QCC bank.
