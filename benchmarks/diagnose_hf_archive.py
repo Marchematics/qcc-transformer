@@ -661,6 +661,9 @@ def sparse_core_simulation(model, tokenizer, record, args):
     ordered = flat.argsort(descending=True)
     results = []
     records = [(args.record, record)]
+    if args.prompt_template == 'phi3':
+        from benchmarks.benchmark_hf_ruler import _format_phi3_record
+        records = [(args.record, _format_phi3_record(record))]
     original_attention = ALL_ATTENTION_FUNCTIONS['sdpa']
     window = int(args.window_size)
 
@@ -759,6 +762,7 @@ def main():
     parser.add_argument('--model', required=True)
     parser.add_argument('--ruler-jsonl', type=Path, required=True)
     parser.add_argument('--record', type=int, default=3)
+    parser.add_argument('--prompt-template', choices=('as-is', 'phi3'), default='phi3')
     parser.add_argument('--window-size', type=int, default=4096)
     parser.add_argument('--sink-size', type=int, default=32)
     parser.add_argument('--query-sampling', choices=('uniform', 'tail'), default='uniform')
