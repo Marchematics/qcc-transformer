@@ -2062,3 +2062,16 @@ that the earlier 5% failure is explained only by cross-task head ranking. The
 intervention still removes all non-core bounded remote state, so it remains a
 diagnostic bound rather than a verdict on a combined sparse-core plus bounded
 bank design.
+
+### Sparse core plus oracle answer block diagnostic
+
+To separate “missing answer block” from “all other remote context is needed”, a
+10% target-ranked full-history core (103 units) was combined with the known
+32-token answer block for every non-core head; non-core heads otherwise used the
+local 4,096-token window. The Full-KV ranking pass returned `9116227`, but the
+combined masked run returned `51` and had zero answer recall. This intervention
+still changes all non-core prefill outputs and is an upper-bound diagnostic,
+not a final bounded-bank implementation. It shows that preserving one known
+answer block plus a small full-history core is insufficient under this mask;
+other remote context or a less disruptive bounded representation remains
+necessary.
