@@ -2015,3 +2015,16 @@ all-unit sanity remains correct, so the 5% and 10% failures are attributable
 to the tested head selection/coverage rather than a prompt or output-layout
 mismatch. This does not test a target-derived oracle core and is not a final
 sparse-core architecture result.
+
+### Oracle answer-block diagnostic
+
+A diagnostic mask retained the 32-token prompt block containing the known
+`9116227` answer for every Phi attention head and allowed each head's recent
+4,096-token window; all other remote history was masked. The 32K generation did
+not recover the target and produced an unrelated `7...` answer (`recall=0`,
+`score=0`). This rules out the narrow claim that the answer block alone is
+sufficient under the altered prefill representation. It does not isolate
+selection from context dependence: the intervention also removes every other
+remote block, so it is not evidence that retaining the correct block inside an
+otherwise complete remote state would fail. The oracle positions were
+`5056–5087` after the Phi-3 prompt formatting.
