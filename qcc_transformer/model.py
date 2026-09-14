@@ -2264,12 +2264,21 @@ class QCCSelfAttention(nn.Module):
             or self._full_history_key_cache.shape[0] != bsz
             or self._full_history_key_cache.device != key.device
             or self._full_history_key_cache.dtype != key.dtype
-            or self._full_history_key_cache.shape[2] < self.max_position_embeddings
+            or self._full_history_key_cache.shape[2] < needed
         ):
+            previous_capacity = (
+                0
+                if self._full_history_key_cache is None
+                else int(self._full_history_key_cache.shape[2])
+            )
+            capacity = min(
+                self.max_position_embeddings,
+                max(needed, self.window_size, max(1, previous_capacity * 2)),
+            )
             cache_shape = (
                 bsz,
                 len(self.full_history_heads),
-                self.max_position_embeddings,
+                capacity,
                 dim,
             )
             self._full_history_key_cache = torch.empty(
