@@ -1,0 +1,28 @@
+{
+  "run_id": "causal-secondarybank-core5-row1-v3",
+  "full_history_units": [
+    [
+      8,
+      4
+    ],
+    [
+      10,
+      8
+    ],
+    [
+      10,
+      17
+    ],
+    [
+      12,
+      5
+    ],
+    [
+      12,
+      6
+    ]
+  ],
+  "purpose": "Semantics regression after vectorized block reservoir update; one 32K row.",
+  "output": "artifacts/benchmark-causal-secondarybank-core5-row1-v3.json",
+  "progress": "artifacts/benchmark-causal-secondarybank-core5-row1-v3.progress.jsonl"
+}
