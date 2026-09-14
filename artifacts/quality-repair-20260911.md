@@ -1810,3 +1810,12 @@ are writer-label metrics, not task quality. The adapter is saved locally as
 32K generation evaluation. A first launch failed before training because the
 new causal flag was not propagated to the patch kwargs; no result was written,
 then the corrected calibration completed.
+### First hidden-state writer 32K evaluation result
+
+The hidden-state writer's first QCC record fails badly on the remote number
+task. Source line7 target9116227 is not present in the generated answer;
+the model repeats distractor numbers and reaches the128-token output limit,
+so answer recall and completion score are0. QCC state is4,995,568,640 bytes.
+This is a stronger negative result than the K/V-only predictor on the same
+record and does not support promoting the hidden writer. Three QCC records
+remain pending; no aggregate claim is made.
