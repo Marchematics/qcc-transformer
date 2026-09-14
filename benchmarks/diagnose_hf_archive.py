@@ -636,12 +636,46 @@ def sparse_core_simulation(model, tokenizer, record, args):
     trace_paths = args.sparse_core_head_traces or []
     if args.oracle_block and args.oracle_block_size <= 0:
         raise ValueError('--oracle-block-size must be positive')
-    if not args.oracle_block and not trace_paths:
+    if not args.oracle_block and not trace_paths and not args.sparse_core_rank_target:
         raise ValueError('--sparse-core requires --sparse-core-head-traces')
     layers = int(model.config.num_hidden_layers)
     heads = int(model.config.num_attention_heads)
     unit_scores = torch.zeros(layers, heads, dtype=torch.float64)
     used_traces = []
+    records = [(args.record, record)]
+    if args.prompt_template == 'phi3':
+        from benchmarks.benchmark_hf_ruler import _format_phi3_record
+        records = [(args.record, _format_phi3_record(record))]
+    if args.sparse_core_rank_target:
+        # Rank units from the target's own Full-KV decode remote mass. This is
+        # a diagnostic ranking pass; it does not feed target labels into the
+        # sparse generation itself.
+        rank_original = ALL_ATTENTION_FUNCTIONS['sdpa']
+
+        def capture_target_mass(module, query, key, value, attention_mask, **kwargs):
+            if query.shape[-2] == 1:
+                layer = int(getattr(module, 'layer_idx', -1))
+                if 0 <= layer < layers:
+                    logits = torch.matmul(query.float(), key.float().transpose(-1, -2))
+                    logits = logits * float(kwargs.get('scaling', 1.0 / math.sqrt(query.shape[-1])))
+                    if isinstance(attention_mask, torch.Tensor):
+                        logits = logits + attention_mask.to(dtype=logits.dtype)
+                    probability = torch.softmax(logits, dim=-1)
+                    remote_end = max(0, key.shape[-2] - int(args.window_size))
+                    if remote_end:
+                        unit_scores[layer] += probability[..., :remote_end].sum(-1)[0, :, 0].double().cpu()
+            return rank_original(module, query, key, value, attention_mask, **kwargs)
+
+        ALL_ATTENTION_FUNCTIONS.register('sdpa', capture_target_mass)
+        try:
+            _run_model(
+                model, tokenizer, records, torch.device('cuda'),
+                args.sparse_core_rank_new_tokens, qcc=False,
+                offload_full_kv=True, full_kv_resident_layers=8,
+            )
+        finally:
+            ALL_ATTENTION_FUNCTIONS.register('sdpa', rank_original)
+        used_traces.append('target Full-KV decode remote-mass capture')
     for path in trace_paths:
         trace = json.loads(Path(path).read_text())
         mass = torch.zeros(layers, heads, dtype=torch.float64)
@@ -662,10 +696,6 @@ def sparse_core_simulation(model, tokenizer, record, args):
         raise ValueError('--sparse-core-fractions must contain values in (0,1]')
     ordered = flat.argsort(descending=True)
     results = []
-    records = [(args.record, record)]
-    if args.prompt_template == 'phi3':
-        from benchmarks.benchmark_hf_ruler import _format_phi3_record
-        records = [(args.record, _format_phi3_record(record))]
     oracle_positions = set()
     if args.oracle_block:
         prompt_ids = tokenizer(records[0][1]['input'], add_special_tokens=False)['input_ids']
@@ -868,6 +898,9 @@ def main():
     parser.add_argument('--sparse-core-head-traces', type=Path, nargs='+')
     parser.add_argument('--sparse-core-fractions', default='0.025,0.05,0.10')
     parser.add_argument('--sparse-core-max-new-tokens', type=int, default=64)
+    parser.add_argument('--sparse-core-rank-target', action='store_true',
+                        help='rank core units from this record\'s Full-KV decode remote mass')
+    parser.add_argument('--sparse-core-rank-new-tokens', type=int, default=16)
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     # The installed HF kernels package currently fails strict dataclass
