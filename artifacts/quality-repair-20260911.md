@@ -1983,3 +1983,13 @@ cross-task diagnostic rather than an oracle for the target row. The target
 no answer (`answer_recall=0`, `score=0`). A 10% run on the same row is pending;
 the temporary failed simulations caused by the original dense-mask and output
 layout bugs are not quality evidence.
+
+### Sparse-core 10% first diagnostic result
+
+The same cross-task head ranking with 103 of 1,024 layer/head units (10%)
+allowed to read full remote history still failed the independent 32K
+`niah_multikey_2` target `9116227` (16-token diagnostic run, recall 0,
+score 0). Together with the 5% result, this particular cross-task ranking did
+not recover the remote needle at either tested fraction. The result is only a
+head-mask simulation; it does not establish that 10% is insufficient when the
+core is selected from the target task or when oracle retention is used.
