@@ -1748,3 +1748,11 @@ the held-out 32K needle. The remaining three QCC records are still running;
 no aggregate is claimed. The evaluation uses the adapter with num_codes16,
 causal admission predictor enabled, and the pre-threshold-correction loaded
 configuration; later runs will use the all-score threshold correction.
+### Second trained-causal-predictor 32K result
+
+The corrected adapter evaluation's second QCC record also fails. Source line26
+(niah_multikey_3) targets `e20a8be5-a274-47d8-838b-42290d0453a1` but emits
+`470e0000-0000-0000-0000-000000000000.`, recall0 after39 tokens. The first
+two causal-predictor QCC records are both failed remote retrievals; the two
+numeric/variable records remain pending. This does not support a quality
+promotion or a 99% claim.
