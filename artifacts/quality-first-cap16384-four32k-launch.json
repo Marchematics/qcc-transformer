@@ -12,7 +12,7 @@
     "--full-attention-query-chunk-size", "128", "--full-attention-key-chunk-size", "1024",
     "--use-triton", "--local-attention-backend", "sdpa", "--prefill-chunk-size", "512",
     "--load-in-4bit", "--device", "cuda", "--window-size", "4096", "--num-codes", "16",
-    "--exact-num-sets", "256", "--exact-ways", "64", "--background-size", "128",
+    "--exact-num-sets", "512", "--exact-ways", "32", "--background-size", "128",
     "--retention-block-size", "32", "--quality-query-tail", "128", "--quality-first",
     "--exact-attention", "--exact-storage-dtype", "bfloat16", "--archive-position-invariant",
     "--kv-head-policy", "repeat", "--trust-remote-code",

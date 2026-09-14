@@ -1862,3 +1862,11 @@ the number of admission calls by the block size. The change is code-level only;
 the currently running 16K-capacity job was loaded before this commit and is not
 used as a speed measurement. Existing hybrid archive quality/block tests and
 Python compilation pass.
+
+### 16K quality-first launch geometry correction
+
+The first 16,384-slot launch completed all four Full-KV records, then failed
+before QCC construction because the block bank requires `ways == block_size`;
+the launch had used `256 x 64` with block size `32`. No QCC score was produced.
+The corrected equivalent capacity is `512 x 32`, which preserves the required
+block geometry and is recorded in the launch artifact for the rerun.
