@@ -1819,3 +1819,11 @@ so answer recall and completion score are0. QCC state is4,995,568,640 bytes.
 This is a stronger negative result than the K/V-only predictor on the same
 record and does not support promoting the hidden writer. Three QCC records
 remain pending; no aggregate claim is made.
+### Second hidden-state writer 32K result
+
+Source line26 fails under the hidden writer as well. The target UUID is not
+recovered; generation devolves into a repeated malformed textual UUID
+description and reaches128 tokens, giving recall0 and completion0. Together
+with line7, both remote multi-key records fail under the hidden writer. The
+single-number and variable records remain pending. This confirms that adding
+hidden-state capacity alone does not solve unknown remote retrieval.
