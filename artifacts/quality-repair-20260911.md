@@ -1571,3 +1571,27 @@ suite-level99% quality,1M retrieval or serving speed. The next comparison
 uses exactly the four prespecified16K records from the preceding quality-first
 run, with the same model/template/capacity/dtype and causal scoring/commit.
 No writer training or capacity sweep is introduced.
+
+### Completed causal-block four-task16K follow-up
+
+The causal original-KV candidate finishes all four prespecified pairs without
+execution errors. QCC recall is [1,0,1,1], compared with Full-KV [1,0,1,0.8]
+and previous quality-first QCC [1,0,1,0.8]. Macro recall is0.75 versus0.70;
+completion-weighted mean is0.75 versus0.50. The numeric answers remain exact.
+Variable tracking now explicitly includes FERDZ, retrieving all five targets
+and stopping at102 tokens; Full-KV misses FERDZ and reaches128 tokens.
+UUID remains wrong, and its incorrect UUID differs from Full-KV's incorrect
+UUID. Its relative score is undefined, not a successful preserved task.
+All four QCC owned-state measurements are4,995,568,640 bytes.
+
+The aggregate ratio1.0714 is arithmetic on four records, not evidence that
+the99% aggregate/97% worst-task target is attained. There is still only one
+record per task, and no128K/1M or serving result. This result supports taking
+the causal original-KV path to longer inputs before adding training.
+
+Next inputs are source lines7,26,46,66 from the32K bucket, preserving all
+settings including8192 BF16 foreground,128 background, window4096 and block32.
+Line7 avoids repeating the frequently diagnosed row6. Retrieval target
+positions in source metadata are5080,22807,24017 respectively, outside the
+final4096-token window at these declared lengths. These are a fixed follow-up
+selection, not claimed untouched across all historical project work.
