@@ -2340,6 +2340,7 @@ class QCCSelfAttention(nn.Module):
                         archive_key, archive_value,
                         exact_key=self._local_key_cache[:, :, write_index],
                         exact_query=q,
+                        hidden=hidden,
                     )
                 # A token eviction changes the recurrent archive state.  Any
                 # read cached from an earlier state is therefore invalid even
@@ -2682,6 +2683,7 @@ class QCCSelfAttention(nn.Module):
                     output=archive_out[:, :, event_start:],
                     exact_key=exact_evicted_k,
                     exact_query=q[:, :, event_start:],
+                    hidden=hidden[:, event_start:event_start + event_count],
                     quality_query=quality_query,
                     quality_key_start=archive_event_offset,
                     quality_query_start=quality_query_start,
@@ -3165,6 +3167,7 @@ class QCCSelfAttention(nn.Module):
                     output=archive_out[:, :, self.window_size :],
                     exact_key=k[:, :, :event_count],
                     exact_query=q[:, :, self.window_size :],
+                    hidden=hidden[:, :event_count],
                 )
             gate = torch.sigmoid(gate_proj).transpose(1, 2).unsqueeze(-1)
             mixed_out = self._mix_local_archive(local_out, archive_out, gate)
@@ -3262,6 +3265,7 @@ class QCCSelfAttention(nn.Module):
                         evicted_value,
                         exact_key=evicted_local_key,
                         exact_query=q[:, :, t],
+                        hidden=hidden[:, t],
                     )
 
             lk = torch.stack(local_keys, dim=2)

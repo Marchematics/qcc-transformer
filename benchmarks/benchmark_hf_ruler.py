@@ -526,11 +526,15 @@ def main() -> None:
         help="retain original KV with causal scores and read-before-commit blocks")
     parser.add_argument("--causal-admission-predictor", action="store_true",
         help="use the trained causal hidden-state admission predictor")
+    parser.add_argument("--causal-hidden-predictor", action="store_true",
+        help="use the trained hidden-state causal writer")
     args = parser.parse_args()
     if args.causal_block_retention and (args.quality_first or args.causal_coreset or not args.exact_attention):
         raise ValueError("causal-block-retention requires standalone --exact-attention")
     if args.causal_admission_predictor and not args.causal_block_retention:
         raise ValueError("causal-admission-predictor requires causal-block-retention")
+    if args.causal_hidden_predictor and not args.causal_block_retention:
+        raise ValueError("causal-hidden-predictor requires causal-block-retention")
     if args.causal_coreset and args.quality_first:
         raise ValueError("causal-coreset is causal and cannot use future-query quality-first selection")
     if args.active_query_correction and args.exact_query_correction:
@@ -666,6 +670,7 @@ def main() -> None:
                     "quality_first": args.quality_first,
                     "causal_block_retention": args.causal_block_retention,
                     "causal_admission_predictor": args.causal_admission_predictor,
+                    "causal_hidden_predictor": args.causal_hidden_predictor,
                     "quality_block_propagation": args.quality_block_propagation,
                     "quality_prefill_shadow_only": args.quality_prefill_shadow_only,
                     "exact_storage_dtype": exact_storage_dtype,
@@ -739,6 +744,7 @@ def main() -> None:
                 "causal_coreset": args.causal_coreset,
                 "causal_block_retention": args.causal_block_retention,
                 "causal_admission_predictor": args.causal_admission_predictor,
+                "causal_hidden_predictor": args.causal_hidden_predictor,
                 "coreset_capacity": args.coreset_capacity,
                 "coreset_merge_policy": args.coreset_merge_policy,
                 "coreset_query_probes": args.coreset_query_probes,
@@ -850,6 +856,7 @@ def main() -> None:
         "causal_coreset": args.causal_coreset,
         "causal_block_retention": args.causal_block_retention,
         "causal_admission_predictor": args.causal_admission_predictor,
+        "causal_hidden_predictor": args.causal_hidden_predictor,
         "coreset_capacity": args.coreset_capacity,
         "coreset_merge_policy": args.coreset_merge_policy,
         "coreset_query_probes": args.coreset_query_probes,

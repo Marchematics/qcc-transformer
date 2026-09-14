@@ -1782,3 +1782,20 @@ fourth records, are preserved in the result/progress artifact. The next
 method choice must address future-query-independent remote retention; neither
 the instantaneous QK baseline nor this small K/V predictor is a valid path to
 99% retrieval.
+### Hidden-state causal writer extension
+
+The K/V-only causal predictor failed both remote 32K retrievals. The next
+writer extension is now wired but opt-in: each attention layer can train a
+single hidden-state linear projection to one score per KV head. Phi's
+3072-dimension hidden state with32 heads costs98,336 parameters per layer,
+3,146,752 across32 layers, or0.08235% of the logical backbone. The main
+pretrained weights remain frozen. The predictor receives only the current
+hidden state at eviction time; it never sees future queries or answers.
+
+Calibration already has teacher hidden captures and future-attention salience
+labels, so `calibrate_hf_admission.py --causal-hidden-predictor` trains and
+saves this writer using the existing adapter format. The RULER runner exposes
+the matching `--causal-hidden-predictor` deployment flag. CPU regressions cover
+the hidden score path and causal block semantics. No hidden-writer checkpoint
+or task score exists yet; the current GPU evaluation was launched before this
+extension and is not changed.

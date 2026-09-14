@@ -80,6 +80,22 @@ class LandmarkAdmissionPredictor(nn.Module):
         return score + self.bias.float().view(1, -1, 1)
 
 
+class HiddenAdmissionPredictor(nn.Module):
+    """Per-head causal writer from the current attention hidden state."""
+
+    def __init__(self, hidden_dim: int, num_heads: int) -> None:
+        super().__init__()
+        if hidden_dim <= 0 or num_heads <= 0:
+            raise ValueError("hidden_dim and num_heads must be positive")
+        self.projection = nn.Linear(hidden_dim, num_heads)
+
+    def forward(self, hidden: Tensor) -> Tensor:
+        if hidden.ndim not in (2, 3) or hidden.shape[-1] != self.projection.in_features:
+            raise ValueError("hidden must have shape [batch, hidden_dim] or [batch, tokens, hidden_dim]")
+        score = self.projection(hidden.float())
+        return score if hidden.ndim == 2 else score.transpose(1, 2)
+
+
 class HybridQCCArchive(QCCArchive):
     """QCC recurrent archive plus a fixed-capacity exact associative tier."""
 
@@ -122,6 +138,8 @@ class HybridQCCArchive(QCCArchive):
         causal_coreset: bool = False,
         causal_block_retention: bool = False,
         causal_admission_predictor: bool = False,
+        causal_hidden_predictor: bool = False,
+        hidden_admission_dim: int | None = None,
         coreset_capacity: int | None = None,
         coreset_merge_policy: str = "ward",
         coreset_query_probes: int = 8,
@@ -141,6 +159,10 @@ class HybridQCCArchive(QCCArchive):
             raise ValueError('causal block retention requires the standalone exact attention path')
         if causal_admission_predictor and not causal_block_retention:
             raise ValueError('causal admission predictor requires causal block retention')
+        if causal_hidden_predictor and not causal_block_retention:
+            raise ValueError('causal hidden predictor requires causal block retention')
+        if causal_hidden_predictor and (hidden_admission_dim is None or hidden_admission_dim <= 0):
+            raise ValueError('causal hidden predictor requires hidden_admission_dim')
         if quality_query_tail is not None and quality_query_tail <= 0:
             raise ValueError("quality_query_tail must be positive")
         if causal_coreset:
@@ -168,6 +190,8 @@ class HybridQCCArchive(QCCArchive):
         )
         self.causal_block_retention = bool(causal_block_retention)
         self.causal_admission_predictor = bool(causal_admission_predictor)
+        self.causal_hidden_predictor = bool(causal_hidden_predictor)
+        self.hidden_admission = None
         self.causal_coreset = bool(causal_coreset)
         self.quality_query_tail = quality_query_tail
         if active_codes is not None or lazy_decay:
@@ -268,6 +292,8 @@ class HybridQCCArchive(QCCArchive):
         self.admission = LandmarkAdmissionPredictor(
             num_heads, head_dim, bias_init=admission_bias_init
         )
+        if causal_hidden_predictor:
+            self.hidden_admission = HiddenAdmissionPredictor(hidden_admission_dim, num_heads)
         self.exact_mix_logits = nn.Parameter(
             torch.full((num_heads,), float(exact_mix_bias_init))
         )
@@ -298,6 +324,8 @@ class HybridQCCArchive(QCCArchive):
                      and name in ('query_correction_u', 'query_correction_v'))
                     or (self.causal_admission_predictor
                         and name.startswith('admission.'))
+                    or (self.causal_hidden_predictor
+                        and name.startswith('hidden_admission.'))
                 )
         # Global-table writes and weighted reads never consult set routing.
         if (
@@ -612,6 +640,7 @@ class HybridQCCArchive(QCCArchive):
         *,
         exact_key: Tensor | None = None,
         exact_query: Tensor | None = None,
+        hidden: Tensor | None = None,
     ) -> None:
         if self.causal_coreset:
             self.exact_bank.update(
@@ -622,7 +651,9 @@ class HybridQCCArchive(QCCArchive):
             return
         if self.exact_only:
             with torch.no_grad():
-                if self.causal_block_retention and exact_key is not None and exact_query is not None:
+                if self.causal_hidden_predictor and hidden is not None:
+                    score = self.hidden_admission(hidden)
+                elif self.causal_block_retention and exact_key is not None and exact_query is not None:
                     score = (
                         self.admission(exact_key, value)
                         if self.causal_admission_predictor
@@ -642,7 +673,9 @@ class HybridQCCArchive(QCCArchive):
             return
         super().update(key, value)
         with torch.no_grad():
-            if self.causal_block_retention and exact_key is not None and exact_query is not None:
+            if self.causal_hidden_predictor and hidden is not None:
+                score = self.hidden_admission(hidden)
+            elif self.causal_block_retention and exact_key is not None and exact_query is not None:
                 score = (
                     self.admission(exact_key, value)
                     if self.causal_admission_predictor
@@ -697,6 +730,7 @@ class HybridQCCArchive(QCCArchive):
         quality_query: Tensor | None = None,
         quality_key_start: int = 0,
         quality_query_start: int = 0,
+        hidden: Tensor | None = None,
     ) -> tuple[Tensor, Tensor]:
         """Causally read a block with a bounded number of admission events."""
 
@@ -839,6 +873,7 @@ class HybridQCCArchive(QCCArchive):
         quality_query: Tensor | None = None,
         quality_key_start: int = 0,
         quality_query_start: int = 0,
+        hidden: Tensor | None = None,
     ) -> Tensor:
         if admission_score is not None and (
             admission_score.shape != key.shape[:3]
@@ -896,7 +931,9 @@ class HybridQCCArchive(QCCArchive):
                 # key for the query at its eviction event. A trained writer
                 # can supply admission_score through this same interface.
                 admission_score = (
-                    self.admission(exact_key, value)
+                    self.hidden_admission(hidden)
+                    if self.causal_hidden_predictor and hidden is not None
+                    else self.admission(exact_key, value)
                     if self.causal_admission_predictor
                     else (exact_key.float() * exact_query.float()).sum(-1) / math.sqrt(self.head_dim)
                 )
@@ -955,6 +992,8 @@ def upgrade_qcc_attention(
 
     if not isinstance(attention, QCCSelfAttention):
         raise TypeError("attention must be QCCSelfAttention")
+    if hybrid_kwargs.get("causal_hidden_predictor"):
+        hybrid_kwargs.setdefault("hidden_admission_dim", attention.d_model)
     archive = HybridQCCArchive.from_archive(attention.archive, **hybrid_kwargs)
     attention.archive = archive
     if archive.causal_coreset or archive.causal_block_retention:
@@ -1051,6 +1090,7 @@ def load_hybrid_retrofit_adapter(
 
 __all__ = [
     "HybridQCCArchive",
+    "HiddenAdmissionPredictor",
     "LandmarkAdmissionPredictor",
     "enable_hybrid_retrofit",
     "load_hybrid_retrofit_adapter",

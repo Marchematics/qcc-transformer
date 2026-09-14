@@ -186,6 +186,7 @@ def _teacher_examples(
     num_teacher_queries: int,
     teacher_topk: int,
     positive_fraction: float,
+    include_hidden: bool = False,
 ) -> list[tuple[Tensor, Tensor, Tensor]]:
     qcc = wrapper.qcc
     projection = qcc.q_proj
@@ -234,7 +235,10 @@ def _teacher_examples(
         labels = salience_binary_labels(
             salience, positive_fraction=positive_fraction, min_positive=1
         )
-        examples.append((kh.detach().cpu(), vh.detach().cpu(), labels.cpu()))
+        if include_hidden:
+            examples.append((hidden.detach().cpu(), labels.cpu()))
+        else:
+            examples.append((kh.detach().cpu(), vh.detach().cpu(), labels.cpu()))
         del hidden, q, k, v, qh, kh, vh, rotated_q, rotated_k, rotary_salience, salience, labels
         if qcc.archive_position_invariant:
             del raw_salience
@@ -274,7 +278,8 @@ def _train_layer(
     steps: int,
     lr: float,
 ) -> dict[str, object]:
-    predictor = archive.admission
+    hidden_mode = bool(train_examples and len(train_examples[0]) == 2)
+    predictor = archive.hidden_admission if hidden_mode else archive.admission
     device = archive.codes.device
     for parameter in predictor.parameters():
         parameter.requires_grad_(True)
@@ -282,12 +287,17 @@ def _train_layer(
     losses: list[float] = []
     predictor.train()
     for step in range(steps):
-        key_cpu, value_cpu, label_cpu = train_examples[step % len(train_examples)]
-        key = key_cpu.to(device)
-        value = value_cpu.to(device)
+        example = train_examples[step % len(train_examples)]
+        if hidden_mode:
+            hidden_cpu, label_cpu = example
+            hidden = hidden_cpu.to(device)
+        else:
+            key_cpu, value_cpu, label_cpu = example
+            key = key_cpu.to(device)
+            value = value_cpu.to(device)
         labels = label_cpu.to(device)
         optimizer.zero_grad(set_to_none=True)
-        logits = predictor(key, value)
+        logits = predictor(hidden) if hidden_mode else predictor(key, value)
         loss = balanced_admission_loss(logits, labels)
         loss.backward()
         optimizer.step()
@@ -298,10 +308,14 @@ def _train_layer(
         all_logits = []
         all_labels = []
         with torch.no_grad():
-            for key_cpu, value_cpu, label_cpu in examples:
-                all_logits.append(
-                    predictor(key_cpu.to(device), value_cpu.to(device)).cpu()
-                )
+            for example in examples:
+                if hidden_mode:
+                    hidden_cpu, label_cpu = example
+                    logits = predictor(hidden_cpu.to(device))
+                else:
+                    key_cpu, value_cpu, label_cpu = example
+                    logits = predictor(key_cpu.to(device), value_cpu.to(device))
+                all_logits.append(logits.cpu())
                 all_labels.append(label_cpu)
         return _binary_metrics(torch.cat(all_logits, dim=-1), torch.cat(all_labels, dim=-1))
 
@@ -367,6 +381,11 @@ def main() -> None:
         action="store_true",
         help="train the admission predictor for causal original-KV block retention",
     )
+    parser.add_argument(
+        "--causal-hidden-predictor",
+        action="store_true",
+        help="train a per-head hidden-state causal writer",
+    )
     parser.add_argument("--layers", default="all")
     parser.add_argument("--teacher-queries", type=int, default=128)
     parser.add_argument("--teacher-topk", type=int, default=8)
@@ -386,6 +405,8 @@ def main() -> None:
         raise ValueError("chunk counts and steps must be positive")
     if args.causal_admission_predictor and args.quality_first:
         raise ValueError("causal admission training cannot use quality-first selection")
+    if args.causal_hidden_predictor and args.quality_first:
+        raise ValueError("causal hidden training cannot use quality-first selection")
     if not 0.0 < args.positive_fraction <= 1.0:
         raise ValueError("positive-fraction must lie in (0, 1]")
 
@@ -451,7 +472,8 @@ def main() -> None:
             "quality_first": args.quality_first,
             "causal_block_retention": args.causal_admission_predictor,
             "causal_admission_predictor": args.causal_admission_predictor,
-            "exact_attention": args.causal_admission_predictor,
+            "causal_hidden_predictor": args.causal_hidden_predictor,
+            "exact_attention": args.causal_admission_predictor or args.causal_hidden_predictor,
         },
     )
     if args.init_adapter is not None:
@@ -490,6 +512,7 @@ def main() -> None:
                 num_teacher_queries=args.teacher_queries,
                 teacher_topk=args.teacher_topk,
                 positive_fraction=args.positive_fraction,
+                include_hidden=args.causal_hidden_predictor,
             )
             held_examples = _teacher_examples(
                 wrapper,
@@ -499,6 +522,7 @@ def main() -> None:
                 num_teacher_queries=args.teacher_queries,
                 teacher_topk=args.teacher_topk,
                 positive_fraction=args.positive_fraction,
+                include_hidden=args.causal_hidden_predictor,
             )
             layer_reports[str(layer_index)] = _train_layer(
                 archive,
@@ -534,6 +558,7 @@ def main() -> None:
         "quality_first": args.quality_first,
         "causal_block_retention": args.causal_admission_predictor,
         "causal_admission_predictor": args.causal_admission_predictor,
+        "causal_hidden_predictor": args.causal_hidden_predictor,
         "selected_layers": sorted(selected_layers),
         "trainable_parameters": trainable,
         "total_parameters": total,

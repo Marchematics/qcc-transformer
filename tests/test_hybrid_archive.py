@@ -683,6 +683,28 @@ def test_causal_admission_predictor_replaces_qk_score_when_enabled():
     torch.testing.assert_close(hybrid.exact_bank._scores[0, 0, 0, 0], torch.tensor(1.0))
 
 
+def test_causal_hidden_predictor_scores_current_hidden_state():
+    base = QCCArchive(
+        num_heads=1, head_dim=2, num_codes=1, decay_rates=(0.9,),
+        window_size=2, use_triton=False,
+    )
+    hybrid = HybridQCCArchive.from_archive(
+        base, exact_num_sets=1, exact_ways=1,
+        exact_attention=True, causal_block_retention=True,
+        causal_hidden_predictor=True, hidden_admission_dim=4,
+    )
+    hybrid.exact_bank.diversity_weight = 0.0
+    with torch.no_grad():
+        hybrid.hidden_admission.projection.weight.zero_()
+        hybrid.hidden_admission.projection.bias.zero_()
+        hybrid.hidden_admission.projection.weight[0, 2] = 1.0
+        hidden = torch.tensor([[0.0, 0.0, 3.0, 0.0]])
+        key = torch.tensor([[[2.0, 0.0]]])
+        hybrid.update(key, torch.zeros_like(key), exact_key=key,
+                      exact_query=torch.zeros_like(key), hidden=hidden)
+    torch.testing.assert_close(hybrid.exact_bank._scores[0, 0, 0, 0], torch.tensor(3.0))
+
+
 def test_active_query_correction_changes_live_attention_query():
     attention = QCCSelfAttention(
         8,
