@@ -1595,3 +1595,24 @@ Line7 avoids repeating the frequently diagnosed row6. Retrieval target
 positions in source metadata are5080,22807,24017 respectively, outside the
 final4096-token window at these declared lengths. These are a fixed follow-up
 selection, not claimed untouched across all historical project work.
+
+### Correct causal-run parameter accounting and freeze bypassed parameters
+
+Launch-manifest review found that causal runs omitted --num-codes and used
+the runner default64, whereas the previous quality-first four16K run used16.
+Raw causal result files correctly record11,504,640 marked trainable parameters
+(0.3010835% of3,821,079,552), not6,589,440/0.17245%. The running32K manifest
+also uses64. These original records are preserved. Prior wording that only
+the policy configuration changed should be read with this additional
+configuration difference; no measured effect of prototype count is claimed.
+
+The causal-block exact path bypasses the recurrent prototypes, admission
+predictor and learned blend. It now freezes these parameters and the outer
+local/archive gate, reusing the existing coreset-mode freeze location.
+Only an explicitly enabled live Q correction keeps its U/V parameters
+trainable. The default causal writer adds no trainable parameters.
+Both existing causal-HF continuation tests pass with freeze assertions; a
+rank2 active-Q check retains exactly the two32-total-element factors.
+No parameter values, tensor allocation or inference formula changed. The
+already-loaded32K process keeps its original flags/count; this correction
+will apply to subsequent constructions, not retroactively to its results.

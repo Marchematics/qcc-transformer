@@ -281,6 +281,15 @@ class HybridQCCArchive(QCCArchive):
             # adapter capacity for a path that cannot affect its output.
             for parameter in self.parameters():
                 parameter.requires_grad_(False)
+        if self.causal_block_retention:
+            # The default writer is a direct QK score; it has no learned
+            # admission or blend. Only an enabled live Q correction can
+            # contribute trainable parameters to this inference path.
+            for name, parameter in self.named_parameters():
+                parameter.requires_grad_(
+                    self.active_query_correction
+                    and name in ('query_correction_u', 'query_correction_v')
+                )
         # Global-table writes and weighted reads never consult set routing.
         if (
             not self.causal_coreset
@@ -923,7 +932,7 @@ def upgrade_qcc_attention(
         raise TypeError("attention must be QCCSelfAttention")
     archive = HybridQCCArchive.from_archive(attention.archive, **hybrid_kwargs)
     attention.archive = archive
-    if archive.causal_coreset:
+    if archive.causal_coreset or archive.causal_block_retention:
         # Exact mass merging bypasses the learned local/archive gate.  Freeze
         # it alongside the obsolete recurrent parameters so calibration counts
         # only parameters that can change this deployment path.

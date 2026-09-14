@@ -526,6 +526,8 @@ def test_causal_block_hf_prefill_and_decode_share_commit_semantics(sets):
     patch_hf_model_hybrid(model, window_size=4, prefill_chunk_size=5,
         use_triton=False, hybrid_kwargs=dict(causal_block_retention=True,
         exact_attention=True, exact_num_sets=sets, exact_ways=2, block_size=2))
+    assert not any(p.requires_grad for p in model.attn.qcc.archive.parameters())
+    assert not any(p.requires_grad for p in model.attn.qcc.gate.parameters())
     split = copy.deepcopy(model)
     changed = copy.deepcopy(model)
     token = copy.deepcopy(model)
