@@ -121,6 +121,7 @@ class HybridQCCArchive(QCCArchive):
         active_query_correction: bool = False,
         causal_coreset: bool = False,
         causal_block_retention: bool = False,
+        causal_admission_predictor: bool = False,
         coreset_capacity: int | None = None,
         coreset_merge_policy: str = "ward",
         coreset_query_probes: int = 8,
@@ -138,6 +139,8 @@ class HybridQCCArchive(QCCArchive):
             or quality_prefill_shadow_only or persistent_landmark
         ):
             raise ValueError('causal block retention requires the standalone exact attention path')
+        if causal_admission_predictor and not causal_block_retention:
+            raise ValueError('causal admission predictor requires causal block retention')
         if quality_query_tail is not None and quality_query_tail <= 0:
             raise ValueError("quality_query_tail must be positive")
         if causal_coreset:
@@ -164,6 +167,7 @@ class HybridQCCArchive(QCCArchive):
             and (quality_first or causal_coreset or causal_block_retention)
         )
         self.causal_block_retention = bool(causal_block_retention)
+        self.causal_admission_predictor = bool(causal_admission_predictor)
         self.causal_coreset = bool(causal_coreset)
         self.quality_query_tail = quality_query_tail
         if active_codes is not None or lazy_decay:
@@ -287,8 +291,10 @@ class HybridQCCArchive(QCCArchive):
             # contribute trainable parameters to this inference path.
             for name, parameter in self.named_parameters():
                 parameter.requires_grad_(
-                    self.active_query_correction
-                    and name in ('query_correction_u', 'query_correction_v')
+                    (self.active_query_correction
+                     and name in ('query_correction_u', 'query_correction_v'))
+                    or (self.causal_admission_predictor
+                        and name.startswith('admission.'))
                 )
         # Global-table writes and weighted reads never consult set routing.
         if (
@@ -614,7 +620,11 @@ class HybridQCCArchive(QCCArchive):
         if self.exact_only:
             with torch.no_grad():
                 if self.causal_block_retention and exact_key is not None and exact_query is not None:
-                    score = (exact_key.float() * exact_query.float()).sum(-1) / math.sqrt(self.head_dim)
+                    score = (
+                        self.admission(exact_key, value)
+                        if self.causal_admission_predictor
+                        else (exact_key.float() * exact_query.float()).sum(-1) / math.sqrt(self.head_dim)
+                    )
                 elif self.quality_first and exact_key is not None and exact_query is not None:
                     score = F.cosine_similarity(
                         exact_key.float(), exact_query.float(), dim=-1
@@ -630,7 +640,11 @@ class HybridQCCArchive(QCCArchive):
         super().update(key, value)
         with torch.no_grad():
             if self.causal_block_retention and exact_key is not None and exact_query is not None:
-                score = (exact_key.float() * exact_query.float()).sum(-1) / math.sqrt(self.head_dim)
+                score = (
+                    self.admission(exact_key, value)
+                    if self.causal_admission_predictor
+                    else (exact_key.float() * exact_query.float()).sum(-1) / math.sqrt(self.head_dim)
+                )
             elif self.quality_first and exact_key is not None and exact_query is not None:
                 score = F.cosine_similarity(
                     exact_key.float(), exact_query.float(), dim=-1
@@ -878,7 +892,11 @@ class HybridQCCArchive(QCCArchive):
                 # Initial causal baseline: the native logit of the evicted
                 # key for the query at its eviction event. A trained writer
                 # can supply admission_score through this same interface.
-                admission_score = (exact_key.float() * exact_query.float()).sum(-1) / math.sqrt(self.head_dim)
+                admission_score = (
+                    self.admission(exact_key, value)
+                    if self.causal_admission_predictor
+                    else (exact_key.float() * exact_query.float()).sum(-1) / math.sqrt(self.head_dim)
+                )
             exact, confidence = self._exact_chunk(
                 exact_key,
                 value,

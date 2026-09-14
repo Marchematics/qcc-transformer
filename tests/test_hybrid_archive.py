@@ -661,6 +661,27 @@ def test_causal_block_decode_uses_contemporaneous_qk_score():
     )
 
 
+def test_causal_admission_predictor_replaces_qk_score_when_enabled():
+    base = QCCArchive(
+        num_heads=1, head_dim=2, num_codes=1, decay_rates=(0.9,),
+        window_size=2, use_triton=False,
+    )
+    hybrid = HybridQCCArchive.from_archive(
+        base, exact_num_sets=1, exact_ways=1,
+        exact_attention=True, causal_block_retention=True,
+        causal_admission_predictor=True,
+    )
+    hybrid.exact_bank.diversity_weight = 0.0
+    with torch.no_grad():
+        hybrid.admission.key_weight.fill_(1.0)
+        hybrid.admission.value_weight.zero_()
+        hybrid.admission.bias.zero_()
+        key = torch.tensor([[[1.0, 0.0]]])
+        query = torch.tensor([[[0.0, 4.0]]])
+        hybrid.update(key, torch.zeros_like(key), exact_key=key, exact_query=query)
+    torch.testing.assert_close(hybrid.exact_bank._scores[0, 0, 0, 0], torch.tensor(1.0))
+
+
 def test_active_query_correction_changes_live_attention_query():
     attention = QCCSelfAttention(
         8,

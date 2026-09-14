@@ -1667,3 +1667,17 @@ retrieval is the limiting behavior while variable tracking is preserved.
 The next method work should train a causal hidden-state writer against
 future-teacher deletion impact, then evaluate on independent 32K records;
 capacity or block-width scans are not justified by these results.
+
+### Causal admission-predictor training path
+
+Added causal_admission_predictor to HybridQCCArchive, the RULER runner and
+calibrate_hf_admission.py. In this mode the hard exact tier remains causal
+and uses the existing admission predictor on current hidden-state-derived
+K/V; no future query is passed at inference. The calibration script already
+collects Full-KV hidden states and future attention salience before patching,
+so it now can train only per-head normalized K/V weights and bias, then save
+the same QCC-only adapter format. The default causal-block mode continues to
+use contemporaneous native QK and has zero active trainable parameters; the
+new flag is opt-in and is the first causal writer candidate for real
+retrieval. Focused predictor/QK selection tests and Python compilation pass.
+No trained checkpoint or quality score exists yet.

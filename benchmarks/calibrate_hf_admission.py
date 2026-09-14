@@ -349,6 +349,11 @@ def main() -> None:
         action="store_true",
         help="use a bounded score-ranked exact shadow with soft reads; admission training is skipped",
     )
+    parser.add_argument(
+        "--causal-admission-predictor",
+        action="store_true",
+        help="train the admission predictor for causal original-KV block retention",
+    )
     parser.add_argument("--layers", default="all")
     parser.add_argument("--teacher-queries", type=int, default=128)
     parser.add_argument("--teacher-topk", type=int, default=8)
@@ -366,6 +371,8 @@ def main() -> None:
         raise ValueError("max-tokens must exceed window-size to produce long-range labels")
     if args.num_train_chunks <= 0 or args.num_held_chunks <= 0 or args.steps <= 0:
         raise ValueError("chunk counts and steps must be positive")
+    if args.causal_admission_predictor and args.quality_first:
+        raise ValueError("causal admission training cannot use quality-first selection")
     if not 0.0 < args.positive_fraction <= 1.0:
         raise ValueError("positive-fraction must lie in (0, 1]")
 
@@ -429,6 +436,9 @@ def main() -> None:
             "exact_probe_sets": args.exact_probe_sets,
             "max_inserts_per_chunk": args.max_inserts_per_chunk,
             "quality_first": args.quality_first,
+            "causal_block_retention": args.causal_admission_predictor,
+            "causal_admission_predictor": args.causal_admission_predictor,
+            "exact_attention": args.causal_admission_predictor,
         },
     )
     if args.init_adapter is not None:
@@ -509,6 +519,8 @@ def main() -> None:
         ),
         "requested_max_inserts_per_chunk": args.max_inserts_per_chunk,
         "quality_first": args.quality_first,
+        "causal_block_retention": args.causal_admission_predictor,
+        "causal_admission_predictor": args.causal_admission_predictor,
         "selected_layers": sorted(selected_layers),
         "trainable_parameters": trainable,
         "total_parameters": total,
