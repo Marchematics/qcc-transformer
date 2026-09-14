@@ -1870,3 +1870,12 @@ before QCC construction because the block bank requires `ways == block_size`;
 the launch had used `256 x 64` with block size `32`. No QCC score was produced.
 The corrected equivalent capacity is `512 x 32`, which preserves the required
 block geometry and is recorded in the launch artifact for the rerun.
+
+### 16K quality-first v2 controlled stop
+
+The corrected `512 x 32` v2 launch completed all four Full-KV baselines
+(`answer_recall=1.0` for each) but did not emit a QCC record before its exact
+stage became impractically long on the single A10. The run was stopped after
+preserving its progress log; it is not a QCC quality result. The next equal
+capacity trial uses `128 x 128`, so one committed retention block is 128
+tokens and the batched causal reader performs four times fewer block commits.
