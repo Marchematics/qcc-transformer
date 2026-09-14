@@ -1849,3 +1849,16 @@ the logical pretrained backbone) and a bounded state of `4,995,568,640` bytes
 per request. This is a negative result for the writer: adding a linear
 hidden-state score did not recover unknown remote needles at 32K. The raw JSON
 and progress log are preserved in the corresponding benchmark artifacts.
+
+### Batched quality-first admission path
+
+The quality-first exact path previously called the scalar admission routine for
+every token, even when the bank already used fixed-size blocks and a background
+reservoir. This made long prefill spend Python scheduling work on every token.
+The path now sends each tile through the bank's causal batched read-before-commit
+operation, using a triangular current-tile mask and `-inf` scores for entries
+that were not selected. This preserves the scalar block semantics while reducing
+the number of admission calls by the block size. The change is code-level only;
+the currently running 16K-capacity job was loaded before this commit and is not
+used as a speed measurement. Existing hybrid archive quality/block tests and
+Python compilation pass.
