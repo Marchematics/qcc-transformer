@@ -1,4 +1,5 @@
 import copy
+import math
 
 import torch
 import pytest
@@ -636,6 +637,28 @@ def test_exact_query_correction_changes_the_active_exact_read_path():
         corrected = hybrid._read_exact(query)[0]
         original = hybrid.exact_bank.read_attention(query)[0]
     assert not torch.equal(corrected, original)
+
+
+def test_causal_block_decode_uses_contemporaneous_qk_score():
+    base = QCCArchive(
+        num_heads=1, head_dim=2, num_codes=1, decay_rates=(0.9,),
+        window_size=2, use_triton=False,
+    )
+    hybrid = HybridQCCArchive.from_archive(
+        base, exact_num_sets=1, exact_ways=1,
+        exact_attention=True, causal_block_retention=True,
+    )
+    hybrid.exact_bank.diversity_weight = 0.0
+    key = torch.tensor([[[2.0, 0.0]]])
+    query = torch.tensor([[[3.0, 4.0]]])
+    with torch.no_grad():
+        hybrid.update(
+            torch.zeros_like(key), torch.ones_like(key),
+            exact_key=key, exact_query=query,
+        )
+    torch.testing.assert_close(
+        hybrid.exact_bank._scores[0, 0, 0, 0], torch.tensor(6.0 / math.sqrt(2.0))
+    )
 
 
 def test_active_query_correction_changes_live_attention_query():

@@ -1616,3 +1616,16 @@ rank2 active-Q check retains exactly the two32-total-element factors.
 No parameter values, tensor allocation or inference formula changed. The
 already-loaded32K process keeps its original flags/count; this correction
 will apply to subsequent constructions, not retroactively to its results.
+
+### Causal decode score alignment
+
+Review of the live path showed that prefill block writes used the causal
+read-before-commit score, while model-level single-token evictions called
+HybridQCCArchive.update and still used the legacy admission predictor.
+Causal-block update now computes the same contemporaneous scaled dot product
+from exact_key and exact_query for both paths. The default causal writer
+therefore has one score definition across prefill and decode; no future query
+or answer is read. A focused regression verifies the stored score against
+the native scaled dot product. The causal HF tests and this regression pass.
+The currently running32K job was loaded before this change and retains its
+original code; its result will be labeled accordingly.

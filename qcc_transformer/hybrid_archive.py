@@ -613,7 +613,9 @@ class HybridQCCArchive(QCCArchive):
             return
         if self.exact_only:
             with torch.no_grad():
-                if self.quality_first and exact_key is not None and exact_query is not None:
+                if self.causal_block_retention and exact_key is not None and exact_query is not None:
+                    score = (exact_key.float() * exact_query.float()).sum(-1) / math.sqrt(self.head_dim)
+                elif self.quality_first and exact_key is not None and exact_query is not None:
                     score = F.cosine_similarity(
                         exact_key.float(), exact_query.float(), dim=-1
                     )
@@ -627,7 +629,9 @@ class HybridQCCArchive(QCCArchive):
             return
         super().update(key, value)
         with torch.no_grad():
-            if self.quality_first and exact_key is not None and exact_query is not None:
+            if self.causal_block_retention and exact_key is not None and exact_query is not None:
+                score = (exact_key.float() * exact_query.float()).sum(-1) / math.sqrt(self.head_dim)
+            elif self.quality_first and exact_key is not None and exact_query is not None:
                 score = F.cosine_similarity(
                     exact_key.float(), exact_query.float(), dim=-1
                 )
