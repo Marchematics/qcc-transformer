@@ -1799,3 +1799,14 @@ the matching `--causal-hidden-predictor` deployment flag. CPU regressions cover
 the hidden score path and causal block semantics. No hidden-writer checkpoint
 or task score exists yet; the current GPU evaluation was launched before this
 extension and is not changed.
+### Hidden-state writer calibration completed
+
+The corrected hidden-writer calibration completed on the RULER JSONL streams.
+It trains3,146,752 parameters (0.15394% of the logical pretrained backbone),
+with the pretrained model and other QCC parameters frozen. Held-out classifier
+precision/recall for layer15 is0.434/0.914 and layer31 is0.501/0.889; these
+are writer-label metrics, not task quality. The adapter is saved locally as
+`causal-hidden-admission-all-v1.adapter.pt` and is queued for an independent
+32K generation evaluation. A first launch failed before training because the
+new causal flag was not propagated to the patch kwargs; no result was written,
+then the corrected calibration completed.
