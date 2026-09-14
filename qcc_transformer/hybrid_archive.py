@@ -641,6 +641,7 @@ class HybridQCCArchive(QCCArchive):
         exact_key: Tensor | None = None,
         exact_query: Tensor | None = None,
         hidden: Tensor | None = None,
+        admission_score: Tensor | None = None,
     ) -> None:
         if self.causal_coreset:
             self.exact_bank.update(
@@ -651,7 +652,9 @@ class HybridQCCArchive(QCCArchive):
             return
         if self.exact_only:
             with torch.no_grad():
-                if self.causal_hidden_predictor and hidden is not None:
+                if admission_score is not None:
+                    score = admission_score
+                elif self.causal_hidden_predictor and hidden is not None:
                     score = self.hidden_admission(hidden)
                 elif self.causal_block_retention and exact_key is not None and exact_query is not None:
                     score = (
@@ -673,7 +676,9 @@ class HybridQCCArchive(QCCArchive):
             return
         super().update(key, value)
         with torch.no_grad():
-            if self.causal_hidden_predictor and hidden is not None:
+            if admission_score is not None:
+                score = admission_score
+            elif self.causal_hidden_predictor and hidden is not None:
                 score = self.hidden_admission(hidden)
             elif self.causal_block_retention and exact_key is not None and exact_query is not None:
                 score = (

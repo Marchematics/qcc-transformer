@@ -1899,3 +1899,24 @@ the four rows is `18,935,482,368` bytes (`17.6350 GiB`). The benchmark reports
 backbone. This is a bounded 32K quality result for the non-causal
 quality-first diagnostic path. It does not establish causal prefill, 128K or
 1M quality, or any TPOT/throughput/concurrency target.
+
+### Hidden-writer birth-score alignment fix
+
+The hidden-state writer was previously evaluated with a deterministic index
+mismatch: training learned `score_i = f(h_i)`, while the eviction path passed
+the current chunk hidden for the KV being evicted. For a local window `W`,
+that paired `KV_i` with `h_{i+W}`. The implementation now computes the writer
+score when each KV is produced, stores one FP32 score per KV head in the same
+bounded ring as the local K/V, and forwards the chronological evicted scores
+to the hybrid archive. Single-token and chunked paths share the same ring
+mapping, including wrap-around and reset. The base archive accepts and ignores
+the optional score argument for compatibility.
+
+A CPU replay with a two-token window and deterministic hidden scores verified
+that the first three evicted K/V entries receive birth scores `0,1,2` in both
+heads; no current-token scores are substituted. Existing causal/block/hidden
+archive tests pass and both modified modules compile. The fix adds one FP32
+score per local KV slot (16 MiB for the current 32-layer, 32-head, 4096-window
+geometry) and no trainable parameters. A corrected 32K hidden-writer GPU
+rerun remains pending; the existing `[0,0,1,0]` result must not be used to
+reject the aligned writer.

@@ -578,6 +578,7 @@ class QCCArchive(nn.Module):
         _include_landmarks: bool = True,
         exact_key: Optional[Tensor] = None,
         exact_query: Optional[Tensor] = None,
+        admission_score: Optional[Tensor] = None,
     ) -> None:
         """Insert one evicted token per batch/head into the archive.
 
@@ -586,7 +587,7 @@ class QCCArchive(nn.Module):
         local-window length.
         """
 
-        del exact_key, exact_query
+        del exact_key, exact_query, admission_score
         if key.shape != value.shape or key.ndim != 3:
             raise ValueError("key and value must both have shape [batch, heads, head_dim]")
         bsz, heads, dim = key.shape
@@ -1497,6 +1498,10 @@ class QCCSelfAttention(nn.Module):
         self._local_values: list[Tensor] = []
         self._local_key_cache: Optional[Tensor] = None
         self._local_value_cache: Optional[Tensor] = None
+        # A hidden-state writer scores a KV at birth.  Keep those scores in
+        # the same chronological ring as the local K/V so eviction forwards
+        # the score for the evicted item, rather than the current token.
+        self._local_score_cache: Optional[Tensor] = None
         # Position-free lexical keys/values are kept in a separate bounded
         # ring when ``archive_lexical_landmark`` is enabled.  Initialize the
         # fields eagerly so introspection and checkpoint-free unit tests see a
@@ -1506,6 +1511,7 @@ class QCCSelfAttention(nn.Module):
         self._archive_key_cache: Optional[Tensor] = None
         self._chunk_key_scratch: Optional[Tensor] = None
         self._chunk_value_scratch: Optional[Tensor] = None
+        self._chunk_score_scratch: Optional[Tensor] = None
         self._chunk_lexical_key_scratch: Optional[Tensor] = None
         self._chunk_lexical_value_scratch: Optional[Tensor] = None
         self._chunk_archive_key_scratch: Optional[Tensor] = None
@@ -2031,6 +2037,7 @@ class QCCSelfAttention(nn.Module):
         self._local_values = []
         self._local_key_cache = None
         self._local_value_cache = None
+        self._local_score_cache = None
         self._lexical_key_cache = None
         self._lexical_value_cache = None
         self._archive_key_cache = None
@@ -2038,6 +2045,7 @@ class QCCSelfAttention(nn.Module):
         self._full_value_cache = None
         self._chunk_key_scratch = None
         self._chunk_value_scratch = None
+        self._chunk_score_scratch = None
         self._chunk_lexical_key_scratch = None
         self._chunk_lexical_value_scratch = None
         self._chunk_archive_key_scratch = None
@@ -2178,6 +2186,39 @@ class QCCSelfAttention(nn.Module):
             old_length,
         )
 
+    def _combined_local_score_chunk(
+        self, score: Tensor, *, old_length: int
+    ) -> Tensor:
+        """Build chronological birth scores matching ``_combined_local_chunk``."""
+        if self._local_score_cache is None:
+            raise RuntimeError("local score cache is not initialized")
+        if score.ndim != 3 or score.shape[:2] != self._local_score_cache.shape[:2]:
+            raise ValueError("score must have shape [batch, heads, tokens]")
+        length = score.shape[2]
+        needed = old_length + length
+        if (
+            not hasattr(self, "_chunk_score_scratch")
+            or self._chunk_score_scratch is None
+            or self._chunk_score_scratch.shape[0] != score.shape[0]
+            or self._chunk_score_scratch.shape[2] < needed
+            or self._chunk_score_scratch.device != score.device
+        ):
+            self._chunk_score_scratch = torch.empty(
+                (score.shape[0], self.num_heads, max(needed, self.window_size + length)),
+                device=score.device,
+                dtype=torch.float32,
+            )
+        scratch = self._chunk_score_scratch
+        if old_length:
+            start = self._cache_start
+            first = min(old_length, self.window_size - start)
+            scratch[:, :, :first] = self._local_score_cache[:, :, start:start + first]
+            if first < old_length:
+                remainder = old_length - first
+                scratch[:, :, first:old_length] = self._local_score_cache[:, :, :remainder]
+        scratch[:, :, old_length:needed] = score.float()
+        return scratch[:, :, :needed]
+
     def _combined_lexical_chunk(
         self, key: Tensor, value: Tensor
     ) -> tuple[Tensor, Tensor, int]:
@@ -2283,6 +2324,9 @@ class QCCSelfAttention(nn.Module):
         ):
             self.reset_cache(bsz, device=hidden.device)
         q_proj, k_proj, v_proj, gate_proj = self._project_qkv_gate(hidden[:, None])
+        birth_score = None
+        if bool(getattr(self.archive, "causal_hidden_predictor", False)):
+            birth_score = self.archive.hidden_admission(hidden).float()
         q_raw = self._split_heads(q_proj)[:, :, 0]
         q_raw = self._apply_active_query_correction(q_raw)
         key_raw = self._split_heads(k_proj)[:, :, 0]
@@ -2303,6 +2347,12 @@ class QCCSelfAttention(nn.Module):
                 shape = (bsz, self.num_heads, self.window_size, self.head_dim)
                 self._local_key_cache = torch.empty(shape, device=key.device, dtype=key.dtype)
                 self._local_value_cache = torch.empty(shape, device=value.device, dtype=value.dtype)
+                if birth_score is not None:
+                    self._local_score_cache = torch.empty(
+                        (bsz, self.num_heads, self.window_size),
+                        device=birth_score.device,
+                        dtype=torch.float32,
+                    )
                 if (
                     self.archive_position_invariant
                     and lexical_k is None
@@ -2336,11 +2386,16 @@ class QCCSelfAttention(nn.Module):
                     assert self._archive_key_cache is not None
                     archive_key = self._archive_key_cache[:, :, write_index]
                 if self._seen_tokens >= self.window_size + self.attention_sink_size:
+                    evicted_score = None
+                    if birth_score is not None:
+                        assert self._local_score_cache is not None
+                        evicted_score = self._local_score_cache[:, :, write_index]
                     self.archive.update(
                         archive_key, archive_value,
                         exact_key=self._local_key_cache[:, :, write_index],
                         exact_query=q,
                         hidden=hidden,
+                        admission_score=evicted_score,
                     )
                 # A token eviction changes the recurrent archive state.  Any
                 # read cached from an earlier state is therefore invalid even
@@ -2353,6 +2408,9 @@ class QCCSelfAttention(nn.Module):
                 self._cache_start = (self._cache_start + 1) % self.window_size
             self._local_key_cache[:, :, write_index] = key
             self._local_value_cache[:, :, write_index] = value
+            if birth_score is not None:
+                assert self._local_score_cache is not None
+                self._local_score_cache[:, :, write_index] = birth_score
             if (
                 self.archive_position_invariant
                 and lexical_k is None
@@ -2508,6 +2566,9 @@ class QCCSelfAttention(nn.Module):
         ):
             self.reset_cache(bsz, device=hidden.device)
         q_proj, k_proj, v_proj, gate_proj = self._project_qkv_gate(hidden)
+        birth_scores = None
+        if bool(getattr(self.archive, "causal_hidden_predictor", False)):
+            birth_scores = self.archive.hidden_admission(hidden).float()
         q_raw = self._split_heads(q_proj)
         q_raw = self._apply_active_query_correction(q_raw)
         k_raw = self._split_heads(k_proj)
@@ -2536,6 +2597,12 @@ class QCCSelfAttention(nn.Module):
                 shape = (bsz, self.num_heads, self.window_size, self.head_dim)
                 self._local_key_cache = torch.empty(shape, device=k.device, dtype=k.dtype)
                 self._local_value_cache = torch.empty(shape, device=v.device, dtype=v.dtype)
+                if birth_scores is not None:
+                    self._local_score_cache = torch.empty(
+                        (bsz, self.num_heads, self.window_size),
+                        device=birth_scores.device,
+                        dtype=torch.float32,
+                    )
                 if (
                     self.archive_position_invariant
                     and lexical_k is None
@@ -2548,6 +2615,11 @@ class QCCSelfAttention(nn.Module):
                     self._lexical_key_cache = torch.empty(shape, device=lexical_k.device, dtype=lexical_k.dtype)
                     self._lexical_value_cache = torch.empty(shape, device=lexical_v.device, dtype=lexical_v.dtype)
             combined_k, combined_v, old_length = self._combined_local_chunk(k, v)
+            combined_scores = None
+            if birth_scores is not None:
+                combined_scores = self._combined_local_score_chunk(
+                    birth_scores, old_length=old_length
+                )
             combined_archive_k = (
                 self._combined_archive_key_chunk(archive_k_current)
                 if (
@@ -2667,6 +2739,11 @@ class QCCSelfAttention(nn.Module):
             if event_count > 0:
                 evicted_k = combined_k[:, :, prefix_skip:prefix_skip + event_count]
                 evicted_v = combined_v[:, :, prefix_skip:prefix_skip + event_count]
+                evicted_scores = None
+                if combined_scores is not None:
+                    evicted_scores = combined_scores[
+                        :, :, prefix_skip:prefix_skip + event_count
+                    ]
                 # Keep the rotary local keys for the optional exact shadow;
                 # the recurrent archive may intentionally receive raw keys.
                 exact_evicted_k = evicted_k
@@ -2684,6 +2761,7 @@ class QCCSelfAttention(nn.Module):
                     exact_key=exact_evicted_k,
                     exact_query=q[:, :, event_start:],
                     hidden=hidden[:, event_start:event_start + event_count],
+                    admission_score=evicted_scores,
                     quality_query=quality_query,
                     quality_key_start=archive_event_offset,
                     quality_query_start=quality_query_start,
@@ -2732,13 +2810,20 @@ class QCCSelfAttention(nn.Module):
             new_start = (self._cache_start + evicted) % self.window_size
             tail_k = combined_k[:, :, -keep:]
             tail_v = combined_v[:, :, -keep:]
+            tail_scores = None if combined_scores is None else combined_scores[:, :, -keep:]
             first = min(keep, self.window_size - new_start)
             self._local_key_cache[:, :, new_start : new_start + first] = tail_k[:, :, :first]
             self._local_value_cache[:, :, new_start : new_start + first] = tail_v[:, :, :first]
+            if tail_scores is not None:
+                assert self._local_score_cache is not None
+                self._local_score_cache[:, :, new_start : new_start + first] = tail_scores[:, :, :first]
             if first < keep:
                 remainder = keep - first
                 self._local_key_cache[:, :, :remainder] = tail_k[:, :, first:]
                 self._local_value_cache[:, :, :remainder] = tail_v[:, :, first:]
+                if tail_scores is not None:
+                    assert self._local_score_cache is not None
+                    self._local_score_cache[:, :, :remainder] = tail_scores[:, :, first:]
             if combined_lexical_k is not None:
                 assert self._lexical_key_cache is not None and self._lexical_value_cache is not None
                 lexical_tail_k = combined_lexical_k[:, :, -keep:]
