@@ -1756,3 +1756,10 @@ The corrected adapter evaluation's second QCC record also fails. Source line26
 two causal-predictor QCC records are both failed remote retrievals; the two
 numeric/variable records remain pending. This does not support a quality
 promotion or a 99% claim.
+### Third causal predictor 32K result
+
+Source line46 (niah_single_1) completes under the causal predictor adapter:
+target4250981, prediction4250981, recall1, normal10-token termination.
+Together with the first two failures, the partial QCC recall vector is
+[0,0,1]; variable tracking remains running. The QCC state remains
+4,995,568,640 bytes.
