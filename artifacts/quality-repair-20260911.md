@@ -2110,3 +2110,14 @@ zero answer recall. Its measured state was `5,398,221,824` bytes (`5.03 GiB`).
 This negative result is limited to layer 15 and the current intervention; it
 shows that concentrating full history in one layer does not repair the remote
 needle under the present prefill path.
+
+### Vectorized block background reservoir update
+
+Profiling the interrupted full-history sanity path showed the dominant Python
+stack in `_commit_pending_block`: each rejected block called the scalar
+background reservoir sampler once per token. The block path now computes the
+reservoir counters, per-event slots, and last write for each background slot
+in bounded tensors, using one call per committed block. The scalar sampler is
+unchanged for block size one. Existing associative and hybrid background,
+block, exact, and quality tests pass. This is a serving-path optimization; no
+new quality claim is attached to it.

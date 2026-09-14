@@ -191,10 +191,17 @@ class SetAssociativeLandmarkBank(nn.Module):
         demoted = write & ~has_empty
         if self.background_size:
             event = ~write | demoted
-            for offset in range(self.block_size):
-                self._sample_background(
-                    torch.where(demoted[..., None], old_keys[:, :, offset], self._pending_keys[:, :, offset]),
-                    torch.where(demoted[..., None], old_values[:, :, offset], self._pending_values[:, :, offset]), event)
+            block_keys = torch.where(
+                demoted[..., None, None],
+                old_keys,
+                self._pending_keys,
+            )
+            block_values = torch.where(
+                demoted[..., None, None],
+                old_values,
+                self._pending_values,
+            )
+            self._sample_background_block(block_keys, block_values, event)
         wb, wh = torch.where(write)
         selected = index[write]
         self._keys[wb, wh, selected] = self._pending_keys[write]
@@ -219,6 +226,58 @@ class SetAssociativeLandmarkBank(nn.Module):
         selected = slot[keep]
         self._background_keys[batch, head, selected] = key.to(self._background_keys.dtype)[keep]
         self._background_values[batch, head, selected] = value.to(self._background_values.dtype)[keep]
+
+    @torch.no_grad()
+    def _sample_background_block(
+        self, key: Tensor, value: Tensor, event: Tensor
+    ) -> None:
+        """Reservoir-sample one rejected block with bounded tensor work."""
+        if key.ndim != 4 or value.shape != key.shape:
+            raise ValueError("background block key/value must be [batch, heads, block, dim]")
+        if key.shape[:2] != event.shape or key.shape[2] != self.block_size:
+            raise ValueError("background block shape does not match bank")
+        batch_size, heads, block, _ = key.shape
+        count_before = self._background_count
+        event_block = event.to(torch.long).unsqueeze(-1).expand(-1, -1, block)
+        counts = count_before.unsqueeze(-1) + event_block.cumsum(-1)
+        draws = torch.stack([
+            torch.rand((block,), device=key.device, generator=rng)
+            for rng in self._background_rngs
+        ], dim=0).unsqueeze(1)
+        slots = torch.where(
+            counts <= self.background_size,
+            counts - 1,
+            (draws * counts).to(torch.long),
+        )
+        keep = event_block.bool() & (slots < self.background_size)
+        slot_ids = torch.arange(
+            self.background_size, device=key.device, dtype=torch.long
+        ).view(1, 1, 1, -1)
+        positions = torch.arange(block, device=key.device, dtype=torch.long).view(
+            1, 1, block, 1
+        )
+        last = torch.where(
+            keep.unsqueeze(-1) & (slots.unsqueeze(-1) == slot_ids),
+            positions,
+            torch.full_like(positions, -1),
+        ).amax(2)
+        valid = last >= 0
+        gather = last.clamp_min(0).unsqueeze(-1).expand(
+            batch_size, heads, self.background_size, key.shape[-1]
+        )
+        chosen_key = key.gather(2, gather).to(self._background_keys.dtype)
+        chosen_value = value.gather(2, gather).to(self._background_values.dtype)
+        batch_index = torch.arange(batch_size, device=key.device)[:, None, None]
+        head_index = torch.arange(heads, device=key.device)[None, :, None]
+        slot_index = torch.arange(
+            self.background_size, device=key.device
+        )[None, None, :]
+        write_batch = batch_index.expand_as(valid)[valid]
+        write_head = head_index.expand_as(valid)[valid]
+        write_slot = slot_index.expand_as(valid)[valid]
+        self._background_keys[write_batch, write_head, write_slot] = chosen_key[valid]
+        self._background_values[write_batch, write_head, write_slot] = chosen_value[valid]
+        self._background_count.add_(event_block.sum(-1))
 
     def _ensure_state(self, key: Tensor) -> None:
         if self._keys.shape[0] != key.shape[0] or self._keys.device != key.device:
