@@ -1939,3 +1939,15 @@ was `18,878,127,104` bytes (`17.58 GiB`). Increasing the exact capacity to
 needles under causal birth-time QK admission. This is a real-model 32K result,
 not a 128K/1M or serving benchmark, and it does not invalidate the separate
 non-causal quality-first diagnostic result. Raw JSON and progress are retained.
+
+### Sparse core head-layer diagnostic added
+
+The diagnostic runner now supports `--sparse-core`. It ranks layer/head units
+from supplied teacher answer-attention traces (normalizing each trace before
+combining), then runs the native Full-KV model with remote history enabled only
+for the selected top fraction and a causal local window for all other units.
+The intervention keeps the original pretrained Q/K/V and SDPA path; it is a
+head-layer mask simulation, not a serving implementation. Fractions default to
+2.5%, 5%, and 10%, and the output records the exact selected units and each
+RULER row. This prepares the next architecture decision without adding a new
+test suite. No sparse-core GPU result exists yet.

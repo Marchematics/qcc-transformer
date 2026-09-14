@@ -628,6 +628,102 @@ def trace_teacher_heads(model, tokenizer, record, args):
         observations=selected), indent=2)+'\n')
 
 
+def sparse_core_simulation(model, tokenizer, record, args):
+    """Measure generation when only selected layer/head units retain remote KV."""
+    from benchmarks.benchmark_hf_ruler import _run_model
+    from transformers.models.phi3.modeling_phi3 import ALL_ATTENTION_FUNCTIONS
+
+    trace_paths = args.sparse_core_head_traces or []
+    if not trace_paths:
+        raise ValueError('--sparse-core requires --sparse-core-head-traces')
+    layers = int(model.config.num_hidden_layers)
+    heads = int(model.config.num_attention_heads)
+    unit_scores = torch.zeros(layers, heads, dtype=torch.float64)
+    used_traces = []
+    for path in trace_paths:
+        trace = json.loads(Path(path).read_text())
+        mass = torch.zeros(layers, heads, dtype=torch.float64)
+        for row in trace.get('observations', []):
+            layer = int(row['layer'])
+            values = torch.tensor(row['answer_mass_by_head'], dtype=torch.float64)
+            if layer < layers and values.numel() == heads:
+                mass[layer] += values
+        total = mass.sum()
+        if total > 0:
+            unit_scores += mass / total
+            used_traces.append(str(path))
+    if not used_traces:
+        raise ValueError('sparse-core traces contain no matching answer-mass observations')
+    flat = unit_scores.flatten()
+    fractions = [float(item) for item in args.sparse_core_fractions.split(',') if item.strip()]
+    if not fractions or any(not 0.0 < item <= 1.0 for item in fractions):
+        raise ValueError('--sparse-core-fractions must contain values in (0,1]')
+    ordered = flat.argsort(descending=True)
+    results = []
+    records = [(args.record, record)]
+    original_attention = ALL_ATTENTION_FUNCTIONS['sdpa']
+    window = int(args.window_size)
+
+    def evaluate(core_count: int):
+        core_flat = ordered[:core_count]
+        core_mask = torch.zeros(layers * heads, dtype=torch.bool)
+        core_mask[core_flat] = True
+        core_mask = core_mask.view(layers, heads)
+
+        def sparse_attention(module, query, key, value, attention_mask, **kwargs):
+            layer = int(getattr(module, 'layer_idx', -1))
+            if layer < 0 or layer >= layers:
+                return original_attention(module, query, key, value, attention_mask, **kwargs)
+            q_len, key_len = query.shape[-2], key.shape[-2]
+            query_positions = key_len - q_len + torch.arange(q_len, device=query.device)
+            key_positions = torch.arange(key_len, device=query.device)
+            causal = key_positions[None, :] <= query_positions[:, None]
+            recent = key_positions[None, :] >= query_positions[:, None] - window + 1
+            allowed = causal.unsqueeze(0).expand(heads, -1, -1).clone()
+            non_core = ~core_mask[layer].to(device=query.device)
+            allowed[non_core] &= recent
+            additive = torch.zeros(
+                (1, heads, q_len, key_len), device=query.device, dtype=query.dtype
+            )
+            additive.masked_fill_(
+                ~allowed.unsqueeze(0), torch.finfo(query.dtype).min
+            )
+            if isinstance(attention_mask, torch.Tensor):
+                additive = additive + attention_mask.to(dtype=query.dtype)
+            return original_attention(module, query, key, value, additive, **kwargs)
+
+        ALL_ATTENTION_FUNCTIONS.register('sdpa', sparse_attention)
+        try:
+            rows = _run_model(
+                model, tokenizer, records, torch.device('cuda'),
+                args.sparse_core_max_new_tokens, qcc=False,
+                offload_full_kv=True, full_kv_resident_layers=8,
+            )
+        finally:
+            ALL_ATTENTION_FUNCTIONS.register('sdpa', original_attention)
+        return core_mask, rows
+
+    for fraction in fractions:
+        count = max(1, min(flat.numel(), math.ceil(flat.numel() * fraction)))
+        core_mask, rows = evaluate(count)
+        results.append(dict(
+            fraction=fraction,
+            core_units=count,
+            core_layers_heads=core_mask.nonzero().tolist(),
+            records=rows,
+        ))
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(json.dumps(dict(
+        record=args.record,
+        model=args.model,
+        window_size=window,
+        scope='Full-KV teacher with per-layer/head remote-history masking; diagnostic simulation',
+        head_score_traces=used_traces,
+        head_score_normalization='per-trace answer attention mass normalized before summation',
+        results=results,
+    ), indent=2) + '\n')
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', required=True)
@@ -664,6 +760,11 @@ def main():
     parser.add_argument('--trace-teacher-heads', type=Path)
     parser.add_argument('--replay-teacher-retention', action='store_true',
                         help='replay actual bounded admission on teacher KV at layers 15,17,19,20')
+    parser.add_argument('--sparse-core', action='store_true',
+                        help='simulate full remote history for selected layer/head units')
+    parser.add_argument('--sparse-core-head-traces', type=Path, nargs='+')
+    parser.add_argument('--sparse-core-fractions', default='0.025,0.05,0.10')
+    parser.add_argument('--sparse-core-max-new-tokens', type=int, default=64)
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     from transformers import AutoTokenizer
@@ -679,6 +780,9 @@ def main():
         return
     if args.trace_teacher_heads:
         trace_teacher_heads(model, tokenizer, record, args)
+        return
+    if args.sparse_core:
+        sparse_core_simulation(model, tokenizer, record, args)
         return
     if args.trace_candidate:
         trace_candidate(model, tokenizer, record, args)
