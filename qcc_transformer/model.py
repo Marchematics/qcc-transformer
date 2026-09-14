@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Sequence
 
 import torch
 from torch import Tensor, nn
@@ -133,6 +133,7 @@ class QCCArchive(nn.Module):
         self.num_codes = num_codes
         self.num_scales = int(rates.numel())
         self.window_size = window_size
+        self.max_position_embeddings = int(max_position_embeddings)
         self.use_triton = use_triton
         # Inference may route to a small top-k subset while retaining an
         # overcomplete codebook for representational capacity. ``None`` keeps
@@ -1502,6 +1503,12 @@ class QCCSelfAttention(nn.Module):
         # the same chronological ring as the local K/V so eviction forwards
         # the score for the evicted item, rather than the current token.
         self._local_score_cache: Optional[Tensor] = None
+        # Optional diagnostic/deployment policy: selected query heads retain
+        # their original K/V history up to the configured context bound. The
+        # remaining heads continue through the bounded archive path.
+        self.full_history_heads: tuple[int, ...] = ()
+        self._full_history_key_cache: Optional[Tensor] = None
+        self._full_history_value_cache: Optional[Tensor] = None
         # Position-free lexical keys/values are kept in a separate bounded
         # ring when ``archive_lexical_landmark`` is enabled.  Initialize the
         # fields eagerly so introspection and checkpoint-free unit tests see a
@@ -2038,6 +2045,8 @@ class QCCSelfAttention(nn.Module):
         self._local_key_cache = None
         self._local_value_cache = None
         self._local_score_cache = None
+        self._full_history_key_cache = None
+        self._full_history_value_cache = None
         self._lexical_key_cache = None
         self._lexical_value_cache = None
         self._archive_key_cache = None
@@ -2054,6 +2063,15 @@ class QCCSelfAttention(nn.Module):
         self._seen_tokens = 0
         self._archive_read_cache = None
         self._archive_query_cache = None
+
+    def set_full_history_heads(self, heads: Sequence[int]) -> None:
+        """Select query heads that keep an exact bounded full-history cache."""
+        selected = tuple(sorted({int(head) for head in heads}))
+        if any(head < 0 or head >= self.num_heads for head in selected):
+            raise ValueError("full-history head index is outside attention geometry")
+        self.full_history_heads = selected
+        self._full_history_key_cache = None
+        self._full_history_value_cache = None
 
     def _retain_attention_sinks(self, key: Tensor, value: Tensor) -> None:
         if not self.use_archive or self._seen_tokens >= self.attention_sink_size:
@@ -2219,6 +2237,62 @@ class QCCSelfAttention(nn.Module):
         scratch[:, :, old_length:needed] = score.float()
         return scratch[:, :, :needed]
 
+    def _full_history_attention(
+        self,
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        *,
+        old_length: int,
+    ) -> Tensor:
+        """Read selected heads from their exact, bounded full-history cache."""
+        if not self.full_history_heads:
+            raise RuntimeError("full-history attention requested without selected heads")
+        bsz, _, length, dim = query.shape
+        selected = torch.tensor(self.full_history_heads, device=query.device)
+        selected_key = key.index_select(1, selected)
+        selected_value = value.index_select(1, selected)
+        needed = old_length + length
+        if needed > self.max_position_embeddings:
+            raise ValueError(
+                "full-history cache exceeds max_position_embeddings; "
+                "use a checkpoint-native context bound"
+            )
+        if (
+            self._full_history_key_cache is None
+            or self._full_history_value_cache is None
+            or self._full_history_key_cache.shape[0] != bsz
+            or self._full_history_key_cache.device != key.device
+            or self._full_history_key_cache.dtype != key.dtype
+            or self._full_history_key_cache.shape[2] < self.max_position_embeddings
+        ):
+            cache_shape = (
+                bsz,
+                len(self.full_history_heads),
+                self.max_position_embeddings,
+                dim,
+            )
+            self._full_history_key_cache = torch.empty(
+                cache_shape, device=key.device, dtype=key.dtype
+            )
+            self._full_history_value_cache = torch.empty(
+                cache_shape, device=value.device, dtype=value.dtype
+            )
+        assert self._full_history_value_cache is not None
+        self._full_history_key_cache[:, :, old_length:needed] = selected_key
+        self._full_history_value_cache[:, :, old_length:needed] = selected_value
+        full_key = self._full_history_key_cache[:, :, :needed]
+        full_value = self._full_history_value_cache[:, :, :needed]
+        # SDPA's rectangular causal mode uses the lower-right alignment, so a
+        # query chunk sees exactly the prefix before it plus its causal prefix.
+        return _scaled_dot_product_attention(
+            query.index_select(1, selected),
+            full_key,
+            full_value,
+            is_causal=True,
+            dropout_p=0.0,
+        )
+
     def _combined_lexical_chunk(
         self, key: Tensor, value: Tensor
     ) -> tuple[Tensor, Tensor, int]:
@@ -2323,6 +2397,7 @@ class QCCSelfAttention(nn.Module):
             or self.archive._numerator.device != hidden.device
         ):
             self.reset_cache(bsz, device=hidden.device)
+        history_length = self._seen_tokens
         q_proj, k_proj, v_proj, gate_proj = self._project_qkv_gate(hidden[:, None])
         birth_score = None
         if bool(getattr(self.archive, "causal_hidden_predictor", False)):
@@ -2565,6 +2640,7 @@ class QCCSelfAttention(nn.Module):
             or self.archive._numerator.device != hidden.device
         ):
             self.reset_cache(bsz, device=hidden.device)
+        history_length = self._seen_tokens
         q_proj, k_proj, v_proj, gate_proj = self._project_qkv_gate(hidden)
         birth_scores = None
         if bool(getattr(self.archive, "causal_hidden_predictor", False)):
@@ -2843,6 +2919,12 @@ class QCCSelfAttention(nn.Module):
                     self._archive_key_cache[:, :, :remainder] = archive_tail_k[:, :, first:]
             self._cache_start = new_start
             self._cache_length = keep
+        if self.full_history_heads:
+            full_out = self._full_history_attention(
+                q, k, v, old_length=history_length
+            )
+            selected = torch.tensor(self.full_history_heads, device=q.device)
+            head_out[:, selected] = full_out
         self._seen_tokens += length
         return self.out_proj(head_out.transpose(1, 2).reshape(bsz, length, self.d_model))
 

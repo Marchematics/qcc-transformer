@@ -528,6 +528,10 @@ def main() -> None:
         help="use the trained causal hidden-state admission predictor")
     parser.add_argument("--causal-hidden-predictor", action="store_true",
         help="use the trained hidden-state causal writer")
+    parser.add_argument(
+        "--full-history-units", default=None,
+        help="comma-separated layer:head units that keep exact full history",
+    )
     args = parser.parse_args()
     if args.causal_block_retention and (args.quality_first or args.causal_coreset or not args.exact_attention):
         raise ValueError("causal-block-retention requires standalone --exact-attention")
@@ -762,6 +766,23 @@ def main() -> None:
             local_attention_backend=args.local_attention_backend,
             prefill_chunk_size=args.prefill_chunk_size,
         )
+    if args.full_history_units:
+        units: dict[int, list[int]] = {}
+        for item in args.full_history_units.split(","):
+            if not item.strip() or ":" not in item:
+                raise ValueError("full-history-units must use layer:head entries")
+            layer_text, head_text = item.split(":", 1)
+            layer, head = int(layer_text), int(head_text)
+            units.setdefault(layer, []).append(head)
+        for name in replaced:
+            module = patched.get_submodule(name)
+            layer = int(module.qcc._qcc_layer_index)
+            module.qcc.set_full_history_heads(units.get(layer, ()))
+        unknown_layers = sorted(set(units) - {
+            int(patched.get_submodule(name).qcc._qcc_layer_index) for name in replaced
+        })
+        if unknown_layers:
+            raise ValueError(f"full-history-units references unknown layers: {unknown_layers}")
         enable_qkv_only_deployment_profile(patched)
     qcc_results = _run_model(
         patched, tokenizer, records, patched_device, args.max_new_tokens, qcc=True,
@@ -857,6 +878,7 @@ def main() -> None:
         "causal_block_retention": args.causal_block_retention,
         "causal_admission_predictor": args.causal_admission_predictor,
         "causal_hidden_predictor": args.causal_hidden_predictor,
+        "full_history_units": args.full_history_units,
         "coreset_capacity": args.coreset_capacity,
         "coreset_merge_policy": args.coreset_merge_policy,
         "coreset_query_probes": args.coreset_query_probes,
