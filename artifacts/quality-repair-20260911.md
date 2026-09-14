@@ -2039,3 +2039,15 @@ artifacts were removed. The interpretable sequence is the later all-unit sanity
 of those cross-task masks failed `niah_multikey_2`. The 5%/10% masks still
 replace all non-core remote history with a local window, so they test a
 stronger intervention than adding a core to the current QCC bank.
+
+### Target-derived sparse-core 5% diagnostic
+
+The core ranking was recomputed from the target row's own Full-KV decode
+remote-attention mass, then the same row was rerun with 52/1,024 units (5%)
+allowed full remote history and all other units limited to the local window.
+The Full-KV ranking pass reproduced the target, but the masked run returned
+`728` and did not contain `9116227` (`answer_recall=0`, `score=0`). This shows
+that the earlier cross-task ranking was not the only issue. It still does not
+prove a 5% core is insufficient for the final design, because non-core units
+were given no bounded exact bank and the ranking uses attention mass rather
+than causal deletion impact.
