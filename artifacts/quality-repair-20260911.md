@@ -1681,3 +1681,16 @@ use contemporaneous native QK and has zero active trainable parameters; the
 new flag is opt-in and is the first causal writer candidate for real
 retrieval. Focused predictor/QK selection tests and Python compilation pass.
 No trained checkpoint or quality score exists yet.
+
+### 32K causal comparison complete
+
+The fixed-budget32K run now has all four paired records. Causal QCC recall is
+[0,0,1,1] and Full-KV is [1,1,1,1]; macro scores are0.50 and1.00.
+Completion is1.00 for all records. The two remote multi-key retrievals fail
+with predictions9486799 and6f250408-8dbb-475f-8f23-093e5c1ae0c6, while the
+single-number and variable-tracking records are correct. QCC state remains
+4,995,568,640 bytes. This confirms the causal native-QK baseline cannot
+retain arbitrary unknown remote needles at32K with8192 slots.
+The run used the pre-freeze implementation snapshot and its recorded marked
+trainable count is0.3010835%; subsequent causal constructions freeze bypassed
+parameters.
