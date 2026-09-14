@@ -2004,3 +2004,14 @@ units ranked from normalized answer-mass traces of two other records) then
 failed the same target in a 16-token run; it produced the distractor
 `7289247`. The earlier 5%/10% files without the Phi-3 template were discarded
 as invalid diagnostics.
+
+### Sparse-core corrected 10% result
+
+With the same Phi-3 prompt formatting and cross-task answer-mass ranking, 103
+of 1,024 layer/head units (10%) retained full remote history for the 32K
+multi-key row. The target `9116227` was not recovered; the run returned the
+same distractor `7289247` in 10 tokens (`answer_recall=0`, `score=0`). The
+all-unit sanity remains correct, so the 5% and 10% failures are attributable
+to the tested head selection/coverage rather than a prompt or output-layout
+mismatch. This does not test a target-derived oracle core and is not a final
+sparse-core architecture result.
