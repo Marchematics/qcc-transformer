@@ -1920,3 +1920,22 @@ score per local KV slot (16 MiB for the current 32-layer, 32-head, 4096-window
 geometry) and no trainable parameters. A corrected 32K hidden-writer GPU
 rerun remains pending; the existing `[0,0,1,0]` result must not be used to
 reject the aligned writer.
+
+### Causal 16K block128 32K evaluation completed
+
+The equal-capacity causal original-KV path (`128 x 128` slots, block size 128,
+background reservoir 128, BF16 exact K/V, no future-query quality-first
+side-channel) completed the same four 32K records. Full-KV answer recall is
+`[1,1,1,1]`. Causal QCC answer recall is `[0,0,1,1]`, so retrieval recall is
+`0.5`: both multi-key remote records fail, while the single-number and
+variable-tracking records contain the expected answers. The variable tracking
+continuation reaches the 128-token output limit, so the completion-weighted
+QCC scores are `[0,0,1,0]` and aggregate score is `0.25`.
+
+The causal path has no trainable parameters and measured persistent QCC tensor
+state `8,355,599,360` bytes (`7.782 GiB`) per request; peak CUDA allocation
+was `18,878,127,104` bytes (`17.58 GiB`). Increasing the exact capacity to
+16,384 original KV slots therefore did not recover the two unknown remote
+needles under causal birth-time QK admission. This is a real-model 32K result,
+not a 128K/1M or serving benchmark, and it does not invalidate the separate
+non-causal quality-first diagnostic result. Raw JSON and progress are retained.
