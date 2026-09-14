@@ -2075,3 +2075,14 @@ not a final bounded-bank implementation. It shows that preserving one known
 answer block plus a small full-history core is insufficient under this mask;
 other remote context or a less disruptive bounded representation remains
 necessary.
+
+### Causal secondary-bank core5 real-model probe
+
+The first fair integrated probe added five target-ranked full-history
+layer/head units to the existing causal 8,192-slot exact bank (32-token blocks,
+BF16 K/V) on the 32K multi-key row. Full-KV returned `9116227`; the combined
+bounded-bank path returned `3184296` and had zero answer recall. The measured
+QCC state was `5,247,226,880` bytes (`4.887 GiB`) with five bounded full-history
+unit caches enabled. This one-row result does not decide the number of units,
+but it shows that five selected full-history units do not repair the current
+remote retrieval path.
