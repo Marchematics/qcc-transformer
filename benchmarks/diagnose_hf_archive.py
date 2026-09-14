@@ -634,7 +634,9 @@ def sparse_core_simulation(model, tokenizer, record, args):
     from transformers.models.phi3.modeling_phi3 import ALL_ATTENTION_FUNCTIONS
 
     trace_paths = args.sparse_core_head_traces or []
-    if not trace_paths:
+    if args.oracle_block and args.oracle_block_size <= 0:
+        raise ValueError('--oracle-block-size must be positive')
+    if not args.oracle_block and not trace_paths:
         raise ValueError('--sparse-core requires --sparse-core-head-traces')
     layers = int(model.config.num_hidden_layers)
     heads = int(model.config.num_attention_heads)
@@ -652,7 +654,7 @@ def sparse_core_simulation(model, tokenizer, record, args):
         if total > 0:
             unit_scores += mass / total
             used_traces.append(str(path))
-    if not used_traces:
+    if not args.oracle_block and not used_traces:
         raise ValueError('sparse-core traces contain no matching answer-mass observations')
     flat = unit_scores.flatten()
     fractions = [float(item) for item in args.sparse_core_fractions.split(',') if item.strip()]
@@ -664,11 +666,23 @@ def sparse_core_simulation(model, tokenizer, record, args):
     if args.prompt_template == 'phi3':
         from benchmarks.benchmark_hf_ruler import _format_phi3_record
         records = [(args.record, _format_phi3_record(record))]
+    oracle_positions = set()
+    if args.oracle_block:
+        prompt_ids = tokenizer(records[0][1]['input'], add_special_tokens=False)['input_ids']
+        for answer in record.get('outputs', []):
+            answer_ids = tokenizer(answer, add_special_tokens=False)['input_ids']
+            for start in range(max(0, len(prompt_ids) - len(answer_ids) + 1)):
+                if prompt_ids[start:start + len(answer_ids)] == answer_ids:
+                    block_start = (start // args.oracle_block_size) * args.oracle_block_size
+                    oracle_positions.update(range(block_start, block_start + args.oracle_block_size))
+                    break
+        if not oracle_positions:
+            raise ValueError('oracle block answer tokens were not found in the formatted prompt')
     original_attention = ALL_ATTENTION_FUNCTIONS['sdpa']
     window = int(args.window_size)
 
     def evaluate(core_count: int):
-        core_flat = ordered[:core_count]
+        core_flat = ordered[:core_count] if not args.oracle_block else ordered[:0]
         core_mask = torch.zeros(layers * heads, dtype=torch.bool)
         core_mask[core_flat] = True
         core_mask = core_mask.view(layers, heads)
@@ -716,13 +730,62 @@ def sparse_core_simulation(model, tokenizer, record, args):
                 if not TRITON_AVAILABLE:
                     raise RuntimeError('sparse-core simulation requires Triton for long prompts')
                 q_len, key_len = query.shape[-2], key.shape[-2]
-                output[:, local_heads] = triton_local_chunk_attention(
-                    query[:, local_heads],
-                    key[:, local_heads],
-                    value[:, local_heads],
-                    old_length=key_len - q_len,
-                    window_size=window,
-                )
+                if not args.oracle_block:
+                    output[:, local_heads] = triton_local_chunk_attention(
+                        query[:, local_heads],
+                        key[:, local_heads],
+                        value[:, local_heads],
+                        old_length=key_len - q_len,
+                        window_size=window,
+                    )
+                else:
+                    # Combine a bounded recent slice with the fixed oracle
+                    # blocks in small query tiles. This keeps the diagnostic
+                    # memory linear in the window plus oracle blocks instead
+                    # of constructing a prompt-sized attention mask.
+                    local_query = query[:, local_heads]
+                    local_key = key[:, local_heads]
+                    local_value = value[:, local_heads]
+                    oracle_list = sorted(p for p in oracle_positions if p < key_len)
+                    for q_start in range(0, q_len, 128):
+                        q_end = min(q_len, q_start + 128)
+                        q_abs = key_len - q_len + torch.arange(
+                            q_start, q_end, device=query.device
+                        )
+                        recent_start = max(0, int(q_abs[0].item()) - window + 1)
+                        recent_end = min(key_len, int(q_abs[-1].item()) + 1)
+                        recent_positions = torch.arange(
+                            recent_start, recent_end, device=query.device
+                        )
+                        if oracle_list:
+                            oracle_tensor = torch.tensor(
+                                oracle_list, device=query.device, dtype=torch.long
+                            )
+                            positions = torch.cat((recent_positions, oracle_tensor)).unique(sorted=True)
+                        else:
+                            positions = recent_positions
+                        keys_tile = local_key.index_select(2, positions)
+                        values_tile = local_value.index_select(2, positions)
+                        logits = torch.matmul(
+                            local_query[:, :, q_start:q_end].float(),
+                            keys_tile.float().transpose(-1, -2),
+                        ) / math.sqrt(local_query.shape[-1])
+                        is_oracle = torch.zeros(
+                            positions.shape[0], device=query.device, dtype=torch.bool
+                        )
+                        if oracle_list:
+                            is_oracle = torch.isin(positions, oracle_tensor)
+                        allowed = (positions[None, :] <= q_abs[:, None]) & (
+                            (positions[None, :] >= q_abs[:, None] - window + 1)
+                            | is_oracle[None, :]
+                        )
+                        logits = logits.masked_fill(
+                            ~allowed[None, None], torch.finfo(logits.dtype).min
+                        )
+                        weights = torch.softmax(logits, dim=-1).to(values_tile.dtype)
+                        output[:, local_heads, q_start:q_end] = torch.matmul(
+                            weights, values_tile
+                        )
             return output.transpose(1, 2).contiguous(), None
 
         ALL_ATTENTION_FUNCTIONS.register('sdpa', sparse_attention)
@@ -753,6 +816,9 @@ def sparse_core_simulation(model, tokenizer, record, args):
         scope='Full-KV teacher with per-layer/head remote-history masking; diagnostic simulation',
         head_score_traces=used_traces,
         head_score_normalization='per-trace answer attention mass normalized before summation',
+        oracle_block=args.oracle_block,
+        oracle_block_size=args.oracle_block_size if args.oracle_block else None,
+        oracle_positions=sorted(oracle_positions) if args.oracle_block else None,
         results=results,
     ), indent=2) + '\n')
 
@@ -796,6 +862,9 @@ def main():
                         help='replay actual bounded admission on teacher KV at layers 15,17,19,20')
     parser.add_argument('--sparse-core', action='store_true',
                         help='simulate full remote history for selected layer/head units')
+    parser.add_argument('--oracle-block', action='store_true',
+                        help='diagnostic: retain prompt blocks containing the supplied answers for every head')
+    parser.add_argument('--oracle-block-size', type=int, default=32)
     parser.add_argument('--sparse-core-head-traces', type=Path, nargs='+')
     parser.add_argument('--sparse-core-fractions', default='0.025,0.05,0.10')
     parser.add_argument('--sparse-core-max-new-tokens', type=int, default=64)
@@ -820,7 +889,7 @@ def main():
     if args.trace_teacher_heads:
         trace_teacher_heads(model, tokenizer, record, args)
         return
-    if args.sparse_core:
+    if args.sparse_core or args.oracle_block:
         sparse_core_simulation(model, tokenizer, record, args)
         return
     if args.trace_candidate:
