@@ -1827,3 +1827,10 @@ description and reaches128 tokens, giving recall0 and completion0. Together
 with line7, both remote multi-key records fail under the hidden writer. The
 single-number and variable records remain pending. This confirms that adding
 hidden-state capacity alone does not solve unknown remote retrieval.
+### Third hidden-state writer 32K result
+
+Source line46 retrieves the target number4250981 under the hidden writer, so
+answer recall is1, but generation continues with blank tokens to the128-token
+limit; the completion-weighted score is0. This separates retrieval from stop
+behavior and leaves the hidden writer's current causal quality incomplete.
+Variable tracking remains the final pending record.
