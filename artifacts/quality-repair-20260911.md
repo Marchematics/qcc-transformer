@@ -2100,3 +2100,13 @@ and its state cost already exceeds the all-head 8,192-bank path. This is a
 single-row diagnostic; it does not rule out a different head selection or a
 non-disruptive prefill implementation, but it removes the simple core10 plus
 current-bank candidate from the leading path.
+
+### Layerwise full-history probe
+
+A one-row probe gave every head in layer 15 an on-demand full-history cache while
+keeping the 8,192-slot bounded exact bank in all layers. Full-KV returned
+`9116227`; the combined path produced an empty 16-token continuation and had
+zero answer recall. Its measured state was `5,398,221,824` bytes (`5.03 GiB`).
+This negative result is limited to layer 15 and the current intervention; it
+shows that concentrating full history in one layer does not repair the remote
+needle under the present prefill path.
