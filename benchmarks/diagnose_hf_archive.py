@@ -720,7 +720,7 @@ def sparse_core_simulation(model, tokenizer, record, args):
                     old_length=key_len - q_len,
                     window_size=window,
                 )
-            return output, None
+            return output.transpose(1, 2).contiguous(), None
 
         ALL_ATTENTION_FUNCTIONS.register('sdpa', sparse_attention)
         try:
