@@ -648,6 +648,7 @@ def test_causal_block_decode_uses_contemporaneous_qk_score():
         base, exact_num_sets=1, exact_ways=1,
         exact_attention=True, causal_block_retention=True,
     )
+    assert hybrid.admission_threshold == pytest.approx(-1.0e9)
     hybrid.exact_bank.diversity_weight = 0.0
     key = torch.tensor([[[2.0, 0.0]]])
     query = torch.tensor([[[3.0, 4.0]]])

@@ -1727,3 +1727,13 @@ run-start and two completed Full-KV records are preserved in
 The corrected rerun explicitly passes `--num-codes 16` and writes a separate
 v2 result/progress path. This is a configuration correction, not a quality
 result.
+### Causal writer admission threshold correction
+
+The causal original-KV writer must rank all observed events. Its prior default
+threshold of0 discarded every negative causal QK or predictor score before a
+slot could compete, leaving the fixed table underfilled. Causal block mode now
+sets the finite threshold to-1e9; replacement ranking, not score sign, controls
+which records survive. Focused causal tests pass. The already-running
+causal-admission-all-v2-four32k-v2 process was instantiated before this change
+and retains threshold0; its eventual output will be labeled as the pre-correction
+control. Subsequent evaluations will use the corrected threshold.

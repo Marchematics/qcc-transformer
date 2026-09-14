@@ -175,6 +175,7 @@ class HybridQCCArchive(QCCArchive):
                 "HybridQCCArchive currently requires the dense base archive; "
                 "sparse/lazy fallbacks can double-dispatch virtual updates"
             )
+        exact_hard_read = True
         if quality_first:
             # Quality-first is an explicit bounded exact shadow.  Use the
             # score-based global table rather than FIFO: a long prefill is
@@ -194,10 +195,12 @@ class HybridQCCArchive(QCCArchive):
             # Keep nearest-neighbour reads and honor the caller's mix bias so the
             # confidence gate remains a conservative, tunable fallback.
             exact_mix_bias_init = float(exact_mix_bias_init)
-            exact_hard_read = True
             max_inserts_per_chunk = exact_num_sets * exact_ways
-        else:
-            exact_hard_read = True
+        if causal_block_retention:
+            # A causal writer must let every observed event compete for the
+            # bounded table. The score, not a fixed positive threshold, decides
+            # which slot survives; negative logits are valid evidence too.
+            admission_threshold = -1.0e9
         super().__init__(
             num_heads,
             head_dim,
