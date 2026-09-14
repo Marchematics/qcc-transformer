@@ -133,7 +133,6 @@ class QCCArchive(nn.Module):
         self.num_codes = num_codes
         self.num_scales = int(rates.numel())
         self.window_size = window_size
-        self.max_position_embeddings = int(max_position_embeddings)
         self.use_triton = use_triton
         # Inference may route to a small top-k subset while retaining an
         # overcomplete codebook for representational capacity. ``None`` keeps
@@ -1403,6 +1402,7 @@ class QCCSelfAttention(nn.Module):
             raise ValueError("rotary_dim must be no larger than head_dim")
         self.window_size = window_size
         self.attention_sink_size = attention_sink_size
+        self.max_position_embeddings = int(max_position_embeddings)
         if not 0 <= attention_sink_size <= window_size:
             raise ValueError("attention_sink_size must be between zero and window_size")
         self._sink_keys: Optional[Tensor] = None
