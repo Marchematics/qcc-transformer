@@ -1951,3 +1951,22 @@ head-layer mask simulation, not a serving implementation. Fractions default to
 2.5%, 5%, and 10%, and the output records the exact selected units and each
 RULER row. This prepares the next architecture decision without adding a new
 test suite. No sparse-core GPU result exists yet.
+
+### Aligned hidden writer 32K evaluation completed
+
+The hidden-state writer was rerun after the birth-score ring alignment fix,
+using the same 8,192-slot configuration, 32-token retention blocks, adapter,
+model, template, and stop rule as the original evaluation. Full-KV answer
+recall is `[1,1,1,1]`; aligned-writer QCC answer recall is `[0,0,1,1]`, giving
+macro answer recall `0.50`. The two remote multi-key records still fail
+(`8822690` for target `9116227`, and a wrong UUID for the second record).
+The single-number and variable-tracking records contain all expected answers
+and terminate before the output limit, so completion-weighted QCC score is
+`0.50`.
+
+The aligned writer uses `3,146,752` trainable parameters (`0.08235%` of the
+logical pretrained backbone) and measured QCC state `5,031,220,224` bytes
+(`4.687 GiB`) per request. The score-index bug was real and changed outputs,
+but correcting it did not recover unknown remote multi-key retrieval. This
+rules out the old deployment mismatch as the primary explanation for those
+failures; further full-head writer expansion is not supported by this result.
