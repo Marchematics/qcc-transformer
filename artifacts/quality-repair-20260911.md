@@ -1640,3 +1640,30 @@ uses4,995,568,640 bytes of QCC state. This is a genuine eviction case
 (the target lies beyond the4096 local window). It provides a concrete failure
 of the untrained instantaneous-QK writer for unknown future queries. The
 remaining three QCC records are still running; no aggregate is reported.
+
+### Completed fixed-budget32K causal comparison
+
+The four records complete without execution errors. Full-KV recall is
+[1,1,1,1] (macro1.0); causal QCC recall is [0,0,1,1] (macro0.5).
+The two remote niah_multikey records fail: line7 target9116227 predicts9486799,
+and line26 target e20a8be5-a274-47d8-838b-42290d0453a1 predicts
+6f250408-8dbb-475f-8f23-093e5c1ae0c6. Single-number line46 and variable
+tracking line66 both recall all targets and terminate normally. Completion is
+1.0 for all eight records. QCC state is4,995,568,640 bytes per record.
+
+This run was launched before the later causal decode-score alignment commit;
+prefill used the causal path, while single-token decode still used the prior
+update implementation. Its failure is thus conservative evidence against
+the untrained causal writer, not an isolated test of the final aligned decode
+implementation. The result is still sufficient to reject the claim that
+instantaneous causal QK scoring reliably preserves unknown 32K needles.
+The output files record 11,504,640 marked trainable parameters (0.3010835%)
+because they predate the freeze-accounting correction; the default causal
+block path itself has no active learned parameters after that correction.
+
+The four-task causal 16K run remains the positive diagnostic: macro recall0.75
+versus0.70 quality-first QCC. Across both lengths, remote UUID/number
+retrieval is the limiting behavior while variable tracking is preserved.
+The next method work should train a causal hidden-state writer against
+future-teacher deletion impact, then evaluate on independent 32K records;
+capacity or block-width scans are not justified by these results.
