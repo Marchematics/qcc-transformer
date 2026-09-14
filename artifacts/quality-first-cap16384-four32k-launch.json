@@ -1,5 +1,5 @@
 {
-  "run_id": "quality-first-cap16384-four32k-v1",
+  "run_id": "quality-first-cap16384-four32k-v2",
   "input": "artifacts/ruler-causal-block-four32k-input.jsonl",
   "purpose": "Quality-first future-query retention at 32K with 16,384 original BF16 KV slots; compare against the completed 8,192-slot causal and hidden-writer controls.",
   "command": [
@@ -7,7 +7,7 @@
     "--model", "/datasets/ComfyUI/models/LLM/Phi-3.5-mini-instruct",
     "--ruler-jsonl", "artifacts/ruler-causal-block-four32k-input.jsonl",
     "--prompt-template", "phi3", "--max-examples", "4", "--max-new-tokens", "128",
-    "--offload-full-kv", "--full-kv-resident-layers", "8", "--run-id", "quality-first-cap16384-four32k-v1",
+    "--offload-full-kv", "--full-kv-resident-layers", "8", "--run-id", "quality-first-cap16384-four32k-v2",
     "--dtype", "bfloat16", "--attn-implementation", "eager", "--chunked-full-attention",
     "--full-attention-query-chunk-size", "128", "--full-attention-key-chunk-size", "1024",
     "--use-triton", "--local-attention-backend", "sdpa", "--prefill-chunk-size", "512",
@@ -16,8 +16,8 @@
     "--retention-block-size", "32", "--quality-query-tail", "128", "--quality-first",
     "--exact-attention", "--exact-storage-dtype", "bfloat16", "--archive-position-invariant",
     "--kv-head-policy", "repeat", "--trust-remote-code",
-    "--output", "artifacts/benchmark-quality-first-cap16384-four32k-v1.json",
-    "--progress-jsonl", "artifacts/benchmark-quality-first-cap16384-four32k-v1.progress.jsonl"
+    "--output", "artifacts/benchmark-quality-first-cap16384-four32k-v2.json",
+    "--progress-jsonl", "artifacts/benchmark-quality-first-cap16384-four32k-v2.progress.jsonl"
   ],
   "launch_dependency": "starts after causal-hidden-admission-all-v1-four32k-v1 exits"
 }
