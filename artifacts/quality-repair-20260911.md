@@ -1879,3 +1879,23 @@ stage became impractically long on the single A10. The run was stopped after
 preserving its progress log; it is not a QCC quality result. The next equal
 capacity trial uses `128 x 128`, so one committed retention block is 128
 tokens and the batched causal reader performs four times fewer block commits.
+
+### 16K quality-first block128 32K evaluation completed
+
+The corrected `128 x 128` equal-capacity launch completed all four Full-KV and
+QCC records on the Phi-3.5-mini RULER subset. Full-KV answer recall is
+`[1,1,1,1]`; QCC answer recall is also `[1,1,1,1]`, with completion-weighted
+scores `[1,1,1,1]`. The two multi-key retrieval records, the single-number
+record, and variable tracking all contain every expected answer. The variable
+tracking continuation is verbose but stays below the 128-token limit, so the
+reported official answer-recall and completion score remain one.
+
+The run uses `exact_num_sets=128`, `exact_ways=128`, `retention_block_size=128`,
+`background_size=128`, quality-first future-query salience, and BF16 exact K/V
+storage with FP32 score state. The measured QCC tensor state is
+`8,356,385,792` bytes (`7.7825 GiB`) per request; peak CUDA allocation across
+the four rows is `18,935,482,368` bytes (`17.6350 GiB`). The benchmark reports
+`6,589,440` trainable parameters, `0.17245%` of the logical pretrained
+backbone. This is a bounded 32K quality result for the non-causal
+quality-first diagnostic path. It does not establish causal prefill, 128K or
+1M quality, or any TPOT/throughput/concurrency target.
