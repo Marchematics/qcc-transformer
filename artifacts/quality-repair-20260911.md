@@ -1701,3 +1701,18 @@ extracts each record's `input` (or `text`) field and joins records into the
 calibration stream, preserving the existing plain-text path. This avoids
 training on serialized metadata. Python compilation remains clean. No
 checkpoint has been produced by this helper change yet.
+### Causal admission predictor calibration completed
+
+The first calibration launch was intentionally preserved as
+`admission-regular-all.*`: its command omitted the causal flag and trained
+the regular hybrid admission predictor. It is not used as causal evidence.
+
+The corrected `causal-admission-all-v2` launch used the JSONL NIAH inputs,
+eight 2,048-token train chunks from the 16K stream and four held-out chunks
+from the 32K stream, window512, teacher_queries128, teacher_topk8,
+positive_fraction0.02, and100 AdamW steps. The causal block mode was enabled;
+all pretrained weights and all non-admission QCC parameters were frozen. The
+saved adapter contains197,632 trainable admission parameters, or
+0.009683% of3,821,079,552 logical pretrained parameters. This is a calibration
+fit/held-out classifier report, not a task-generation result. The adapter is
+now queued for an independent four-record32K RULER comparison.
