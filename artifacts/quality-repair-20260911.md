@@ -1716,3 +1716,14 @@ saved adapter contains197,632 trainable admission parameters, or
 0.009683% of3,821,079,552 logical pretrained parameters. This is a calibration
 fit/held-out classifier report, not a task-generation result. The adapter is
 now queued for an independent four-record32K RULER comparison.
+### Causal adapter evaluation launch correction
+
+The first causal-adapter evaluation was stopped before inference because its
+command omitted `--num-codes 16`, while the adapter had been trained with16
+codes and the evaluator instantiated the default64. The loader reported a
+shape mismatch in `archive.mix_logits`; no QCC output was produced. Its
+run-start and two completed Full-KV records are preserved in
+`benchmark-causal-admission-all-v2-four32k-load-mismatch.progress.jsonl`.
+The corrected rerun explicitly passes `--num-codes 16` and writes a separate
+v2 result/progress path. This is a configuration correction, not a quality
+result.
