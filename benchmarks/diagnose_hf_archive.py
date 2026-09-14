@@ -767,6 +767,11 @@ def main():
     parser.add_argument('--sparse-core-max-new-tokens', type=int, default=64)
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
+    # The installed HF kernels package currently fails strict dataclass
+    # validation on this environment's Python version.  Diagnostics use the
+    # ordinary Transformers attention implementation, matching the benchmark
+    # runner's import policy.
+    sys.modules.setdefault('kernels', None)
     from transformers import AutoTokenizer
     from transformers.cache_utils import DynamicCache
     from transformers.models.phi3.modeling_phi3 import apply_rotary_pos_emb
