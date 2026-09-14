@@ -712,7 +712,10 @@ def sparse_core_simulation(model, tokenizer, record, args):
     window = int(args.window_size)
 
     def evaluate(core_count: int):
-        core_flat = ordered[:core_count] if not args.oracle_block else ordered[:0]
+        # Oracle blocks augment the selected full-history core; they do not
+        # suppress it. This allows a diagnostic of core plus bounded exact
+        # coverage without pretending the known block is the whole context.
+        core_flat = ordered[:core_count]
         core_mask = torch.zeros(layers * heads, dtype=torch.bool)
         core_mask[core_flat] = True
         core_mask = core_mask.view(layers, heads)
