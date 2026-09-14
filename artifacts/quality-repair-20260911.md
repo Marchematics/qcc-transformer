@@ -1834,9 +1834,18 @@ answer recall is1, but generation continues with blank tokens to the128-token
 limit; the completion-weighted score is0. This separates retrieval from stop
 behavior and leaves the hidden writer's current causal quality incomplete.
 Variable tracking remains the final pending record.
-### Third hidden writer 32K result
 
-Source line46 retrieves4250981, so answer recall is1, but the model emits
-only blank continuation tokens until the128-token limit; completion score is0.
-The hidden writer therefore improves lookup on this one record without a
-usable stopping behavior. Variable tracking is the final pending record.
+### Completed hidden-state writer 32K evaluation
+
+The four-record 32K evaluation is complete. Full-KV answer recall is
+`[1,1,1,1]`; hidden-writer QCC recall is `[0,0,1,0]`, giving macro recall
+`0.25` and relative retention `0.25`. The two remote retrieval records fail,
+the single-number record emits the correct answer but reaches the 128-token
+limit, and variable tracking fails with malformed continuation. The
+completion-weighted QCC score is `0.0` versus Full-KV `1.0`.
+
+The causal hidden writer uses `3,146,752` trainable parameters (`0.08235%` of
+the logical pretrained backbone) and a bounded state of `4,995,568,640` bytes
+per request. This is a negative result for the writer: adding a linear
+hidden-state score did not recover unknown remote needles at 32K. The raw JSON
+and progress log are preserved in the corresponding benchmark artifacts.
