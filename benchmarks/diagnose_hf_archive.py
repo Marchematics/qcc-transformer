@@ -674,23 +674,53 @@ def sparse_core_simulation(model, tokenizer, record, args):
             layer = int(getattr(module, 'layer_idx', -1))
             if layer < 0 or layer >= layers:
                 return original_attention(module, query, key, value, attention_mask, **kwargs)
-            q_len, key_len = query.shape[-2], key.shape[-2]
-            query_positions = key_len - q_len + torch.arange(q_len, device=query.device)
-            key_positions = torch.arange(key_len, device=query.device)
-            causal = key_positions[None, :] <= query_positions[:, None]
-            recent = key_positions[None, :] >= query_positions[:, None] - window + 1
-            allowed = causal.unsqueeze(0).expand(heads, -1, -1).clone()
-            non_core = ~core_mask[layer].to(device=query.device)
-            allowed[non_core] &= recent
-            additive = torch.zeros(
-                (1, heads, q_len, key_len), device=query.device, dtype=query.dtype
-            )
-            additive.masked_fill_(
-                ~allowed.unsqueeze(0), torch.finfo(query.dtype).min
-            )
-            if isinstance(attention_mask, torch.Tensor):
-                additive = additive + attention_mask.to(dtype=query.dtype)
-            return original_attention(module, query, key, value, additive, **kwargs)
+            core = core_mask[layer].to(device=query.device)
+            core_heads = core.nonzero(as_tuple=False).flatten()
+            local_heads = (~core).nonzero(as_tuple=False).flatten()
+            output = torch.empty_like(query)
+            if core_heads.numel():
+                core_attention_mask = attention_mask
+                if (
+                    isinstance(attention_mask, torch.Tensor)
+                    and attention_mask.ndim >= 2
+                    and attention_mask.shape[1] == heads
+                ):
+                    core_attention_mask = attention_mask[:, core_heads]
+                core_result = original_attention(
+                    module,
+                    query[:, core_heads],
+                    key[:, core_heads],
+                    value[:, core_heads],
+                    core_attention_mask,
+                    **kwargs,
+                )
+                core_output = core_result[0] if isinstance(core_result, tuple) else core_result
+                # HF attention functions return [batch, query, heads, dim],
+                # while the local Triton kernel and this diagnostic buffer use
+                # [batch, heads, query, dim].
+                if core_output.ndim == 4 and core_output.shape[1] == query.shape[2]:
+                    core_output = core_output.transpose(1, 2)
+                output[:, core_heads] = core_output
+            if local_heads.numel():
+                # A dense [heads, query, key] band mask would be quadratic in
+                # the prompt length.  The existing Triton local kernel emits
+                # the same causal sliding-window result without materializing
+                # that mask, and also handles the one-token decode case.
+                from qcc_transformer.triton_kernels import (
+                    TRITON_AVAILABLE,
+                    triton_local_chunk_attention,
+                )
+                if not TRITON_AVAILABLE:
+                    raise RuntimeError('sparse-core simulation requires Triton for long prompts')
+                q_len, key_len = query.shape[-2], key.shape[-2]
+                output[:, local_heads] = triton_local_chunk_attention(
+                    query[:, local_heads],
+                    key[:, local_heads],
+                    value[:, local_heads],
+                    old_length=key_len - q_len,
+                    window_size=window,
+                )
+            return output, None
 
         ALL_ATTENTION_FUNCTIONS.register('sdpa', sparse_attention)
         try:
