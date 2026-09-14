@@ -1763,3 +1763,22 @@ target4250981, prediction4250981, recall1, normal10-token termination.
 Together with the first two failures, the partial QCC recall vector is
 [0,0,1]; variable tracking remains running. The QCC state remains
 4,995,568,640 bytes.
+### Completed trained causal predictor 32K evaluation
+
+The independent four-record evaluation of the trained causal admission
+predictor is complete. Full-KV recall is [1,1,1,1] and QCC recall is [0,0,1,1],
+so macro recall is0.50 and retention is0.50. The two remote multi-key records
+still fail: line7 predicts9703933 for target9116227; line26 predicts
+470e0000-0000-0000-0000-000000000000 for the target UUID. Single-number line46
+is correct, and variable tracking line66 recalls all five variables, though
+its explanatory continuation differs. All generations terminate normally.
+
+QCC state is4,995,568,640 bytes per record. The loaded adapter has197,632
+trainable parameters,0.005172% of the reported3,821,079,552 logical backbone
+parameters. This satisfies the parameter budget but does not satisfy quality:
+the trained writer does not recover the unknown remote needles at32K. The
+failed first and second causal predictor records, plus the completed third and
+fourth records, are preserved in the result/progress artifact. The next
+method choice must address future-query-independent remote retention; neither
+the instantaneous QK baseline nor this small K/V predictor is a valid path to
+99% retrieval.
