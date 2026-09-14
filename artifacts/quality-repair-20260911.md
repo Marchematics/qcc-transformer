@@ -1834,3 +1834,9 @@ answer recall is1, but generation continues with blank tokens to the128-token
 limit; the completion-weighted score is0. This separates retrieval from stop
 behavior and leaves the hidden writer's current causal quality incomplete.
 Variable tracking remains the final pending record.
+### Third hidden writer 32K result
+
+Source line46 retrieves4250981, so answer recall is1, but the model emits
+only blank continuation tokens until the128-token limit; completion score is0.
+The hidden writer therefore improves lookup on this one record without a
+usable stopping behavior. Variable tracking is the final pending record.
