@@ -2176,3 +2176,16 @@ scalar CUDA fallback is now restricted to sparse/lazy/landmark modes. Dense
 query-correction chunks use the block scan. Associative and hybrid background,
 block, exact, and quality tests pass. This changes execution granularity only;
 no quality result is inferred from it.
+
+### Quality-first shadow-only 16K row1 completed
+
+After fixing the shadow-only exact-attention boundary and replacing the dense
+CUDA recurrence fallback with the block scan, the 32K multi-key row was rerun
+with 16,384-slot quality-first salience, but without feeding exact-bank output
+into prefill. Full-KV returned `9116227`; QCC returned `77. This appears to be`
+and had zero answer recall. The measured QCC state was
+`11,905,552,896` bytes (`11.09 GiB`) and peak CUDA allocation
+`20,625,201,152` bytes. Instrumented generation time was 259.44 s for
+Full-KV versus 668.27 s for QCC (16 generated tokens, QCC 41.77 s/token), so
+this path is both inaccurate and slower on the measured A10 setup. The result
+is a diagnostic negative; it does not represent the final causal candidate.
