@@ -2142,3 +2142,14 @@ answer recall and score. Together with the prefill-only failure (`5391033`),
 this shows that changing only one phase does not repair the current candidate;
 both the prefill representation and the decode read need a better bounded
 state. The probe used one row and remains diagnostic.
+
+### Full-retention causal bank control stopped by GPU memory
+
+A control configured the causal exact bank for 32,768 slots (enough for the
+32K prompt) so that no historical token should be evicted. Full-KV generated
+`9116227` correctly, but the QCC generation failed before attention with a
+CUDA OOM while constructing the framework causal mask: 22.36 GiB was already
+in use and only 1.16 GiB was free. This run is retained as a resource-bound
+control, not a quality result. The earlier all-unit sparse simulator remains
+the lightweight semantic sanity; the integrated QCC path still needs a memory
+bounded read implementation before a full-retention comparison is feasible.
