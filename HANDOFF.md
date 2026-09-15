@@ -4,6 +4,16 @@
 交接对象：下一位继续实现、评测或部署 QCC Transformer 的工程师/模型
 状态：代码已推送；99 gate 尚未通过；不要把当前结果包装成已达标结果。
 
+## 当前审计（2026-09-16）
+
+最新真实 Phi-3.5-mini 32K 结果已记录在
+`artifacts/quality-repair-20260911.md`。非因果 quality-first 在四条诊断
+记录上达到 QCC answer recall `1.0`，但依赖未来查询。因果 16K、对齐
+hidden writer、full-history core 加 bounded bank、prefill/decode 分阶段
+探针均未恢复多键远程检索；当前没有证据支持 1M `99.5%`、5x TPOT、3x
+吞吐或 8x 并发。主线应保持这个证据边界，优先实现 GQA-aware 的真实
+物理状态和联合 prefill/读取路径，再进行长上下文评测。
+
 ## 当前 DSW 会话（2026-09-04）
 
 - 网页入口：`https://dsw-gateway-cn-hangzhou.data.aliyun.com/dsw-2154359/lab`
