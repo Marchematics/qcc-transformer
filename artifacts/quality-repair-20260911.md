@@ -2241,3 +2241,14 @@ CUDA in `16.727258 s` with 256-token chunks. Persistent QCC state was
 one-token TPOT was `2.654 ms`. This is a QCC-only synthetic measurement with
 no pretrained model or Full-KV timing baseline; it does not establish the
 requested 1M retrieval or speedup targets.
+
+### Synthetic CUDA decode comparison
+
+The existing microbenchmark compared the current two-layer QCC shell with its
+same-shell Full-KV baseline at 8,192 tokens and 128-token decode chunks. QCC
+used `0.2621 s` per measured stream versus Full-KV `0.1264 s`, a speed ratio
+of `0.48x` (QCC was about `2.08x` slower) despite a `50.88x` bounded-cache
+geometry reduction. The result is synthetic and only two layers, but it
+confirms that state compression alone does not imply TPOT improvement; current
+archive maintenance and reads dominate this path. It is not evidence for the
+pretrained 128K/1M targets.
