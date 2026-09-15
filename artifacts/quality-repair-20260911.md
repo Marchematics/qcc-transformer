@@ -2153,3 +2153,14 @@ in use and only 1.16 GiB was free. This run is retained as a resource-bound
 control, not a quality result. The earlier all-unit sparse simulator remains
 the lightweight semantic sanity; the integrated QCC path still needs a memory
 bounded read implementation before a full-retention comparison is feasible.
+
+### Shadow-only prefill boundary fix
+
+The first 16K quality-shadow diagnostic exposed a real integration bug before
+QCC generation: `exact_attention=True` with `quality_prefill_shadow_only=True`
+left `local_log_partition=None`, but `_mix_local_archive` unconditionally
+subtracted it from the exact remote partition. The shadow-only branch now
+keeps the regular learned gate when no local partition is available. Existing
+hybrid quality/exact/block tests pass. The earlier run failed with this
+TypeError before producing a QCC answer and is not a quality result; it is kept
+only as an implementation failure record.

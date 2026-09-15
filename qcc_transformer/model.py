@@ -1546,7 +1546,12 @@ class QCCSelfAttention(nn.Module):
         """
         if bool(getattr(self.archive, "exact_attention", False)):
             remote_partition = self.archive._last_exact_log_partition
-            if remote_partition is None:
+            if remote_partition is None or local_log_partition is None:
+                # Shadow-only prefill populates the exact tier but returns the
+                # recurrent response. It has no local partition to combine
+                # with an exact remote mass yet, so keep the regular gate.
+                if local_log_partition is None:
+                    return gate * local + (1.0 - gate) * archive
                 return local
             weight = torch.sigmoid(remote_partition - local_log_partition).unsqueeze(-1).to(local.dtype)
             return (1 - weight) * local + weight * archive
