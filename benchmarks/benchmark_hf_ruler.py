@@ -15,6 +15,7 @@ import inspect
 import json
 import math
 import sys
+import time
 import traceback
 import types
 from pathlib import Path
@@ -352,6 +353,7 @@ def _run_model(
                 # makes the matched Full-KV reference fail before inference.
                 if _supports_forward_argument(model, "logits_to_keep"):
                     generation_kwargs["logits_to_keep"] = 1
+            generation_start = time.perf_counter()
             generated = model.generate(
                 **encoded,
                 max_new_tokens=max_new_tokens,
@@ -359,10 +361,17 @@ def _run_model(
                 use_cache=True,
                 **generation_kwargs,
             )
+            if device.type == "cuda":
+                torch.cuda.synchronize(device)
+            generation_seconds = time.perf_counter() - generation_start
             continuation = generated[0, encoded["input_ids"].shape[-1] :]
             text = tokenizer.decode(continuation, skip_special_tokens=True)
             result["prediction"] = text
             result["generated_tokens"] = int(continuation.numel())
+            result["generation_seconds"] = generation_seconds
+            result["tpot_ms_per_generated_token"] = (
+                generation_seconds * 1000.0 / max(1, result["generated_tokens"])
+            )
             eos = model.generation_config.eos_token_id
             eos_ids = eos if isinstance(eos, list) else [eos]
             ended = continuation.numel() > 0 and int(continuation[-1]) in eos_ids
