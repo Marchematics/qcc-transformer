@@ -2189,3 +2189,26 @@ and had zero answer recall. The measured QCC state was
 Full-KV versus 668.27 s for QCC (16 generated tokens, QCC 41.77 s/token), so
 this path is both inaccurate and slower on the measured A10 setup. The result
 is a diagnostic negative; it does not represent the final causal candidate.
+
+### Current target audit (2026-09-16)
+
+The strongest real-model quality result in this repository is the non-causal
+quality-first Phi subset: 4/4 answer recall and completion score one at 32K,
+with `8,356,385,792` bytes of bounded request state. Its future-query salience
+and exact-bank prefill feedback make it a diagnostic, not a causal online
+algorithm.
+
+The causal paths tested on the same four 32K records remain below target:
+causal 16K block retention has answer recall `0.50` and completion score
+`0.25`; aligned hidden writer has answer recall and completion score `0.50`;
+full-history core plus the existing bounded bank fails the tested multi-key
+row; scoped prefill/decode probes also fail. The latest shadow-only run has
+answer recall `0` and is `2.58x` slower than its offloaded Full-KV reference.
+
+No artifact currently proves aggregate quality `>=99%`, worst-task `>=97%`,
+1M retrieval `>=99.5%`, 128K/1M TPOT `>=5x`, throughput `>=3x`, or fixed-SLA
+concurrency `>=8x`. Fixed-capacity state bounds and parameter counts are code
+or geometry properties only until the same serving path is measured at the
+requested lengths. The trainable parameter budget is met by the tested writer
+(`0.08235%`), and pretrained retrofit is functional on Phi; these do not
+imply the quality or serving targets.
