@@ -967,7 +967,15 @@ class QCCArchive(nn.Module):
 
         # Sparse/lazy CUDA chunks and unsupported devices use the reference
         # event path or block scan below.
-        if self.use_triton and key.is_cuda:
+        if (
+            self.use_triton
+            and key.is_cuda
+            and (
+                self.active_codes is not None
+                or self.kernel_features
+                or self.persistent_landmark
+            )
+        ):
             outputs = []
             for index in range(events):
                 if _include_landmarks:

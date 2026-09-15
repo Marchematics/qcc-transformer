@@ -2164,3 +2164,15 @@ keeps the regular learned gate when no local partition is available. Existing
 hybrid quality/exact/block tests pass. The earlier run failed with this
 TypeError before producing a QCC answer and is not a quality result; it is kept
 only as an implementation failure record.
+
+### Vectorized dense recurrence fallback
+
+The shadow-only quality run exposed another launch-bound branch: when a dense
+archive carried the default low-rank query-correction parameters, CUDA chunk
+updates bypassed the fused kernel and fell into one Python `update`/`read` call
+per evicted token. The existing bounded block-scan implementation already
+supports the same query correction and landmark-free dense state, so the
+scalar CUDA fallback is now restricted to sparse/lazy/landmark modes. Dense
+query-correction chunks use the block scan. Associative and hybrid background,
+block, exact, and quality tests pass. This changes execution granularity only;
+no quality result is inferred from it.
