@@ -2131,3 +2131,14 @@ QCC returned `5391033` (`answer_recall=0`, `score=0`). The measured state was
 `5,058,483,200` bytes. This does not show that prefill-only is worse in
 principle; it shows that the current five-unit selection and bank remain
 insufficient when decode uses the bounded path.
+
+### Scoped core5 decode-only probe
+
+The same five target-ranked full-history units were enabled only for decode,
+while the prefill used the original causal 8,192-slot bank and the full-history
+score cache was populated without replacing prefill outputs. On the 32K
+multi-key row, Full-KV returned `9116227`; QCC returned `9721059` with zero
+answer recall and score. Together with the prefill-only failure (`5391033`),
+this shows that changing only one phase does not repair the current candidate;
+both the prefill representation and the decode read need a better bounded
+state. The probe used one row and remains diagnostic.
