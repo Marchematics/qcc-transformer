@@ -2231,3 +2231,13 @@ hypothetical Full-KV sizes are `524,288,000` and `4,096,000,000` bytes,
 respectively, giving a QCC state growth ratio of `1.0x`. This is a structural
 CPU accounting result for a two-layer synthetic model; it does not establish
 pretrained 1M retrieval, peak GPU memory, TPOT, throughput, or concurrency.
+
+### Synthetic 1M CUDA stream measurement
+
+The current two-layer synthetic QCC harness processed 1,000,000 tokens on
+CUDA in `16.727258 s` with 256-token chunks. Persistent QCC state was
+`659,456` bytes against a hypothetical `4,096,000,000`-byte full KV cache
+(`0.0161%`, `6211.18x` geometry reduction). After two warmup steps, median
+one-token TPOT was `2.654 ms`. This is a QCC-only synthetic measurement with
+no pretrained model or Full-KV timing baseline; it does not establish the
+requested 1M retrieval or speedup targets.
