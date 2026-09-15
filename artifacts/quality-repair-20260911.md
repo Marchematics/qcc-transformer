@@ -2121,3 +2121,13 @@ in bounded tensors, using one call per committed block. The scalar sampler is
 unchanged for block size one. Existing associative and hybrid background,
 block, exact, and quality tests pass. This is a serving-path optimization; no
 new quality claim is attached to it.
+
+### Scoped core5 prefill-only probe
+
+The five-unit integrated probe was repeated with full-history reads active only
+for prefill; the selected units were still target-ranked and the other heads
+used the original causal 8,192-slot bank. Full-KV returned `9116227`, while
+QCC returned `5391033` (`answer_recall=0`, `score=0`). The measured state was
+`5,058,483,200` bytes. This does not show that prefill-only is worse in
+principle; it shows that the current five-unit selection and bank remain
+insufficient when decode uses the bounded path.
