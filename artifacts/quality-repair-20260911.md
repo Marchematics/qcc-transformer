@@ -2222,3 +2222,12 @@ CPU testing found the failures in sink, RoPE, and inference paths. The calls
 now add hybrid-only arguments only when the archive exposes the hybrid causal
 writer; base archives retain their original API. The complete existing test
 suite passes.
+
+### Refreshed bounded-state accounting
+
+The current synthetic `QCCForCausalLM` state-only harness reports identical
+persistent state at 128K and 1M: `659,456` bytes in both cases. The matched
+hypothetical Full-KV sizes are `524,288,000` and `4,096,000,000` bytes,
+respectively, giving a QCC state growth ratio of `1.0x`. This is a structural
+CPU accounting result for a two-layer synthetic model; it does not establish
+pretrained 1M retrieval, peak GPU memory, TPOT, throughput, or concurrency.
