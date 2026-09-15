@@ -1507,6 +1507,7 @@ class QCCSelfAttention(nn.Module):
         # their original K/V history up to the configured context bound. The
         # remaining heads continue through the bounded archive path.
         self.full_history_heads: tuple[int, ...] = ()
+        self.full_history_scope = "both"
         self._full_history_key_cache: Optional[Tensor] = None
         self._full_history_value_cache: Optional[Tensor] = None
         # Position-free lexical keys/values are kept in a separate bounded
@@ -2064,12 +2065,17 @@ class QCCSelfAttention(nn.Module):
         self._archive_read_cache = None
         self._archive_query_cache = None
 
-    def set_full_history_heads(self, heads: Sequence[int]) -> None:
+    def set_full_history_heads(
+        self, heads: Sequence[int], *, scope: str = "both"
+    ) -> None:
         """Select query heads that keep an exact bounded full-history cache."""
         selected = tuple(sorted({int(head) for head in heads}))
         if any(head < 0 or head >= self.num_heads for head in selected):
             raise ValueError("full-history head index is outside attention geometry")
+        if scope not in {"both", "prefill", "decode"}:
+            raise ValueError("full-history scope must be 'both', 'prefill', or 'decode'")
         self.full_history_heads = selected
+        self.full_history_scope = scope
         self._full_history_key_cache = None
         self._full_history_value_cache = None
 
@@ -2244,7 +2250,8 @@ class QCCSelfAttention(nn.Module):
         value: Tensor,
         *,
         old_length: int,
-    ) -> Tensor:
+        read: bool = True,
+    ) -> Optional[Tensor]:
         """Read selected heads from their exact, bounded full-history cache."""
         if not self.full_history_heads:
             raise RuntimeError("full-history attention requested without selected heads")
@@ -2290,6 +2297,8 @@ class QCCSelfAttention(nn.Module):
         assert self._full_history_value_cache is not None
         self._full_history_key_cache[:, :, old_length:needed] = selected_key
         self._full_history_value_cache[:, :, old_length:needed] = selected_value
+        if not read:
+            return None
         full_key = self._full_history_key_cache[:, :, :needed]
         full_value = self._full_history_value_cache[:, :, :needed]
         # SDPA's rectangular causal mode uses the lower-right alignment, so a
@@ -2928,10 +2937,18 @@ class QCCSelfAttention(nn.Module):
                     self._archive_key_cache[:, :, :remainder] = archive_tail_k[:, :, first:]
             self._cache_start = new_start
             self._cache_length = keep
-        if self.full_history_heads:
-            full_out = self._full_history_attention(
-                q, k, v, old_length=history_length
+        full_history_active = (
+            self.full_history_heads
+            and (
+                self.full_history_scope == "both"
+                or self.full_history_scope == ("prefill" if length > 1 else "decode")
             )
+        )
+        full_out = self._full_history_attention(
+            q, k, v, old_length=history_length, read=bool(full_history_active)
+        ) if self.full_history_heads else None
+        if full_history_active:
+            assert full_out is not None
             selected = torch.tensor(self.full_history_heads, device=q.device)
             head_out[:, selected] = full_out
         self._seen_tokens += length

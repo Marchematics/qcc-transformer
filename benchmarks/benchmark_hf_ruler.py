@@ -532,6 +532,10 @@ def main() -> None:
         "--full-history-units", default=None,
         help="comma-separated layer:head units that keep exact full history",
     )
+    parser.add_argument(
+        "--full-history-scope", choices=("both", "prefill", "decode"), default="both",
+        help="phase in which selected full-history heads replace bounded reads",
+    )
     args = parser.parse_args()
     if args.causal_block_retention and (args.quality_first or args.causal_coreset or not args.exact_attention):
         raise ValueError("causal-block-retention requires standalone --exact-attention")
@@ -777,7 +781,9 @@ def main() -> None:
         for name in replaced:
             module = patched.get_submodule(name)
             layer = int(module.qcc._qcc_layer_index)
-            module.qcc.set_full_history_heads(units.get(layer, ()))
+            module.qcc.set_full_history_heads(
+                units.get(layer, ()), scope=args.full_history_scope
+            )
         unknown_layers = sorted(set(units) - {
             int(patched.get_submodule(name).qcc._qcc_layer_index) for name in replaced
         })
@@ -879,6 +885,7 @@ def main() -> None:
         "causal_admission_predictor": args.causal_admission_predictor,
         "causal_hidden_predictor": args.causal_hidden_predictor,
         "full_history_units": args.full_history_units,
+        "full_history_scope": args.full_history_scope,
         "coreset_capacity": args.coreset_capacity,
         "coreset_merge_policy": args.coreset_merge_policy,
         "coreset_query_probes": args.coreset_query_probes,
