@@ -2212,3 +2212,13 @@ or geometry properties only until the same serving path is measured at the
 requested lengths. The trainable parameter budget is met by the tested writer
 (`0.08235%`), and pretrained retrofit is functional on Phi; these do not
 imply the quality or serving targets.
+
+### Archive API compatibility cleanup
+
+The hidden-writer score alignment introduced optional `hidden` and
+`admission_score` arguments on the hybrid archive, but three base
+`QCCArchive` call sites still forwarded `hidden` unconditionally. Full-suite
+CPU testing found the failures in sink, RoPE, and inference paths. The calls
+now add hybrid-only arguments only when the archive exposes the hybrid causal
+writer; base archives retain their original API. The complete existing test
+suite passes.

@@ -2496,13 +2496,14 @@ class QCCSelfAttention(nn.Module):
                     if birth_score is not None:
                         assert self._local_score_cache is not None
                         evicted_score = self._local_score_cache[:, :, write_index]
-                    self.archive.update(
-                        archive_key, archive_value,
-                        exact_key=self._local_key_cache[:, :, write_index],
-                        exact_query=q,
-                        hidden=hidden,
-                        admission_score=evicted_score,
-                    )
+                    update_kwargs = {
+                        "exact_key": self._local_key_cache[:, :, write_index],
+                        "exact_query": q,
+                        "admission_score": evicted_score,
+                    }
+                    if hasattr(self.archive, "causal_hidden_predictor"):
+                        update_kwargs["hidden"] = hidden
+                    self.archive.update(archive_key, archive_value, **update_kwargs)
                 # A token eviction changes the recurrent archive state.  Any
                 # read cached from an earlier state is therefore invalid even
                 # when the optional read stride would otherwise reuse it.  An
@@ -2860,18 +2861,24 @@ class QCCSelfAttention(nn.Module):
                     evicted_k = combined_lexical_k[:, :, prefix_skip:prefix_skip + event_count]
                     evicted_v = combined_lexical_v[:, :, prefix_skip:prefix_skip + event_count]
                     exact_evicted_k = evicted_k
+                update_kwargs = {
+                    "output": archive_out[:, :, event_start:],
+                    "exact_key": exact_evicted_k,
+                    "exact_query": q[:, :, event_start:],
+                    "quality_query": quality_query,
+                    "quality_key_start": archive_event_offset,
+                    "quality_query_start": quality_query_start,
+                }
+                if hasattr(self.archive, "causal_hidden_predictor"):
+                    update_kwargs["hidden"] = hidden[
+                        :, event_start:event_start + event_count
+                    ]
+                    update_kwargs["admission_score"] = evicted_scores
                 self.archive.update_read_chunk(
                     evicted_k,
                     evicted_v,
                     archive_q[:, :, event_start:] if lexical_q is None else lexical_q[:, :, event_start:],
-                    output=archive_out[:, :, event_start:],
-                    exact_key=exact_evicted_k,
-                    exact_query=q[:, :, event_start:],
-                    hidden=hidden[:, event_start:event_start + event_count],
-                    admission_score=evicted_scores,
-                    quality_query=quality_query,
-                    quality_key_start=archive_event_offset,
-                    quality_query_start=quality_query_start,
+                    **update_kwargs,
                 )
                 # A chunk update changes the archive state for every active
                 # position.  Do not let a prior token-path remote read leak
@@ -3366,14 +3373,18 @@ class QCCSelfAttention(nn.Module):
             # tensor blocks rather than interpreter iterations.
             event_count = length - self.window_size
             if event_count > 0:
+                update_kwargs = {
+                    "output": archive_out[:, :, self.window_size :],
+                    "exact_key": k[:, :, :event_count],
+                    "exact_query": q[:, :, self.window_size :],
+                }
+                if hasattr(self.archive, "causal_hidden_predictor"):
+                    update_kwargs["hidden"] = hidden[:, :event_count]
                 self.archive.update_read_chunk(
                     archive_k[:, :, :event_count],
                     archive_v[:, :, :event_count],
                     archive_q[:, :, self.window_size :],
-                    output=archive_out[:, :, self.window_size :],
-                    exact_key=k[:, :, :event_count],
-                    exact_query=q[:, :, self.window_size :],
-                    hidden=hidden[:, :event_count],
+                    **update_kwargs,
                 )
             gate = torch.sigmoid(gate_proj).transpose(1, 2).unsqueeze(-1)
             mixed_out = self._mix_local_archive(local_out, archive_out, gate)
@@ -3466,12 +3477,16 @@ class QCCSelfAttention(nn.Module):
                 evicted_archive_key = archive_keys.pop(0)
                 evicted_value = local_values.pop(0)
                 if t >= self.window_size + self.attention_sink_size:
+                    update_kwargs = {
+                        "exact_key": evicted_local_key,
+                        "exact_query": q[:, :, t],
+                    }
+                    if hasattr(self.archive, "causal_hidden_predictor"):
+                        update_kwargs["hidden"] = hidden[:, t]
                     self.archive.update(
                         evicted_archive_key if self.archive_position_invariant else evicted_local_key,
                         evicted_value,
-                        exact_key=evicted_local_key,
-                        exact_query=q[:, :, t],
-                        hidden=hidden[:, t],
+                        **update_kwargs,
                     )
 
             lk = torch.stack(local_keys, dim=2)
