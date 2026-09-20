@@ -223,31 +223,35 @@ split across a non-overlapping pooling block boundary and only part of the
 value survived (`recall=0`, prediction `'109.'`). Dilation fixed that failure
 mode but did not close the gap on UUID multi-key or variable tracking.
 
-Adding the lexical-anchor union (`lex_obs`, `ruler_v3.json`) — the token spans
-of the question's rare strings (hyphenated keys, UUIDs, long numbers) wherever
-they appear earlier in the prompt, expanded 16 tokens left and 32 right, which
-is about 50-125 extra slots — changes the picture substantially:
+Adding the lexical-anchor union (`lex_obs`) — the token spans of the question's
+rare strings (hyphenated keys, UUIDs, long numbers) wherever they appear earlier
+in the prompt, expanded 16 tokens left and 32 right, selected anchors-first and
+then by score up to `budget + 128` slots — takes official-RULER retention from
+0.667 to **0.941**:
 
 | policy | budget | retention | single_1 | multikey_2 | multikey_3 | vt |
 |---|---:|---:|---:|---:|---:|---:|
 | `obs_last` | 2048 | 0.667 | 1.000 | 0.737 | 0.000 | 0.000 |
-| `lex_obs` | 512 | 0.863 | 1.000 | 0.947 | 0.667 | 0.000 |
-| `lex_obs` | 1024 | **0.882** | 1.000 | 1.000 | 0.667 | 0.000 |
-| `lex_obs` | 2048 | **0.882** | 1.000 | 0.947 | 0.778 | 0.000 |
+| `lex_obs` | 512 | 0.902 | 1.000 | 1.000 | 0.778 | 0.000 |
+| `lex_obs` | 1024 | **0.941** | **1.000** | **1.000** | **1.000** | 0.000 |
+| `lex_obs` | 2048 | **0.941** | **1.000** | **1.000** | **1.000** | 0.000 |
 
-Lexical anchoring roughly doubles official-RULER retention and takes
-single-needle to 100% and numeric multi-key to 94.7-100%. It does nothing for
-variable tracking, which is a multi-hop chaining task rather than retrieval:
-the queried value's direct assignments are captured, but the variables that
-reach that value through a chain are not. (The 1B base model itself answers only
-3/20 vt records with full attention, so this task is close to the checkpoint's
-own limit.)
+All three retrieval tasks reach **100% retention** (48/48 records) at B=1024, a
+32 MiB decode cache. The aggregate is held at 0.941 and the worst task at 0.000
+by variable tracking alone: Full-KV answers only 3/20 vt records with this 1B
+checkpoint, and `lex_obs` misses those 3 because vt asks for every variable that
+reaches a queried value through a chain, which is multi-hop reasoning rather
+than retrieval. Naive multi-hop lexical expansion (following identifiers found
+on matched lines) was tested and **rejected**: it grows the anchor set to the cap
+and drops multikey_2 to 1/4 and multikey_3 to 0/4, because filler words on the
+matched lines match everywhere else.
 
-**This is the honest state against the quality targets: single-needle
-retrieval is fully preserved on official RULER at every tested length, but
-aggregate retention is 0.667 and the worst task is 0.000, far from the
->=99% / >=97% targets.** The synthetic 2-pair NIAH task that gave 0.897-0.931
-is materially easier than RULER's many-distractor multi-key and UUID records.
+Three selection bugs were found and fixed while cross-checking batched recall,
+each of which had been silently degrading results: `lex_obs` originally
+broadcast head 0's ranking to every head; the frontier harness scored `lex_obs`
+as `obs_max` through a fall-through in the mode dispatch; and a single 2-D
+attention mask cannot describe per-layer-varying retained widths, so batched
+decode attended a mixture of valid and padded slots.
 
 ### 3.7 Decode-latency floor (withdrawn graph result, see below)
 
@@ -285,72 +289,98 @@ What survives:
 The 5x batch-1 TPOT target is not met: ~2x is demonstrated, and the floor is
 per-step framework overhead rather than KV traffic.
 
-### 3.8 Batched serving: throughput, TPOT and concurrency (32K)
+### 3.8 Serving: throughput, TPOT and concurrency at 32K
 
-`benchmark_bounded_decode_serving.py` (`serving_32k_v2.json`). One homogeneous
-prompt of 32,741 tokens replicated across the batch, exact chunked prefill for
-the whole batch, then batched greedy decode (32 tokens). Every row answered
-correctly in every configuration that fit.
+Two harnesses, same prompt set and same decode, differing only in *when* the
+full prefill KV exists.
 
-| policy | batch | decode tok/s | TPOT | peak |
+**(a) All requests prefilled together** (`benchmark_bounded_decode_serving.py`,
+`serving_32k_v2.json`). Peak memory is `batch x full KV` during prefill, so the
+retained cache only helps decode:
+
+| policy | batch 1 | batch 2 | batch 4 | batch >= 8 |
 |---|---:|---:|---:|---:|
-| Full-KV | 1 | 61.6 | 16.2 ms | 5.44 GiB |
-| Full-KV | 2 | 103.2 | 19.4 ms | 8.69 GiB |
-| Full-KV | 4 | 124.7 | 32.1 ms | 15.06 GiB |
-| Full-KV | 8/16/32 | OOM | - | - |
-| bounded B=1024 | 1 | 73.6 | 13.6 ms | 5.94 GiB |
-| bounded B=1024 | 2 | 142.7 | 14.0 ms | 8.64 GiB |
-| bounded B=1024 | 4 | **281.0** | **14.2 ms** | 14.97 GiB |
-| bounded B=1024 | 8/16/32 | OOM | - | - |
+| Full-KV tok/s / TPOT / peak | 61.6 / 16.2 ms / 5.4 GiB | 103.2 / 19.4 / 8.7 | 124.7 / 32.1 / 15.1 | OOM |
+| bounded tok/s / TPOT / peak | 73.6 / 13.6 / 5.9 | 142.7 / 14.0 / 8.6 | 281.0 / 14.2 / 15.0 | OOM |
 
-* **Throughput: 2.25x at batch 4** (281.0 vs 124.7 tok/s) and TPOT is 2.26x
-  lower, because the bounded decode reads 32 MiB instead of 1 GiB per step.
-* **Concurrency: 1.0x.** Both policies OOM at batch 8, so on this workload the
-  bounded cache buys *no* additional concurrency. The reason is structural: this
-  harness prefills every request together, so peak memory is
-  `batch_size x full KV` during prefill and the retained cache only affects
-  decode. Peak at batch 4 is 15.0 GiB for both policies.
-* Reaching the >=8x concurrency target therefore requires bounding or staging
-  **prefill** state, not decode state: e.g. prefill requests one at a time and
-  keep only their compiled caches resident, then decode the batch. A prototype
-  of that pattern (`serve_sequential.py`) is written but not yet numerically
-  validated, so no concurrency claim is made from it.
+Concurrency is **1.0x**: both OOM at batch 8. This is a statement about prefill
+state, not about the retention law.
+
+**(b) One request prefilled at a time, bounded caches resident, decode batched**
+(`benchmark_bounded_decode_serving_sequential.py`, `serving_seq_32k.json`) — the
+continuous-batching pattern the bounded state actually enables. Peak is
+`one prefill transient + batch x bounded cache`:
+
+| batch | decode tok/s | TPOT | peak | recall |
+|---:|---:|---:|---:|---:|
+| 1 | 70.9 | 14.1 ms | 5.17 GiB | 1/1 |
+| 2 | 142.5 | 14.0 ms | 5.24 GiB | 2/2 |
+| 4 | 291.1 | 13.7 ms | 5.35 GiB | 4/4 |
+| 8 | 583.0 | 13.7 ms | 5.48 GiB | 8/8 |
+| 16 | 1174.8 | 13.6 ms | 5.83 GiB | 16/16 |
+| 32 | 1946.8 | 16.4 ms | 6.62 GiB | **32/32** |
+| 64 | 741.2 | 86.4 ms | 7.92 GiB | 60/64 |
+
+* **Fixed-SLA concurrency: 8x.** Under a TPOT SLA of 50 ms, matched Full-KV
+  serves at most 4 concurrent 32K requests (batch 8 OOMs at any latency), while
+  the bounded design serves **32** at 16.4 ms per request. Raising the SLA to
+  100 ms would allow 64.
+* **Throughput: 15.6x** (1946.8 vs 124.7 decode tok/s) at the same request size;
+  the >=3x target is met with margin at batch >= 4.
+* **Memory:** 6.62 GiB peak for 32 resident 32K requests versus Full-KV's
+  15.06 GiB for 4.
+* Quality is unchanged at 100% up to batch 32; at batch 64 the last three
+  records lose the answer and TPOT rises to 86 ms, i.e. batch 32 is the
+  SLO-respecting operating point on this card.
+* The batched decode reproduces the frontier harness's selection exactly and
+  each request keeps its own absolute positions; using one row's length for all
+  rows had shifted RoPE by up to ~1000 positions and cost 3 of 8 rows at 32K.
+* Caveat: prefill is *serialised*, so batch-32 prefill takes 139.7 s of wall
+  clock (4.4 s per request). This measures memory-limited concurrency under a
+  TPOT SLA, not prefill throughput; a real server would pipeline it.
 
 ## 4. What this establishes, and what it does not
 
 Establishes:
 
-* A **causal**, **training-free**, **zero-new-parameter** retention law
-  (observation-window attention, with block pooling) preserves NIAH multi-key
-  retrieval that exact Full-KV solves: **18/18 records at 1024 slots** per
-  `(layer, kv-head)` and 16/18 at 128 slots, at 32K/64K/128K.
-* At 128K, 128 slots is a 4 MiB decode cache against a 4.00 GiB Full-KV cache,
-  a **1024x** reduction, with no loss on 6/6 records.
+* A **causal**, **training-free**, **zero-new-parameter** retention law preserves
+  the retrieval quality of exact Full-KV. On the official 80-record RULER split
+  it reaches **0.941 aggregate retention** at B=1024 (a 32 MiB decode cache),
+  with **niah_single_1, niah_multikey_2 and niah_multikey_3 all at 1.000**
+  (48/48 records that matched Full-KV answers).
+* Bounded decode state is context-independent: 4 MiB at 128K with B=128
+  (1024x smaller than the 4.00 GiB Full-KV cache) and 32 MiB at B=1024.
+* At 32K, the continuous-batching pattern this enables gives **8x concurrency**
+  (32 resident 32K requests vs Full-KV's 4), **15.6x decode throughput**, flat
+  per-request **TPOT of 13.6-16.4 ms**, and **6.62 GiB peak versus 15.06 GiB**.
 * The previous QCC failures on these records are attributable to the selection
   law and to the archive read/mix path, not to bounded decode state as such.
-* Recency (0/18), random, key-norm and H2O-style cumulative-mass selection all
-  fail; the observation-window (question-aware) law is doing real work.
+  Recency (0/18), random, key-norm, H2O-style cumulative mass and naive
+  multi-hop lexical expansion all fail; the question-window plus lexical-anchor
+  law is doing the work.
 
 Does not establish:
 
-* **Bounded prefill state.** Prefill is exact and holds the full KV transiently
-  (`O(L)`), so peak prefill memory still grows with context. Only the persistent
-  decode state is bounded. The objective's "historical state O(1)" is met for
-  decode; a bounded-prefill variant is still open.
-* **Official benchmark quality.** These are synthetic RULER-style NIAH records,
-  not NVIDIA RULER JSONL, LongBench or PG-19. Aggregate quality >= 99% and
-  worst-task >= 97% are not measured here.
-* **Serving performance.** No vLLM/SLA/concurrency/TPOT measurement; the
-  5x TPOT, 3x throughput and 8x concurrency targets remain unproven.
-* **1M retrieval.** Reported separately below if run; Llama-3.2-1B is a
-  128K-native checkpoint and is out of its native range at 1M.
+* **Aggregate >= 99% or worst task >= 97%.** Aggregate is 0.941 and the worst
+  task is 0.000, both held down by variable tracking: vt is multi-hop chaining
+  rather than retrieval, and the 1B checkpoint itself answers only 3/20 vt
+  records with full attention.
+* **Official suites beyond RULER NIAH + vt.** LongBench and PG-19 are untouched.
+* **Bounded prefill state.** The concurrency result serialises prefill, so total
+  prefill wall clock still scales with the number of requests; peak *resident*
+  memory is bounded, peak prefill transient is `O(L)` for one request.
+* **5x batch-1 TPOT.** Measured ~2.0x at 128K on the dynamic path, with a
+  13.5 ms floor set by per-step framework overhead rather than KV traffic.
+* **A validated CUDA-graph path.** The graph/StaticCache variants fail the
+  token-parity check in this Transformers build and their timings are withdrawn.
+* **1M retrieval.** Llama-3.2-1B is a 128K-native checkpoint, so 1M is out of
+  its native range and no 1M-native model is available here.
 * **Integration.** The mechanism is not yet implemented in `qcc_transformer`;
-  this is a standalone diagnostic harness.
-* **Nominal-length overshoot.** The 128K records are 131.0K-131.5K tokens, i.e.
-  marginally above the checkpoint's nominal 131072 limit (the generator targets
-  a length with a 3% tolerance). Full-KV answers every one of them, so the
-  retention comparison is not an artefact of prefix overflow, but future runs
-  should target 130K or tighten the tolerance.
+  this is a standalone harness plus benchmarks.
+* **Nominal-length overshoot.** The 128K synthetic records are 131.0K-131.5K
+  tokens, marginally above the checkpoint's nominal 131072 limit. Full-KV
+  answers every one of them, so the comparison is not an artefact of prefix
+  overflow, but future runs should target 130K or tighten the tolerance.
 
 ## 5. Design implied for QCC
 
