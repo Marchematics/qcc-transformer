@@ -139,6 +139,33 @@ budget of `B` slots per `(layer, kv-head)`.
 Bounded decode state is independent of context length: the `128K -> 1M` state
 growth of the retained decode cache is exactly `1.00x`.
 
+### 3.5 Decode latency (batch-1, greedy, HF sdpa loop)
+
+Derived from the same `aggregate_v2.json` records: `decode_s / generated` for the
+matched Full-KV run and for bounded runs on identical prompts
+(`analyze_decode_tpot.py`).
+
+| Length | Full-KV TPOT | bounded TPOT (B=128) | TPOT speedup | decode-state reduction |
+|---:|---:|---:|---:|---:|
+| ~32K | 15.6 ms | 13.5 ms | 1.16x | 254x |
+| ~64K | 17.5 ms | 13.8 ms | 1.27x | 510x |
+| ~128K | 27.4 ms | 13.5 ms | **2.03x** | **1026x** |
+
+Two facts matter here:
+
+* Bounded decode latency is **flat in context length** (13.5 ms at 32K, 64K and
+  128K), exactly as a context-independent state predicts. Full-KV latency grows
+  with context.
+* The residual 13.5 ms floor is *not* KV traffic: it is the model's weight read
+  plus per-step Python/framework overhead in this loop. Cache bounding alone
+  therefore yields ~2x batch-1 TPOT at 128K, not 5x. The repo's own Amdahl note
+  predicted this shape; a 5x batch-1 target needs a leaner decode path
+  (CUDA graphs / no per-step Python) or contexts where KV traffic dominates the
+  weight read by a large factor.
+
+This is a diagnostic measurement, not a serving result: no vLLM, no batching, no
+SLA, and the harness synchronises once per decode loop rather than per step.
+
 ## 4. What this establishes, and what it does not
 
 Establishes:
@@ -227,12 +254,20 @@ claim about the QCC package itself: this is a standalone diagnostic harness.
 
 ## 8. Reproduction
 
-Harness (added to this repository):
+Harness (in this repository):
 
 * `benchmarks/benchmark_selection_frontier.py` - policy comparison with full
   hidden-state capture (mechanism check).
 * `benchmarks/benchmark_bounded_decode_frontier.py` - chunked exact prefill,
-  `O(obs)` hidden capture, multi-seed aggregation.
+  `O(obs)` hidden capture, multi-seed aggregation; imported by the scripts below.
+* `benchmarks/benchmark_bounded_decode_ruler.py` - same frontier on official
+  RULER JSONL records.
+* `benchmarks/benchmark_bounded_decode_serving.py` - batched prefill/decode
+  throughput and memory sweep.
+* `benchmarks/analyze_bounded_decode_tpot.py` - decode-TPOT comparison from a
+  results JSON.
+* `benchmarks/check_bounded_decode_selection.py` - CPU-only invariant checks for
+  the selection primitives (budget, forcing, pooling, monotonicity, ordering).
 * `benchmarks/summarize_bounded_decode.py` - result tables.
 
 ```bash
@@ -248,11 +283,21 @@ python benchmarks/benchmark_bounded_decode_frontier.py --lengths 32768 65536 131
   --budgets 128 256 512 1024 --seeds 101 102 103 104 105 106 \
   --pairs 2 --prefill-chunk 8192 --out artifacts/bounded-decode-frontier-aggregate-v2.json
 
-# Borda fusion control (obs_last + obs_mean)
-python benchmarks/benchmark_bounded_decode_frontier.py --lengths 32768 65536 131072 \
-  --policies obs_union --budgets 128 256 512 --seeds 101 102 103 104 105 106 \
-  --pairs 2 --prefill-chunk 8192 --out artifacts/bounded-decode-frontier-union-v1.json
+# official RULER JSONL split
+python benchmarks/benchmark_bounded_decode_ruler.py \
+  --ruler-jsonl <ruler_split.jsonl> \
+  --tasks niah_single_1 niah_multikey_2 niah_multikey_3 vt \
+  --policies full obs_last obs_mean --budgets 128 256 1024 \
+  --out artifacts/bounded-decode-frontier-ruler-v1.json
 
+# batched serving sweep
+python benchmarks/benchmark_bounded_decode_serving.py --length 32768 \
+  --batches 1 2 4 8 --policies full obs_last --budget 1024 \
+  --out artifacts/bounded-decode-frontier-serving-v1.json
+
+python benchmarks/analyze_bounded_decode_tpot.py \
+  artifacts/bounded-decode-frontier-aggregate-v2.json
+python benchmarks/check_bounded_decode_selection.py
 python benchmarks/summarize_bounded_decode.py \
   artifacts/bounded-decode-frontier-sweep-v1.json \
   artifacts/bounded-decode-frontier-aggregate-v2.json \
@@ -262,5 +307,5 @@ python benchmarks/summarize_bounded_decode.py \
 Model path defaults to `/root/qcc/models/Llama-3.2-1B-Instruct`; override with
 `--model`. The harness needs only `torch` and `transformers` (no accelerate,
 no triton, no vLLM). Each result JSON contains every per-record prediction,
-selection statistic and timing, so the tables above are recomputable from the
+selection statistic and timing, so the tables are recomputable from the
 committed files.
