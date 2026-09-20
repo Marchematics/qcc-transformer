@@ -188,6 +188,79 @@ Two facts matter here:
 This is a diagnostic measurement, not a serving result: no vLLM, no batching, no
 SLA, and the harness synchronises once per decode loop rather than per step.
 
+### 3.6 Official RULER JSONL (80 records, 4 tasks, 8K-64K nominal)
+
+The same prefill/selection/decode path, driven from real RULER records
+(`benchmark_bounded_decode_ruler.py`), scored with official answer recall over
+all expected output strings. Records were prepared for a 32K-vocabulary
+tokenizer, so the Llama-3.2 tokenizer yields ~0.72x the nominal length; both
+arms see identical tokens.
+
+Matched Full-KV (greedy, 32 new tokens) answers:
+
+| task | Full-KV correct |
+|---|---:|
+| niah_single_1 | 20/20 |
+| niah_multikey_2 | 19/20 |
+| niah_multikey_3 (UUID keys) | 9/20 |
+| vt (variable tracking) | 3/20 |
+| **total** | **51/80** |
+
+The 1B checkpoint itself cannot do most UUID multi-key and variable-tracking
+records, so retention is reported on the 51 records Full-KV answers.
+
+`obs_last` with sliding-window dilation (`ruler_v2.json`):
+
+| budget | retention | niah_single_1 | niah_multikey_2 | niah_multikey_3 | vt |
+|---|---:|---:|---:|---:|---:|
+| 512 | 0.529 | **1.000** | 0.368 | 0.000 | 0.000 |
+| 1024 | 0.608 | **1.000** | 0.579 | 0.000 | 0.000 |
+| 2048 | 0.667 | **1.000** | 0.737 | 0.000 | 0.000 |
+
+Without dilation the same policy reached only 0.111-0.444 on the first ten
+records (`ruler_v1_partial10.json`), because the answer number's tokens were
+split across a non-overlapping pooling block boundary and only part of the
+value survived (`recall=0`, prediction `'109.'`). Dilation fixed that failure
+mode but did not close the gap on UUID multi-key or variable tracking.
+
+**This is the honest state against the quality targets: single-needle
+retrieval is fully preserved on official RULER at every tested length, but
+aggregate retention is 0.667 and the worst task is 0.000, far from the
+>=99% / >=97% targets.** The synthetic 2-pair NIAH task that gave 0.897-0.931
+is materially easier than RULER's many-distractor multi-key and UUID records.
+
+### 3.7 Removing the per-step floor: static cache and CUDA graphs
+
+`benchmark_bounded_decode_tpot_floor.py` (`lean_decode_32k.json`,
+`lean_decode_128k.json`). Every variant decodes the same retained K/V set.
+
+| variant | 32K | 128K |
+|---|---:|---:|
+| Full-KV, DynamicCache + per-step mask concat | 18.17 ms | 17.54 ms |
+| Full-KV, StaticCache | OOM | OOM |
+| Full-KV, StaticCache + CUDA graph | 53.70 ms | OOM |
+| bounded (B=1024), DynamicCache | 22.95 ms | 15.86 ms |
+| bounded, StaticCache | 44.39 ms | 23.91 ms |
+| **bounded, StaticCache + CUDA graph** | **6.86 ms** | **6.86 ms** |
+
+* The CUDA-graph bounded path is **6.86 ms/token at both 32K and 128K** — exactly
+  the context-independence the bounded state predicts — and **2.0x faster than
+  the 13.5 ms dynamic bounded path**, i.e. the per-step Python/mask/cache-concat
+  overhead was about half the floor.
+* Against matched Full-KV on the same code path (frontier harness, one process,
+  no contention: 15.6 ms at 32K, 27.4 ms at 128K) the graph-optimized bounded
+  path is **~2.3x at 32K and ~4.0x at 128K**.
+* The in-run Full-KV numbers here (18.17 ms at 32K, 17.54 ms at 128K) are
+  inconsistent with each other and with the frontier harness, so this run's
+  Full-KV column is not used for the speedup claim; only the bounded column is
+  internally consistent across lengths.
+* StaticCache without a graph is *slower* than DynamicCache in this Transformers
+  build, and the Full-KV static/graph variants OOM at 128K because the static
+  buffer is allocated alongside the prefilled cache.
+
+So cache bounding plus graph capture reaches ~4x at 128K, not 5x, and the
+5x batch-1 target remains unmet.
+
 ## 4. What this establishes, and what it does not
 
 Establishes:

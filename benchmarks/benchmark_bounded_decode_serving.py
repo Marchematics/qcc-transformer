@@ -114,7 +114,7 @@ def topk_indices_batched(scores, budget, nsink, nrecent, Lc, pool=1):
             s = torch.cat([s, torch.full(s.shape[:-1] + (pad,), float("-inf"), device=s.device)], dim=-1)
         nb = s.shape[-1] // pool
         s = s.view(*s.shape[:-1], nb, pool).amax(dim=-1, keepdim=True).expand(*s.shape[:-1], nb, pool)
-        s = s.reshape(*s.shape[:-3], nb * pool)[..., :Lc]
+        s = s.reshape(*s.shape[:-2], nb * pool)[..., :Lc]
     forced = sorted(set(list(range(min(nsink, Lc))) + list(range(max(0, Lc - nrecent), Lc))))
     if forced:
         s[..., torch.tensor(forced, device=s.device)] = float("inf")

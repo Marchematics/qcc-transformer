@@ -112,6 +112,34 @@ class Runner:
             step_fn()
         self._reset()
 
+    def generate(self, n, next_id, Lc):
+        """Run n greedy steps and return the generated token ids (for parity checks)."""
+        self._reset()
+        out = []
+        cur = next_id
+        if self.mode == "graph":
+            for step in range(n):
+                pos = self.kept + step
+                self.input_ids.copy_(cur)
+                self.cache_position.fill_(pos)
+                self.position_ids.fill_(pos)
+                if step + 1 < n:
+                    self.mask_buf[:, pos + 1] = 1
+                self.graph.replay()
+                cur = self.logits_buf[:, -1:].argmax(-1)
+                out.append(int(cur.item()))
+            return out
+        for step in range(n):
+            pos = Lc + step
+            cp = torch.tensor([pos], device="cuda")
+            o = self.model(cur, past_key_values=self.cache, attention_mask=self.mask_buf,
+                           cache_position=cp, position_ids=cp.unsqueeze(0), use_cache=True)
+            cur = o.logits[:, -1:].argmax(-1)
+            out.append(int(cur.item()))
+            self.mask_buf = torch.cat(
+                [self.mask_buf, torch.ones(1, 1, device="cuda", dtype=torch.long)], dim=1)
+        return out
+
     def __call__(self, n, next_id, Lc):
         self._reset()
         cur = next_id
@@ -210,6 +238,31 @@ def main():
         record(f"bounded_{mode}", BYTES_PER_TOKEN * kept,
                Runner(model, sel_k, sel_v, kept, args.max_new, mode))
         torch.cuda.empty_cache()
+
+    # parity: every mode must generate exactly the tokens the dynamic path does
+    try:
+        torch.manual_seed(0)
+        ref_runner = Runner(model, sel_k, sel_v, kept, args.max_new, "dynamic")
+        ref = ref_runner.generate(args.max_new, next_id, Lc)
+        results["parity_reference_tokens"] = ref
+        for mode in args.modes:
+            if mode == "dynamic":
+                continue
+            r = Runner(model, sel_k, sel_v, kept, args.max_new, mode)
+            if name_has_graph := (mode == "graph"):
+                r.prepare_graph()
+            got = r.generate(args.max_new, next_id, Lc)
+            same = got == ref
+            results.setdefault("parity", {})[f"bounded_{mode}"] = {
+                "matches_dynamic": same, "tokens": got}
+            print(f"  parity bounded_{mode}: {'OK' if same else 'MISMATCH'}", flush=True)
+            del r
+            torch.cuda.empty_cache()
+        del ref_runner
+        torch.cuda.empty_cache()
+    except Exception as exc:  # noqa: BLE001
+        results["parity_error"] = str(exc)[:200]
+        print("  parity check failed:", str(exc)[:120], flush=True)
 
     fd = results["variants"].get("full_kv_dynamic", {}).get("tpot_ms")
     same = results["variants"].get("full_kv_graph") or results["variants"].get("full_kv_static")
