@@ -39,6 +39,7 @@ def multimodel(paths):
     for path in paths:
         data = json.load(open(path))
         model = data["label"]
+        model_path = data["config"]["model"]
         slots = None
         for task, entry in sorted(data["summary"]["tasks"].items()):
             bounded = entry["bounded"]
