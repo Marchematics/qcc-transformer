@@ -4,6 +4,41 @@
 交接对象：下一位继续实现、评测或部署 QCC Transformer 的工程师/模型
 状态：代码已推送；99 gate 尚未通过；不要把当前结果包装成已达标结果。
 
+## 当前审计（2026-09-23 深夜）：保留律已进包，SLA 并发可复核
+
+**保留律现在是包的一部分**（`qcc_transformer/retention.py`，已从 `__init__`
+导出）：
+
+```python
+from qcc_transformer import RetentionConfig, compile_bounded_cache
+cache, logits = compile_bounded_cache(model, input_ids,
+                                      RetentionConfig(budget=4096, lex_cap=512, chain_hops=6),
+                                      tokenizer=tok)
+```
+
+零新增参数、不动权重。验证三层：
+1. `tests/test_retention.py` 五个 CPU 测试（小随机 Llama）：统一宽度、全保留时与
+   未压缩 prefill 逐 token 一致、sink/近期强制保留、锚点召回、赋值链跟随；开发
+   过程中它们抓出打包版 `last` 打分的 einsum 秩错误；
+2. `benchmarks/validate_retention_api.py`：4 条真实 RULER 记录，4/4 得分 1.0，
+   4608 槽，2.3–3.9 s/条，峰值 6.2–7.3 GiB；
+3. `benchmarks/validate_retention_full.py`：20 条（每任务 5 条）与 benchmark
+   harness 在相同预算下逐条比对，**19/20 完全一致**，唯一差异是包在一
+   multikey_3 记录上答对而 harness 答错。仓库完整测试套件通过（并修掉一个
+   Transformers 5.x 下必挂的既有测试 bug）。
+
+**固定 SLA 并发现在可复核**（`benchmarks/analyze_sla_concurrency.py`）：
+
+| 场景 | SLA | Full-KV 最大 batch | 有界 最大 batch | 比值 |
+|---|---:|---:|---:|---:|
+| 32K, B=1024 | 50 ms | 4 | 32 | **8x** |
+| 32K, B=1024 | 25 ms | 2 | 32 | **16x** |
+| 32K, B=4096（质量配置） | 100 ms | 4 | 32 | **8x** |
+| 128K, B=1024 | 50 ms | 1 | 8 | **8x** |
+
+128K 的 Full-KV 上限是 1 个请求（batch 2 直接 OOM），所以那一行不是延迟差异而是
+显存硬墙。
+
 ## 当前审计（2026-09-23）：延迟数字的测量条件（重要）
 
 本机与其它租户共享，这比任何调参都更影响 TPOT 读数：**同一个"有界+graph"
