@@ -156,8 +156,8 @@ def greedy_from_cache(model, cache, first_token, steps, attention_mask=None):
 def _rag_batch(side):
     """Two requests of different lengths, padded on ``side``."""
     model = tiny_model()
-    ids_long = torch.randint(0, 256, (1, 96))
-    ids_short = torch.randint(0, 256, (1, 60))
+    ids_long = torch.randint(1, 256, (1, 96))       # 0 is the padding id
+    ids_short = torch.randint(1, 256, (1, 60))
     width = ids_long.shape[1]
     pad = torch.zeros(1, width - ids_short.shape[1], dtype=torch.long)
     if side == "right":
@@ -285,3 +285,35 @@ def test_fixed_rope_length_pins_only_longrope_checkpoints():
         assert not pinned                      # short prompts keep the checkpoint's own choice
     with fixed_rope_length(stub(None), 20000) as pinned:
         assert not pinned                      # not a LongRoPE checkpoint
+
+
+def test_rare_anchor_mode_finds_short_keys_without_a_pattern():
+    """The task-agnostic mode anchors rare question strings of any alphabet."""
+    tokenizer = StubTokenizer()
+    config = RetentionConfig(observation_window=8, lex_cap=64, anchor_mode="rare",
+                             min_anchor_len=3, max_occurrences=8)
+    prompt = ("filler " * 20
+              + "the code for task ZX9Q is 8123 and it is stored safely. "
+              + "filler " * 20
+              + "What is the code for task ZX9Q?")
+    anchors = lexical_anchors(tokenizer, prompt, config)
+    covered = {prompt[a:b] for a, b in
+               (tokenizer(prompt).offset_mapping[i] for i in anchors)}
+    assert any("ZX9Q" in word for word in covered), sorted(covered)
+    assert any("8123" in word for word in covered), sorted(covered)
+
+
+def test_rare_anchor_mode_ignores_words_that_are_not_rare():
+    tokenizer = StubTokenizer()
+    context = "alpha " * 3 + "filler " * 20
+    prompt = context + "tell me alpha"
+    strict = RetentionConfig(observation_window=3, lex_cap=64, anchor_mode="rare",
+                             min_anchor_len=3, max_occurrences=2)
+    assert lexical_anchors(tokenizer, prompt, strict) == []   # 3 occurrences: too common
+    loose = RetentionConfig(observation_window=3, lex_cap=64, anchor_mode="rare",
+                            min_anchor_len=3, max_occurrences=8,
+                            lex_context_left=0, lex_context_right=0)
+    anchors = lexical_anchors(tokenizer, prompt, loose)
+    covered = {prompt[a:b] for a, b in
+               (tokenizer(prompt).offset_mapping[i] for i in anchors)}
+    assert covered == {"alpha"}, covered

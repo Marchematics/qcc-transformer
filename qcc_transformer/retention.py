@@ -68,6 +68,8 @@ class RetentionConfig:
     min_word_len: int = 6
     min_number_len: int = 4
     max_occurrences: int = 8
+    anchor_mode: str = "pattern"    # "pattern" | "rare" | "both"
+    min_anchor_len: int = 3
     prefill_chunk: int = 8192
     key_chunk: int = 4096
     scoring: str = "last"          # "last" | "mean" | "max"
@@ -329,14 +331,25 @@ def lexical_anchors(tokenizer, prompt: str, config: RetentionConfig) -> list[int
     question = prompt[question_char_start:]
 
     candidates: set[str] = set()
-    for match in re.finditer(r"[A-Za-z0-9][A-Za-z0-9_\-]{%d,}" % (config.min_word_len - 1),
-                             question):
-        candidates.add(match.group(0))
-    for match in re.finditer(r"\d{%d,}" % config.min_number_len, question):
-        candidates.add(match.group(0))
-    for match in re.finditer(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
-                             r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", question):
-        candidates.add(match.group(0))
+    if config.anchor_mode in ("pattern", "both"):
+        for match in re.finditer(r"[A-Za-z0-9][A-Za-z0-9_\-]{%d,}" % (config.min_word_len - 1),
+                                 question):
+            candidates.add(match.group(0))
+        for match in re.finditer(r"\d{%d,}" % config.min_number_len, question):
+            candidates.add(match.group(0))
+        for match in re.finditer(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+                                 r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", question):
+            candidates.add(match.group(0))
+    if config.anchor_mode in ("rare", "both"):
+        # Task-agnostic variant: any surface string the question uses that is
+        # itself rare in the context is a retrieval cue, whatever alphabet it
+        # belongs to.  Common words are excluded by the occurrence cap, not by a
+        # pattern, so short identifiers, names and codes are all covered.
+        for token in range(question_start_token, total):
+            start, end = offsets[token]
+            surface = prompt[start:end].strip()
+            if len(surface) >= config.min_anchor_len and re.search(r"[A-Za-z0-9]", surface):
+                candidates.add(surface)
 
     rare: list[tuple[str, list[int]]] = []
     for word in sorted(candidates, key=len, reverse=True):
