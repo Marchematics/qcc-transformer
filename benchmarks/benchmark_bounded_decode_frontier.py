@@ -330,10 +330,11 @@ def run_one(model, tokenizer, length, args, eos_ids, seed):
     score_cache: dict = {}
 
     def _rank(x):
-        order = torch.argsort(x, descending=True)
+        # per-row rank: 0 is best
+        order = torch.argsort(x, dim=-1, descending=True)
         r = torch.empty_like(order)
-        r[order] = torch.arange(x.numel(), device=x.device)
-        return r
+        idx = torch.arange(x.shape[-1], device=x.device).expand_as(order)
+        return r.scatter_(-1, order, idx)
 
     def get_scores(policy):
         if policy not in score_cache:
@@ -421,10 +422,14 @@ def main():
     eos_ids = set(eos) if isinstance(eos, (list, tuple)) else {eos}
 
     rows = []
+    Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     for seed in args.seeds:
         for length in args.lengths:
             rows.extend(run_one(model, tokenizer, length, args, eos_ids, seed))
-    Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+            # incremental checkpoint so an interrupted sweep keeps its evidence
+            Path(args.out).write_text(json.dumps(
+                {"model": args.model, "config": vars(args), "partial": True,
+                 "results": rows}, indent=2))
     Path(args.out).write_text(json.dumps(
         {"model": args.model, "config": {k: v for k, v in vars(args).items()},
          "results": rows}, indent=2))

@@ -76,32 +76,54 @@ At 64K, keeping only the needle tokens plus sinks and a recent window
 observation-window attention are. Retrieval needs the question-relevant slice of
 the surrounding context, not just the fact itself.
 
-### 3.2 Aggregate (6 records, 2 key/value pairs, chunked exact prefill)
+### 3.2 Aggregate (60 records, 2 key/value pairs, chunked exact prefill)
 
-`benchmark_bounded_decode_frontier.py`, `aggregate_v2.json`. Full-KV is correct on **18/18** records
-(6 lengths of ~32K, 6 of ~64K, 6 of ~128K), so retention is meaningful
-everywhere.
+Two runs of `benchmark_bounded_decode_frontier.py` with disjoint seeds:
+`aggregate_v2.json` (seeds 101-106, budgets 128/256/512/1024) and
+`expand_v1.json` (seeds 110-123, budgets 128/256/512), 20 records per length
+band. Full-KV is correct on **58/60** records (32K 20/20, 64K 20/20,
+128K 18/20), so 128K is at the edge of this 1B checkpoint's ability and the two
+records it misses are excluded from the retention denominators.
 
-Answer recall (records correct / records), budgets are slots per (layer, kv-head):
+Retention = mean answer recall over the records the matched Full-KV run
+answered (`analyze_combined.py`). Budgets are slots per (layer, kv-head);
+B=128 is a 4 MiB decode cache at every context length.
 
-| Length | recent 128 | recent 1024 | obs_mean 128 | obs_mean 1024 | obs_max 128 | obs_max 512 | obs_last 128 | obs_last 1024 |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| ~32K | 0/6 | 0/6 | 4/6 | 6/6 | 3/6 | 3/6 | **6/6** | **6/6** |
-| ~64K | 0/6 | 0/6 | 5/6 | 5/6 | 5/6 | 6/6 | 4/6 | **6/6** |
-| ~128K | 0/6 | 0/6 | 3/6 | 6/6 | 3/6 | 3/6 | **6/6** | **6/6** |
-| total /18 | 0 | 0 | 12 | 17 | 11 | 12 | **16** | **18** |
+| policy | B | raw recall | retention | records |
+|---|---:|---:|---:|---:|
+| `obs_last` | 128 | 0.867 | **0.897** | 60 |
+| `obs_last` | 256 | 0.867 | **0.897** | 60 |
+| `obs_last` | 512 | 0.900 | **0.931** | 60 |
+| `obs_last` | 1024 | 1.000 | **1.000** | 18 |
+| `obs_union` | 128 | 0.738 | 0.775 | 42 |
+| `obs_union` | 256 | 0.833 | 0.875 | 42 |
+| `obs_union` | 512 | 0.881 | 0.925 | 42 |
+| `obs_mean` | 128 | 0.417 | 0.431 | 60 |
+| `obs_mean` | 256 | 0.633 | 0.638 | 60 |
+| `obs_mean` | 512 | 0.800 | 0.810 | 60 |
+| `obs_mean` | 1024 | 0.944 | 0.944 | 18 |
+| `obs_max` | 512 | 0.667 | 0.667 | 18 |
+| `recent` | 128-1024 | 0.000 | **0.000** | 18-60 |
 
-* `obs_last` at 1024 slots per (layer, kv-head) matches Full-KV on **18/18**
-  records, i.e. 100% retention.
-* `obs_last` at **128** slots still matches Full-KV on 16/18 (88.9%).
-* Recency-only selection is 0/18 at every budget up to 1024, so the result is
-  not a recency artefact.
-* `obs_mean` (the SnapKV-style mean) reaches 17/18 at 1024.
+Per band, `obs_last`:
 
-B=128 is 4 MiB of decode cache; Full-KV at 128K is 4.00 GiB. The bounded cache
-is therefore **1024x smaller at 128K** while still answering 16/18 records, and
-18/18 at 32 MiB (B=1024), a 128x reduction.
+| band | B=128 | B=256 | B=512 | B=1024 |
+|---|---:|---:|---:|---:|
+| ~32K (20 rec.) | 0.850 | 0.850 | 0.950 | 1.000 (6) |
+| ~64K (20 rec.) | 0.900 | 0.900 | 0.900 | 1.000 (6) |
+| ~128K (18 rec.) | 0.944 | 0.944 | 0.944 | 1.000 (6) |
 
+The first six-record sample gave 18/18 for `obs_last` at B=1024 and 16/18 at
+B=128; the 60-record replication puts B=128 and B=256 at 89.7% and B=512 at
+93.1%. The larger sample is the honest number, and **89.7-93.1% is below the
+99% aggregate target**: four to six of sixty records lose the answer with a
+small bounded cache even though Full-KV keeps it.
+
+The diagnostic in each row (`selection.answer_token_keep_fraction`) shows why:
+`obs_last` puts all answer tokens in only ~50% of (layer, kv-head) units, so
+retrieval depends on the retained context being sufficient in the units that
+happen to include the needle. Increasing the budget raises that fraction and
+the retention together.
 ### 3.3 Negative controls
 
 Every control below uses the same prefill, the same records and the same decode
