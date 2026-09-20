@@ -726,6 +726,29 @@ property is unchanged. Verification:
   empty-cache return value that Transformers 5.x no longer provides; both are
   fixed).
 
+### 3.17 The shipped API matches the benchmark it came from
+
+`benchmarks/validate_retention_full.py` runs records through the packaged
+`compile_bounded_cache` and compares, record by record, with the benchmark
+harness's stored run at the same budget (`ruler_v6.json`, lex_obs at 4096):
+
+| task | records compared | identical scores | differences |
+|---|---:|---:|---|
+| niah_multikey_2 | 5 | 5 | - |
+| niah_multikey_3 | 5 | 4 | 1 (package 1.000 vs harness 0.000) |
+| niah_single_1 | 5 | 5 | - |
+| vt | 5 | 5 | - |
+| **total** | **20** | **19** | **1, in the package's favour** |
+
+So the numbers reported above are produced by the shipped code path, not only by
+the standalone harness, and the one disagreement is a single record where the
+package recovers an answer the harness missed rather than the reverse.
+
+Absolute recall on these twenty records is 0.850 (single 1.000, multikey_2 1.000,
+multikey_3 0.800, vt 0.600); that is *not* the retention figure - retention is a
+ratio against matched Full-KV over records Full-KV answers, and it is what the
+0.941-1.000 numbers elsewhere in this document refer to.
+
 ## 4. What this establishes, and what it does not
 
 Establishes:
