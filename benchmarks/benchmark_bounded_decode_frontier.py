@@ -20,6 +20,7 @@ import argparse
 import json
 import math
 import random
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -54,6 +55,7 @@ class Record:
     answer: str
     needle_positions: list[int] = field(default_factory=list)
     answer_positions: list[int] = field(default_factory=list)
+    lexical_positions: list[int] = field(default_factory=list)
     meta: dict = field(default_factory=dict)
 
 
@@ -321,6 +323,69 @@ def topk_indices(scores_layer, budget, nsink, nrecent, L, pool=1, dilate=0):
     return torch.tensor(idxs, device=scores_layer.device, dtype=torch.long)
 
 
+def question_lexical_positions(tokenizer, prompt, n_question_tokens, max_positions=512,
+                               min_word_len=6, max_occurrences=8, min_number_len=4,
+                               context_left=16, context_right=32):
+    """Token positions of context strings that also occur in the question.
+
+    This is a deployable, causal prefilter: it only compares the prompt against
+    itself.  RULER multi-key records embed the asked key (for example
+    ``ruthless-hierarchy`` or a UUID) in both the question and the context, so
+    matching the question's rare strings against the context recovers the exact
+    sentence that attention ranking can miss when dozens of near-identical
+    distractors exist.
+
+    Returns a sorted list of token indices, capped at ``max_positions``.
+    """
+    enc = tokenizer(prompt, add_special_tokens=False, return_offsets_mapping=True)
+    offsets = enc.offset_mapping
+    n = len(offsets)
+    q_start = max(0, n - n_question_tokens)
+    q_char_start = offsets[q_start][0] if q_start < n else len(prompt)
+    question = prompt[q_char_start:]
+    words = set()
+    for m in re.finditer(r"[A-Za-z0-9][A-Za-z0-9_\-]{%d,}" % (min_word_len - 1), question):
+        words.add(m.group(0))
+    # numeric values matter for value-tracking tasks ("assigned the value 34537")
+    for m in re.finditer(r"\d{%d,}" % min_number_len, question):
+        words.add(m.group(0))
+    for m in re.finditer(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+                         r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", question):
+        words.add(m.group(0))
+    # keep only strings that are rare in the context: common words appear in
+    # the filler too and would flood the retained set
+    rare = []
+    for w in sorted(words, key=len, reverse=True):
+        occurrences = []
+        start = 0
+        while len(occurrences) <= max_occurrences:
+            i = prompt.find(w, start, q_char_start)
+            if i < 0:
+                break
+            occurrences.append(i)
+            start = i + 1
+        if 0 < len(occurrences) <= max_occurrences:
+            rare.append((w, occurrences))
+    hits = set()
+    for w, occurrences in rare:
+        for i in occurrences:
+            if len(hits) >= max_positions:
+                break
+            for ti, (a, b) in enumerate(offsets):
+                if b > i and a < i + len(w):
+                    hits.add(ti)
+    # the matched string is an anchor: keep a bounded neighbourhood so the
+    # value that follows the matched key is retained as well
+    # the matched string is an anchor; the answer usually follows it (a key is
+    # followed by its value) so the right context is wider than the left
+    expanded = set()
+    for ti in sorted(hits):  # expand anchors in context order, never mid-anchor
+        expanded.update(range(max(0, ti - context_left), min(n, ti + context_right + 1)))
+        if len(expanded) >= max_positions:
+            break
+    return sorted(expanded)[:max_positions]
+
+
 def selection_stats(idxs, positions, L):
     if not positions or idxs is None:
         return None
@@ -348,6 +413,14 @@ def build_idxs(policy, scores, cache, record, budget, nsink, nrecent, L, pool, d
     if policy == "sink_recent":
         sel = sorted(set(list(range(min(nsink, L))) + list(range(max(0, L - (budget - nsink)), L))))
         return [torch.tensor([sel] * layer.keys.shape[1], device=device) for layer in cache.layers]
+    if policy == "lex_obs":
+        # attention ranking plus the question's rare strings found in the context
+        keep = sorted({p for p in record.lexical_positions if p < L})
+        out = []
+        for idx in (topk_indices(s, budget, nsink, nrecent, L, pool, dilate) for s in scores):
+            merged = sorted(set(idx[0].tolist()) | set(keep))
+            out.append(torch.tensor([merged] * idx.shape[0], device=device, dtype=torch.long))
+        return out
     if policy == "oracle_needle":
         keep = set(record.needle_positions)
         sel = sorted(set(list(range(min(nsink, L))) + list(range(max(0, L - nrecent), L))

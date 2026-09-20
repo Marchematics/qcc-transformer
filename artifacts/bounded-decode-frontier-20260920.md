@@ -223,6 +223,26 @@ split across a non-overlapping pooling block boundary and only part of the
 value survived (`recall=0`, prediction `'109.'`). Dilation fixed that failure
 mode but did not close the gap on UUID multi-key or variable tracking.
 
+Adding the lexical-anchor union (`lex_obs`, `ruler_v3.json`) — the token spans
+of the question's rare strings (hyphenated keys, UUIDs, long numbers) wherever
+they appear earlier in the prompt, expanded 16 tokens left and 32 right, which
+is about 50-125 extra slots — changes the picture substantially:
+
+| policy | budget | retention | single_1 | multikey_2 | multikey_3 | vt |
+|---|---:|---:|---:|---:|---:|---:|
+| `obs_last` | 2048 | 0.667 | 1.000 | 0.737 | 0.000 | 0.000 |
+| `lex_obs` | 512 | 0.863 | 1.000 | 0.947 | 0.667 | 0.000 |
+| `lex_obs` | 1024 | **0.882** | 1.000 | 1.000 | 0.667 | 0.000 |
+| `lex_obs` | 2048 | **0.882** | 1.000 | 0.947 | 0.778 | 0.000 |
+
+Lexical anchoring roughly doubles official-RULER retention and takes
+single-needle to 100% and numeric multi-key to 94.7-100%. It does nothing for
+variable tracking, which is a multi-hop chaining task rather than retrieval:
+the queried value's direct assignments are captured, but the variables that
+reach that value through a chain are not. (The 1B base model itself answers only
+3/20 vt records with full attention, so this task is close to the checkpoint's
+own limit.)
+
 **This is the honest state against the quality targets: single-needle
 retrieval is fully preserved on official RULER at every tested length, but
 aggregate retention is 0.667 and the worst task is 0.000, far from the
@@ -306,9 +326,13 @@ approximation. All QCC archive/recurrence/gate machinery can be bypassed:
    per layer, the attention inputs of the last `obs` query positions. This is
    `O(obs * d)` state, independent of context length.
 2. Compile: for each `(layer, kv-head)`, score every key by the attention it
-   receives from those queries, max-pool over small blocks, keep the top `B`.
-   Union with `s` attention sinks and a recent window. Cost is `O(obs * L)` per
-   layer, i.e. `obs / L` of the prefill attention work.
+   receives from those queries, dilate the score map with a sliding-window max
+   (a multi-token answer must not be split by the pooling grid), keep the top
+   `B`. Union with `s` attention sinks, a recent window, and -- for retrieval
+   records that repeat the asked key in the question -- the token spans of the
+   question's rare strings (hyphenated keys, UUIDs, long numbers) wherever they
+   occur earlier in the prompt, expanded by 16 tokens left and 32 right. Cost is
+   `O(obs * L)` per layer for the attention term plus one linear string scan.
 3. Decode: exact attention over the retained set. Keys keep native RoPE phases.
 4. No new parameters, no calibration, no fine-tuning; the pretrained checkpoint
    is untouched.
