@@ -836,6 +836,68 @@ same records compiled and decoded alone:
   4-6 s for these two rows on the A10).  Decode is unaffected - every row pays
   the same bounded width.
 
+### 3.20 The shipped API reproduces the harness on all eighty records
+
+Section 3.17 compared twenty records and reported 19 identical. Extending that to
+the whole split first exposed a real defect, and fixing it closed the gap
+completely.
+
+**What was wrong.** The packaged scorer ranked keys by
+
+```python
+final_query = query[:, -1:, :].reshape(kv_heads, group, head_dim)   # (kv, group, 1, d)
+torch.einsum("god,hld->hgol", final_query, keys)
+```
+
+while the harness kept the singleton query axis:
+
+```python
+final_query = query.reshape(kv_heads, group, n_obs, head_dim)[:, :, -1:, :]
+torch.einsum("hgod,hld->hgol", final_query, keys)
+```
+
+The two are algebraically identical, so this looked like a cosmetic difference.
+It is not: the operands have different shapes, cuBLAS picks different kernels,
+the logits round differently, and the top-k that follows is decided by margins
+that are frequently smaller than that rounding. On a 31,389-token vt record the
+two formulations selected *different slot sets*, and the packaged run lost three
+of five tracked variables that the harness recovered. Across the 80 records the
+packaged run came out at 0.9253 aggregate retention against the harness's 1.000
+- a "reproduction" that reproduced nothing exactly.
+
+**The check that settles it.** `experiments/retention_frontier/diff_selection.py`
+loads one record, computes the anchor positions, the scores and the selections
+through *both* code paths **in the same process on the same cache**, and reports
+each stage separately:
+
+| stage | before | after keeping the singleton axis |
+|---|---|---|
+| lexical anchors | 288 vs 288, fully shared | unchanged |
+| prompt round-trip decode | identical | unchanged |
+| per-layer scores | differ | **bitwise equal, max abs delta 0.0** |
+| selected slot sets | differ | **identical** (both anchor sets) |
+
+**Result after the fix.** The full 80-record run through
+`compile_bounded_cache` (the shipped entry point, not the harness) against the
+stored harness run at the same budget:
+
+| task | records | predictions byte-identical | partial recall: package / harness | retention (package, matched Full-KV) |
+|---|---:|---:|---|---:|
+| niah_single_1 | 20 | 15 | 1.000 / 1.000 | 1.000 |
+| niah_multikey_2 | 20 | 20 | 0.950 / 0.950 | 1.000 |
+| niah_multikey_3 | 20 | 20 | 0.450 / 0.450 | 1.000 |
+| vt | 20 | 20 | 0.660 / 0.660 | 1.028 |
+| **all** | **80** | **75** | **0.765 / 0.765** | **1.0071 aggregate, 1.000 worst task** |
+
+The five non-identical predictions differ only in text generated *after* the
+answer (all 80 agree on the official partial and strict metric). The packaged
+run's own matched-Full-KV retention is 1.0071 aggregate with a 1.000 worst task,
+so the headline quality result is produced by the shipped code path and not only
+by the benchmark harness. The retrospective lesson is worth stating plainly: on
+this workload an "equivalent" rewrite of a scoring kernel is a behavioural
+change, and the only way to know is to compare the *selected sets*, not the
+scores.
+
 ## 4. What this establishes, and what it does not
 
 Establishes:
