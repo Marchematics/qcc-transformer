@@ -96,7 +96,7 @@ def run_record(model, rec, args, eos_ids, row_id):
 
     def get_scores(policy):
         if policy not in score_cache:
-            score_cache[policy] = L.obs_scores(model, captured, cache, Lc, args.obs, policy[4:])
+            score_cache[policy] = L.obs_scores(model, captured, cache, Lc, args.obs, policy[4:], args.key_chunk)
         return score_cache[policy]
 
     rows = []
@@ -109,7 +109,7 @@ def run_record(model, rec, args, eos_ids, row_id):
         for budget in budgets:
             eff = budget if budget is not None else Lc
             nrecent = max(1, int(eff * 0.25)) if budget is not None else 0
-            idxs = L.build_idxs(policy, scores, cache, rec, eff, args.nsink, nrecent, Lc, args.pool, ids.device)
+            idxs = L.build_idxs(policy, scores, cache, rec, eff, args.nsink, nrecent, Lc, args.pool, ids.device, args.dilate)
             diag = L.selection_stats(idxs, rec.answer_positions, Lc)
             if idxs is None:
                 for layer, (ok, ov) in zip(cache.layers, orig):
@@ -160,6 +160,8 @@ def main():
     ap.add_argument("--obs", type=int, default=64)
     ap.add_argument("--nsink", type=int, default=4)
     ap.add_argument("--pool", type=int, default=7)
+    ap.add_argument("--dilate", type=int, default=0)
+    ap.add_argument("--key-chunk", type=int, default=4096)
     ap.add_argument("--max-new", type=int, default=24)
     ap.add_argument("--prefill-chunk", type=int, default=8192)
     ap.add_argument("--no-answer-prefix", action="store_true")
@@ -191,7 +193,8 @@ def main():
     rows = []
     for i, rec in enumerate(records):
         rows.extend(run_record(model, rec, args, eos_ids, i))
-        if (i + 1) % 10 == 0:
+        torch.cuda.empty_cache()
+        if (i + 1) % 5 == 0:
             Path(args.out).write_text(json.dumps({"partial": True, "results": rows}, indent=1), encoding="utf-8")
     Path(args.out).write_text(json.dumps(
         {"model": args.model, "ruler": args.ruler_jsonl,

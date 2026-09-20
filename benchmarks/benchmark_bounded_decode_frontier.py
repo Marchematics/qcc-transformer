@@ -157,7 +157,7 @@ def prefill_capture(model, ids, obs, chunk):
 
 
 @torch.no_grad()
-def obs_scores(model, captured, cache, L, obs, mode, key_chunk=16384):
+def obs_scores(model, captured, cache, L, obs, mode, key_chunk=4096):
     """Per (layer, kv-head) key importance from the observation-window queries.
 
     Computed in key chunks so peak memory is O(obs * key_chunk) per layer.
@@ -227,16 +227,87 @@ def obs_scores(model, captured, cache, L, obs, mode, key_chunk=16384):
     return out
 
 
+@torch.no_grad()
+def obs_vote_scores(model, captured, cache, L, obs, top_v=64, key_chunk=4096):
+    """Confidence-weighted observation-window voting.
+
+    Every question query votes for its top-`top_v` keys, and each vote is
+    weighted by that query's own peak probability ``p_max = exp(s - logsumexp)``.
+    A peaked retrieval query (which names the key it is looking for) therefore
+    contributes ~1 while a diffuse query contributes ~1/L, which is what makes
+    voting work for single-fact retrieval: a needle relevant to only one query
+    still wins if that query is confident.
+    """
+    num_heads = model.config.num_attention_heads
+    kv_heads = cache.layers[0].keys.shape[1]
+    group = num_heads // kv_heads
+    head_dim = model.model.layers[0].self_attn.head_dim
+    key_pos = torch.arange(L, device=cache.layers[0].keys.device)
+    NEG = -1e30
+    out = []
+    for layer_idx, layer in enumerate(cache.layers):
+        h = captured[layer_idx]
+        n_obs = h.shape[1]
+        attn = model.model.layers[layer_idx].self_attn
+        q = attn.q_proj(h[0]).view(n_obs, num_heads, head_dim).transpose(0, 1)
+        pos = torch.arange(L - n_obs, L, device=h.device)
+        cos, sin = model.model.rotary_emb(h, pos.unsqueeze(0))
+        q = apply_rope(q, cos[0].unsqueeze(0), sin[0].unsqueeze(0))
+        qf = q.reshape(kv_heads, group, n_obs, head_dim)
+        k = layer.keys[0]
+
+        # pass 1: best score and log-sum-exp per (kv_head, query)
+        best = torch.full((kv_heads, n_obs), NEG, device=h.device)
+        lse = torch.zeros((kv_heads, n_obs), device=h.device)
+        for ks in range(0, L, key_chunk):
+            ke = min(L, ks + key_chunk)
+            sc = torch.einsum("hgod,hld->hgol", qf.float(), k[:, ks:ke].float()) * attn.scaling
+            valid = key_pos[ks:ke][None, :] <= pos[:, None]
+            sc = sc.masked_fill(~valid[None, None, :, :], NEG).amax(dim=1)  # (kv, obs, blk)
+            bm = sc.amax(dim=-1)
+            nm = torch.maximum(best, bm)
+            lse = lse * torch.exp(best - nm) + torch.exp(sc - nm[..., None]).sum(dim=-1)
+            best = nm
+        lse = torch.log(lse) + best
+
+        # pass 2: weight each query's top-v votes by its peak probability
+        votes = torch.zeros(kv_heads, L, device=h.device)
+        for ks in range(0, L, key_chunk):
+            ke = min(L, ks + key_chunk)
+            sc = torch.einsum("hgod,hld->hgol", qf.float(), k[:, ks:ke].float()) * attn.scaling
+            valid = key_pos[ks:ke][None, :] <= pos[:, None]
+            sc = sc.masked_fill(~valid[None, None, :, :], NEG).amax(dim=1)
+            v = min(top_v, sc.shape[-1])
+            top = sc.topk(v, dim=-1)
+            weight = torch.exp(top.values - lse[..., None])          # (kv, obs, v)
+            votes[:, ks:ke].scatter_add_(1, top.indices.reshape(kv_heads, -1),
+                                         weight.reshape(kv_heads, -1))
+        out.append(votes)
+    return out
+
+
 def keynorm_scores(cache):
     return [layer.keys[0].float().norm(dim=-1) for layer in cache.layers]
 
 
-def topk_indices(scores_layer, budget, nsink, nrecent, L, pool=1):
+def topk_indices(scores_layer, budget, nsink, nrecent, L, pool=1, dilate=0):
+    """Return (kv_heads, <=budget) index tensor, always including sink+recent.
+
+    pool>1 max-pools over non-overlapping `pool`-token blocks before ranking.
+    dilate>1 instead takes a sliding-window max of that width, so a hit protects
+    its immediate neighbours even when a multi-token answer straddles a block
+    boundary.
+    """
     kv_heads = scores_layer.shape[0]
     idxs = []
     forced = sorted(set(list(range(min(nsink, L))) + list(range(max(0, L - nrecent), L))))
     for head in range(kv_heads):
         s = scores_layer[head].clone().float()
+        if dilate > 1:
+            k = dilate if dilate % 2 == 1 else dilate + 1
+            pad = k // 2
+            padded = torch.nn.functional.pad(s.view(1, 1, -1), (pad, pad), value=float("-inf"))
+            s = torch.nn.functional.max_pool1d(padded, kernel_size=k, stride=1).view(-1)[:L]
         if pool > 1:
             pad = (-L) % pool
             if pad:
@@ -268,7 +339,7 @@ def selection_stats(idxs, positions, L):
             "all_answer_unit_fraction": units_all / len(fracs)}
 
 
-def build_idxs(policy, scores, cache, record, budget, nsink, nrecent, L, pool, device):
+def build_idxs(policy, scores, cache, record, budget, nsink, nrecent, L, pool, device, dilate=0):
     if policy == "full":
         return None
     if policy == "recent":
@@ -286,7 +357,7 @@ def build_idxs(policy, scores, cache, record, budget, nsink, nrecent, L, pool, d
         g = torch.Generator(device="cpu").manual_seed(1234)
         sel = sorted(torch.randperm(L, generator=g)[:budget].tolist())
         return [torch.tensor([sel] * layer.keys.shape[1], device=device) for layer in cache.layers]
-    return [topk_indices(s, budget, nsink, nrecent, L, pool) for s in scores]
+    return [topk_indices(s, budget, nsink, nrecent, L, pool, dilate) for s in scores]
 
 
 @torch.no_grad()
@@ -343,6 +414,8 @@ def run_one(model, tokenizer, length, args, eos_ids, seed):
                 mean = obs_scores(model, captured, cache, L, args.obs, "mean")
                 # Borda fusion: lower rank sum is better; negate so "higher is better"
                 score_cache[policy] = [-(_rank(a) + _rank(b)) for a, b in zip(last, mean)]
+            elif policy == "obs_vote":
+                score_cache[policy] = obs_vote_scores(model, captured, cache, L, args.obs, args.top_v)
             else:
                 score_cache[policy] = obs_scores(model, captured, cache, L, args.obs, policy[4:])
         return score_cache[policy]
@@ -357,7 +430,7 @@ def run_one(model, tokenizer, length, args, eos_ids, seed):
         for budget in budgets:
             eff = budget if budget is not None else L
             nrecent = max(1, int(eff * 0.25)) if budget is not None else 0
-            idxs = build_idxs(policy, scores, cache, rec, eff, args.nsink, nrecent, L, args.pool, ids.device)
+            idxs = build_idxs(policy, scores, cache, rec, eff, args.nsink, nrecent, L, args.pool, ids.device, args.dilate)
             diag = selection_stats(idxs, rec.answer_positions, L)
             if idxs is None:
                 for layer, (ok, ov) in zip(cache.layers, orig):
