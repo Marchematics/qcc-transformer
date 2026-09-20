@@ -487,6 +487,14 @@ def build_idxs(policy, scores, cache, record, budget, nsink, nrecent, L, pool, d
     if policy == "sink_recent":
         sel = sorted(set(list(range(min(nsink, L))) + list(range(max(0, L - (budget - nsink)), L))))
         return [torch.tensor([sel] * layer.keys.shape[1], device=device) for layer in cache.layers]
+    if policy == "lex_only":
+        # lexical anchors plus sinks and the recent window, with no
+        # attention-selected filler: tests whether a *cleaner* context is what a
+        # multi-item answer needs, rather than a larger one
+        anchors = sorted({p for p in record.lexical_positions if p < L})
+        forced = sorted(set(list(range(min(nsink, L))) + list(range(max(0, L - nrecent), L))))
+        sel = sorted(set(anchors) | set(forced))
+        return [torch.tensor([sel] * sc.shape[0], device=device, dtype=torch.long) for sc in scores]
     if policy == "lex_obs":
         # Each head keeps its own attention ranking and additionally receives the
         # question's rare strings found in the context.  The retained width is
