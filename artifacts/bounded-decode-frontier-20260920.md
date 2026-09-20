@@ -606,6 +606,11 @@ Details at the quality budget:
 | 32K | 32 | 620.1 | 51.6 ms | 11.90 GiB | **32/32** |
 | 128K | 1 | 60.9 | 16.4 ms | 10.48 GiB | 1/1 |
 | 128K | 2 | 122.4 | 16.4 ms | 11.39 GiB | 2/2 |
+| 128K | 4 | 249.3 | 16.1 ms | 11.70 GiB | **4/4** |
+
+Matched Full-KV at 128K serves exactly one request (34.5 tok/s, 28.95 ms) and
+OOMs at batch 2, so the bounded quality configuration still gives 4x concurrency
+at 128K with per-request TPOT of 16 ms against 29 ms.
 
 * **Concurrency is unchanged at 8x** (32 concurrent 32K requests against matched
   Full-KV's ceiling of 4), and recall is 100% at every batch size, so the
