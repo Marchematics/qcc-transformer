@@ -102,7 +102,28 @@ B=128 is 4 MiB of decode cache; Full-KV at 128K is 4.00 GiB. The bounded cache
 is therefore **1024x smaller at 128K** while still answering 16/18 records, and
 18/18 at 32 MiB (B=1024), a 128x reduction.
 
-### 3.3 State and speed accounting
+### 3.3 Negative controls
+
+Every control below uses the same prefill, the same records and the same decode
+path, so the only difference is the retention law.
+
+* `recent` (last-B tokens): **0/18** at every budget up to 1024. Retention is not
+  a recency artefact.
+* `random`, `keynorm` (largest key norm): 0 on all records tested.
+* `h2o` (cumulative causal attention mass over all prefill queries): works only
+  at 2048-4096 slots and never at small budgets. A needle that is only queried
+  *after* the haystack receives almost no prefill attention mass, so an online
+  heavy-hitter rule evicts it before the question arrives. This is exactly why
+  the question-aware observation window is needed.
+* `oracle_needle` (keep the needle tokens, sinks and a recent window, but not the
+  attention-selected context): correct at 32K, **wrong at 64K**. Keeping the fact
+  is not sufficient; the question-relevant slice of surrounding context matters.
+* Borda rank fusion of `obs_last` and `obs_mean` (`obs_union`, `union_v1.json`):
+  14/18 at B=128 and B=256, 16/18 at B=512 — *worse* than `obs_last` alone. Fusing
+  a strong ranking with a weaker one dilutes it; the plain final-query ranking is
+  the better estimator here.
+
+### 3.4 State and speed accounting
 
 Llama-3.2-1B cache geometry: `16 layers x 8 kv-heads x 64 dim x 2 (K,V) x 2 bytes
 = 32,768 bytes per token` for a full KV cache, i.e. `32,768 x B` bytes for a
@@ -148,6 +169,11 @@ Does not establish:
   128K-native checkpoint and is out of its native range at 1M.
 * **Integration.** The mechanism is not yet implemented in `qcc_transformer`;
   this is a standalone diagnostic harness.
+* **Nominal-length overshoot.** The 128K records are 131.0K-131.5K tokens, i.e.
+  marginally above the checkpoint's nominal 131072 limit (the generator targets
+  a length with a 3% tolerance). Full-KV answers every one of them, so the
+  retention comparison is not an artefact of prefix overflow, but future runs
+  should target 130K or tighten the tolerance.
 
 ## 5. Design implied for QCC
 
@@ -222,14 +248,19 @@ python benchmarks/benchmark_bounded_decode_frontier.py --lengths 32768 65536 131
   --budgets 128 256 512 1024 --seeds 101 102 103 104 105 106 \
   --pairs 2 --prefill-chunk 8192 --out artifacts/bounded-decode-frontier-aggregate-v2.json
 
+# Borda fusion control (obs_last + obs_mean)
+python benchmarks/benchmark_bounded_decode_frontier.py --lengths 32768 65536 131072 \
+  --policies obs_union --budgets 128 256 512 --seeds 101 102 103 104 105 106 \
+  --pairs 2 --prefill-chunk 8192 --out artifacts/bounded-decode-frontier-union-v1.json
+
 python benchmarks/summarize_bounded_decode.py \
   artifacts/bounded-decode-frontier-sweep-v1.json \
-  artifacts/bounded-decode-frontier-aggregate-v2.json
+  artifacts/bounded-decode-frontier-aggregate-v2.json \
+  artifacts/bounded-decode-frontier-union-v1.json
 ```
 
 Model path defaults to `/root/qcc/models/Llama-3.2-1B-Instruct`; override with
 `--model`. The harness needs only `torch` and `transformers` (no accelerate,
-no triton, no vLLM). Raw logs for the recorded runs are
-`aggregate_v2.log` and `sweep_v1.log` in the authoring workspace; the JSON
-files above contain every per-record prediction, selection statistic and
-timing.
+no triton, no vLLM). Each result JSON contains every per-record prediction,
+selection statistic and timing, so the tables above are recomputable from the
+committed files.
