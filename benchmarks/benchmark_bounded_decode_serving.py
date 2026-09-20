@@ -101,7 +101,8 @@ def obs_scores_batched(model, captured, cache, Lc, obs, mode):
         per_row.append(L.obs_scores(model, cap_b, shim, Lc, obs, mode))
     merged = []
     for li in range(len(per_row[0])):
-        merged.append(torch.cat([per_row[b][li] for b in range(B)], dim=0))
+        # each per-row entry is (kv_heads, L); stack so the batch dim is explicit
+        merged.append(torch.stack([per_row[b][li] for b in range(B)], dim=0))
     return merged
 
 
@@ -166,6 +167,7 @@ def main():
     ap.add_argument("--max-new", type=int, default=32)
     ap.add_argument("--prefill-chunk", type=int, default=8192)
     ap.add_argument("--seed", type=int, default=4242)
+    ap.add_argument("--load-in-4bit", action="store_true")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
 
@@ -173,7 +175,16 @@ def main():
     tok = AutoTokenizer.from_pretrained(args.model)
     TOK = tok
     L.TOKENIZER = tok
-    model = AutoModelForCausalLM.from_pretrained(args.model, dtype=torch.bfloat16).to("cuda").eval()
+    if args.load_in_4bit:
+        from transformers import BitsAndBytesConfig
+        qcfg = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4",
+                                  bnb_4bit_compute_dtype=torch.bfloat16,
+                                  bnb_4bit_use_double_quant=True)
+        model = AutoModelForCausalLM.from_pretrained(args.model, quantization_config=qcfg,
+                                                     dtype=torch.bfloat16, device_map={"": 0}).eval()
+        print("[setup] loaded NF4 (4-bit) weights", flush=True)
+    else:
+        model = AutoModelForCausalLM.from_pretrained(args.model, dtype=torch.bfloat16).to("cuda").eval()
     inner = model.lm_head
 
     class _LastTokenLMHead(nn.Module):
@@ -227,9 +238,9 @@ def main():
             except torch.cuda.OutOfMemoryError as exc:
                 entry["status"] = "oom"
                 entry["error"] = str(exc)[:160]
-            except RuntimeError as exc:
+            except Exception as exc:  # noqa: BLE001
                 entry["status"] = "error"
-                entry["error"] = str(exc)[:200]
+                entry["error"] = f"{type(exc).__name__}: {str(exc)[:200]}"
             torch.cuda.empty_cache()
             print(json.dumps(entry), flush=True)
             results.append(entry)

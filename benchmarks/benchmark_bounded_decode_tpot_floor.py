@@ -215,12 +215,23 @@ def main():
     ap.add_argument("--prefill-chunk", type=int, default=8192)
     ap.add_argument("--seed", type=int, default=9001)
     ap.add_argument("--modes", nargs="+", default=["dynamic", "static"])
+    ap.add_argument("--load-in-4bit", action="store_true",
+                    help="NF4 weights for *both* arms; a matched serving configuration")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
 
     tok = AutoTokenizer.from_pretrained(args.model)
     L.TOKENIZER = tok
-    model = AutoModelForCausalLM.from_pretrained(args.model, dtype=torch.bfloat16).to("cuda").eval()
+    if args.load_in_4bit:
+        from transformers import BitsAndBytesConfig
+        qcfg = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4",
+                                  bnb_4bit_compute_dtype=torch.bfloat16,
+                                  bnb_4bit_use_double_quant=True)
+        model = AutoModelForCausalLM.from_pretrained(args.model, quantization_config=qcfg,
+                                                     dtype=torch.bfloat16, device_map={"": 0}).eval()
+        print("[setup] loaded NF4 (4-bit) weights", flush=True)
+    else:
+        model = AutoModelForCausalLM.from_pretrained(args.model, dtype=torch.bfloat16).to("cuda").eval()
     inner = model.lm_head
 
     class _LastTokenLMHead(nn.Module):
@@ -254,7 +265,8 @@ def main():
     print(f"[setup] kept={kept} peak={torch.cuda.max_memory_allocated()/2**30:.2f}GiB", flush=True)
 
     results = {"context_tokens": Lc, "budget": args.budget, "kept_slots": kept,
-               "model": args.model, "max_new": args.max_new, "variants": {}}
+               "model": args.model, "max_new": args.max_new, "load_in_4bit": args.load_in_4bit,
+               "variants": {}}
 
     def record(name, state_bytes, runner):
         try:

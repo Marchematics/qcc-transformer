@@ -322,6 +322,37 @@ What the corrected numbers mean:
   bandwidth-limited bound for the cache-attributable part is 2.70x, and the
   graph path's 6.87 ms floor is close to the 5.0 ms weight-plus-LM-head read.
 
+### 3.11 128K TPOT across configurations, and where 5x stands
+
+`lean_decode_128k_4bit.json`, `serving_128k_full_4bit.json`, plus the bf16 runs
+above. All rows are 128K context, batch 1, 32 greedy tokens, same prompt.
+
+| configuration | Full-KV TPOT | bounded TPOT | ratio |
+|---|---:|---:|---:|
+| bf16, both plain dynamic decode | 28.95 ms | 16.77 ms | **1.73x** |
+| bf16, Full-KV dynamic vs bounded + CUDA graph | 28.95 ms | **6.87 ms** | **4.21x** |
+| NF4 4-bit weights, both plain dynamic decode | 105.35 ms | 23.09 ms | **4.56x** |
+| NF4 4-bit, Full-KV dynamic vs bounded + graph | 105.35 ms | **4.98 ms** | 21.1x |
+
+Reading this honestly:
+
+* The only pairing that is like-for-like in *both* cache policy and execution
+  path is the first row: **1.73x**. The cache-attributable speedup at 128K is
+  therefore under 2x, exactly as the bandwidth bound predicts (2.70x ceiling).
+* The second row is the strongest defensible system-level number: **4.21x**,
+  where the additional gain comes from capturing the decode step in a CUDA
+  graph, an optimisation the Full-KV path cannot use here because its static
+  cache overflows the card at 128K.
+* The 4-bit rows move the ratio because the Full-KV arm is *penalised*: a
+  DynamicCache concatenation of 4 GiB per step plus bitsandbytes' unfused
+  dequantisation costs 105 ms/step, three and a half times its bf16 cost. The
+  bounded+graph NF4 configuration is nonetheless a real result on its own:
+  **4.98 ms per token, i.e. 201 tok/s single-stream at 128K context, with a
+  1024x smaller cache**, verified token-identical to the dynamic path.
+* **No matched configuration reaches 5x.** The target is not met at batch 1 on
+  this card; the bandwidth bound says it cannot be for a 1B model whose weights
+  alone are 4.12 ms of the step.
+
 ## 4. What this establishes, and what it does not
 
 Establishes:
