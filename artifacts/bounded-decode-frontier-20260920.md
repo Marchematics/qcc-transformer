@@ -414,20 +414,38 @@ token document is assembled from local sources, prefilled exactly, and its last
 to anchor on, so the observation window is simply the last 64 prefix tokens (the
 SnapKV setting) and no lexical anchors are used.
 
-| cache | kept slots | NLL | perplexity | ppl ratio to Full-KV |
-|---|---:|---:|---:|---:|
-| Full-KV | 32,512 | 2.921 | 18.56 | 1.00x |
-| `obs_last` B=1024 | 1,024 | 3.393 | 29.76 | **1.60x** |
-| `obs_last` B=2048 | 2,048 | pending | pending | pending |
-| `obs_last` B=4096 | 4,096 | pending | pending | pending |
-| `obs_last` B=8192 | 8,192 | pending | pending | pending |
+Budget curve (`obs_last`, `lm_nll_32k*.json`):
 
-At a 3% budget the retention law costs 60% perplexity on general text, even
-though it preserves retrieval perfectly. That is the expected shape: a top-k
-cache selected by a 64-token observation window keeps what the recent context
-asks about, and long-range *language modelling* needs far more of the document
-than long-range *retrieval* does. It is also why the quality target should be
-read per task family rather than as one number.
+| cache | kept slots | share of context | perplexity | ratio to Full-KV |
+|---|---:|---:|---:|---:|
+| Full-KV | 32,512 | 100% | 24.23 | 1.00x |
+| `obs_last` | 1,024 | 3.1% | 42.31 | 1.75x |
+| `obs_last` | 2,048 | 6.3% | 37.51 | 1.55x |
+| `obs_last` | 4,096 | 12.6% | 32.38 | 1.34x |
+| `obs_last` | 8,192 | 25.2% | 23.83 | **0.98x** |
+
+Policy comparison at B=1024:
+
+| policy | perplexity | ratio |
+|---|---:|---:|
+| Full-KV | 24.23 | 1.00x |
+| `obs_mean` | 37.72 | 1.56x |
+| `obs_last` | 42.31 | 1.75x |
+| `recent` | 1053.5 | 43x |
+| `random` | 2787.4 | 115x |
+
+Three conclusions:
+
+* The retention law is **retrieval-specialised**. At the 3% budget that gives
+  100% NIAH retention, general language modelling costs 75% perplexity, and the
+  budget has to reach ~25% of the context before perplexity matches Full-KV
+  (0.98x, i.e. inside the noise of a 256-token evaluation).
+* `recent` and `random` are catastrophic for language modelling (43x and 115x),
+  confirming that the observation-window score is doing real selection work
+  rather than merely keeping the tail.
+* For language modelling `obs_mean` beats `obs_last` (1.56x vs 1.75x), the
+  opposite of the retrieval ordering — so the aggregation choice is
+  task-family dependent, and a serving configuration should pick per workload.
 
 ## 4. What this establishes, and what it does not
 
