@@ -4,6 +4,37 @@
 交接对象：下一位继续实现、评测或部署 QCC Transformer 的工程师/模型
 状态：代码已推送；99 gate 尚未通过；不要把当前结果包装成已达标结果。
 
+## 当前审计（2026-09-21 深夜）：撤回被纠正，TPOT 配置全表
+
+**纠正上一轮的撤回。** 之前说 StaticCache/CUDA-graph 路径 parity 不通过、耗时作废
+——那是错的：**parity 检查的参照实现本身坏了**。参照用的 `DynamicLayer()` 没有设
+`is_initialized=True`，于是 `get_seq_length()` 返回 0，HF 在第一次 update 时把保
+留的 K/V 覆盖掉，参照输出退化成 `'Tags\n }\n return'`，任何正确实现都会"不匹配"。
+修好该标志后 static 与 graph 两条路径都与 dynamic **逐 token 一致**（32K/128K 均
+通过），之前的耗时数字成立。报告 §3.7 保留了这次纠正的完整记录。
+
+**128K TPOT 全配置表**（batch 1，32 token，同一 prompt）：
+
+| 配置 | Full-KV | 有界 | 比值 |
+|---|---:|---:|---:|
+| bf16，两侧都用普通 dynamic decode | 28.95 ms | 16.77 ms | **1.73x** |
+| bf16，Full-KV dynamic vs 有界+CUDA graph | 28.95 ms | **6.87 ms** | **4.21x** |
+| NF4 4bit，两侧都用普通 dynamic decode | 105.35 ms | 23.09 ms | **4.56x** |
+| NF4 4bit，Full-KV dynamic vs 有界+graph | 105.35 ms | **4.98 ms** | 21.1x |
+
+结论：**没有任何"口径一致"的配置达到 5x**。真正的 like-for-like 只有第一行
+1.73x，与带宽上界 2.70x 吻合；4.21x 是"有界+graph 对 Full-KV 普通路径"，多出的
+部分来自 graph 消除了每步 Python/mask/cache-concat（Full-KV 在 128K 用不了
+static cache，会 OOM）；4bit 两行之所以比值大，是因为它**惩罚 Full-KV**（每步
+4 GiB 的 DynamicCache 拼接 + bnb 非融合反量化 = 105 ms/步，比 bf16 慢 3.5 倍）。
+但"有界+graph+NF4"本身是个真实结果：**4.98 ms/token，128K 下单流 201 tok/s，
+缓存小 1024 倍，parity 已验证**。
+
+环境：venv 已装 `bitsandbytes 0.50.2` 与 `accelerate`，两个 harness 都支持
+`--load-in-4bit`。注意本机有其它用户的 GPU 作业
+（`run_oracle_headroom_multitarget.py` 等），跑测量前先确认没有争用，否则会出现
+假 OOM 和 5-8 倍的耗时抖动。
+
 ## 当前审计（2026-09-21）：vt 差距已定位，LM 质量曲线已测
 
 **vt（variable tracking）的差距不是保留律造成的。** 四组实验
