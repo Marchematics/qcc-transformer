@@ -938,7 +938,16 @@ does, and every row records whether it was truncated.
 | configuration (Llama-3.2-1B, 4,608 slots, 80 records) | single_1 | multikey_2 | multikey_3 | vt | aggregate | worst task |
 |---|---:|---:|---:|---:|---:|---:|
 | attention ranking only (`lex_cap=0`) | 1.000 | 0.895 | 0.333 | 1.039 | **0.817** | 0.333 |
-| shipped: ranking + rare-string anchors | 1.000 | 1.000 | 1.000 | 1.028 | **1.007** | 1.000 |
+| + task-agnostic rarity anchors (`anchor_mode="rare"`) | 1.000 | 0.895 | **0.889** | 0.968 | **0.938** | 0.889 |
+| shipped: pattern anchors + chain following | 1.000 | 1.000 | 1.000 | 1.028 | **1.007** | 1.000 |
+
+The middle row matters most for generality. `anchor_mode="rare"` removes every
+task-shaped element: no UUID, hyphenated-identifier or long-number patterns, no
+assignment-chain following - a question token is a cue if the context contains it
+at most `max_occurrences` times. That alone lifts the hardest task from 0.333 to
+0.889 and the aggregate from 0.817 to 0.938, so the *mechanism* (look where the
+question's rare strings already appear) is what generalises, while the pattern
+classes and chain following are a +0.07 refinement on top of it.
 
 So the honest decomposition is: the observation-window ranking is what makes the
 law work at all - it is already exact on single-needle retrieval and on value
