@@ -350,7 +350,7 @@ def topk_indices(scores_layer, budget, nsink, nrecent, L, pool=1, dilate=0):
 
 def question_lexical_positions(tokenizer, prompt, n_question_tokens, max_positions=512,
                                min_word_len=6, max_occurrences=8, min_number_len=4,
-                               context_left=16, context_right=32):
+                               context_left=16, context_right=32, hops=0):
     """Token positions of context strings that also occur in the question.
 
     This is a deployable, causal prefilter: it only compares the prompt against
@@ -392,6 +392,7 @@ def question_lexical_positions(tokenizer, prompt, n_question_tokens, max_positio
         if 0 < len(occurrences) <= max_occurrences:
             rare.append((w, occurrences))
     hits = set()
+    identifiers = set()
     for w, occurrences in rare:
         for i in occurrences:
             if len(hits) >= max_positions:
@@ -399,8 +400,53 @@ def question_lexical_positions(tokenizer, prompt, n_question_tokens, max_positio
             for ti, (a, b) in enumerate(offsets):
                 if b > i and a < i + len(w):
                     hits.add(ti)
-    # the matched string is an anchor: keep a bounded neighbourhood so the
-    # value that follows the matched key is retained as well
+            if hops > 0:
+                line_start = prompt.rfind("\n", 0, i) + 1
+                line_end = prompt.find("\n", i)
+                line = prompt[line_start: line_end if line_end >= 0 else len(prompt)]
+                identifiers.update(re.findall(r"[A-Za-z][A-Za-z0-9_\-]{%d,}" % (min_word_len - 1), line))
+    # Chain following for value-tracking tasks: a value reaches other variables
+    # through assignment lines, so after anchoring the queried value we follow
+    # only identifiers that are *defined* somewhere in the context.  Restricting
+    # to defined symbols is what stops filler words from exploding the anchor
+    # set (a generic identifier scan was measured to blow past the cap and lose
+    # the answer entirely).
+    if hops > 0:
+        # Symbols are short (vt uses 3-5 character names), so the chain step uses
+        # its own minimal length; the `defined` filter is what excludes filler.
+        sym = r"[A-Za-z][A-Za-z0-9_\-]{1,}"
+        # a symbol is any identifier immediately followed by "=" (this captures
+        # "VAR NAME = ..." without having to know the task's keyword)
+        defined = set(re.findall(r"(" + sym + r")\s*=", prompt[:q_char_start]))
+        frontier = set()
+        for _w, occ in rare:
+            for i in occ:
+                ls = prompt.rfind("\n", 0, i) + 1
+                le = prompt.find("\n", i)
+                frontier |= set(re.findall(sym, prompt[ls: le if le >= 0 else len(prompt)]))
+        frontier &= defined
+        seen = set()
+        chain_hits: set[int] = set()
+        for _hop in range(hops):
+            if not frontier or len(hits) >= max_positions:
+                break
+            nxt = set()
+            for name in sorted(frontier):
+                start = 0
+                while len(hits) < max_positions:
+                    i = prompt.find(name, start, q_char_start)
+                    if i < 0:
+                        break
+                    start = i + 1
+                    ls = prompt.rfind("\n", 0, i) + 1
+                    le = prompt.find("\n", i)
+                    le = le if le >= 0 else len(prompt)
+                    for ti, (a, b) in enumerate(offsets):
+                        if b > ls and a < le:
+                            chain_hits.add(ti)   # whole lines need no dilation
+                    nxt |= set(re.findall(sym, prompt[ls:le]))
+            seen |= frontier
+            frontier = (nxt & defined) - seen
     # the matched string is an anchor; the answer usually follows it (a key is
     # followed by its value) so the right context is wider than the left
     expanded = set()
@@ -408,6 +454,8 @@ def question_lexical_positions(tokenizer, prompt, n_question_tokens, max_positio
         expanded.update(range(max(0, ti - context_left), min(n, ti + context_right + 1)))
         if len(expanded) >= max_positions:
             break
+    if hops > 0:
+        expanded |= chain_hits      # chain lines are already complete
     return sorted(expanded)[:max_positions]
 
 

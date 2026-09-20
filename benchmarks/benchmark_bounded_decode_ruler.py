@@ -32,7 +32,7 @@ except ImportError:  # authoring workspace layout
 
 
 def load_ruler(path, tasks, lengths, max_records=None, answer_prefix=True, tokenizer=None,
-               question_tokens=64):
+               question_tokens=64, hops=0):
     records = []
     for line in Path(path).read_text(encoding="utf-8").splitlines():
         if not line.strip():
@@ -64,7 +64,8 @@ def load_ruler(path, tasks, lengths, max_records=None, answer_prefix=True, token
             rec.answer_positions = [pos]
             rec.needle_positions = [pos]
         if tokenizer is not None:
-            rec.lexical_positions = L.question_lexical_positions(tokenizer, prompt, question_tokens)
+            rec.lexical_positions = L.question_lexical_positions(tokenizer, prompt, question_tokens,
+                                                               hops=hops)
         records.append(rec)
         if max_records and len(records) >= max_records:
             break
@@ -166,6 +167,7 @@ def main():
     ap.add_argument("--pool", type=int, default=7)
     ap.add_argument("--dilate", type=int, default=0)
     ap.add_argument("--lex-cap", type=int, default=128)
+    ap.add_argument("--hops", type=int, default=0)
     ap.add_argument("--key-chunk", type=int, default=4096)
     ap.add_argument("--max-new", type=int, default=24)
     ap.add_argument("--prefill-chunk", type=int, default=8192)
@@ -193,7 +195,7 @@ def main():
 
     records = load_ruler(args.ruler_jsonl, args.tasks, args.lengths,
                          args.max_records, not args.no_answer_prefix, tokenizer=tokenizer,
-                         question_tokens=args.obs)
+                         question_tokens=args.obs, hops=args.hops)
     print(f"[setup] {len(records)} RULER records", flush=True)
 
     rows = []
