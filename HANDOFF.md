@@ -16,10 +16,21 @@ cache, logits = compile_bounded_cache(model, input_ids,
                                       tokenizer=tok)
 ```
 
+`attention_mask` 可以是 padded batch（左/右 padding 都可以）：选择先在每条请求自己的
+真实 token 上做，行宽不同时短行用**自身最后槽的副本**补齐——两个完全相同的 `(key, value)`
+槽会均分原来的 softmax 权重，所以补齐后与不补齐是同一次计算；副本在
+`cache.qcc_attention_mask` 里标成 padding。ragged batch 解码时必须自己给位置：
+`position_ids = cache.qcc_prompt_lengths[:, None] + step`（压缩后的 cache 比 prompt 短，
+任何 mask 的 cumsum 都推不出真实长度）。验证见
+`benchmarks/validate_retention_batch.py`（报告 §3.19）：7,730 与 15,584 两行打包后每行
+cache 与单独编译**逐位相同**，唯一分歧是 shipped 配置下 24 步里第 23 步、top-2 margin
+恰为 0.0 的 bf16 batch GEMM 平局，两行得分都仍是 1.0。
+
 零新增参数、不动权重。验证三层：
-1. `tests/test_retention.py` 五个 CPU 测试（小随机 Llama）：统一宽度、全保留时与
-   未压缩 prefill 逐 token 一致、sink/近期强制保留、锚点召回、赋值链跟随；开发
-   过程中它们抓出打包版 `last` 打分的 einsum 秩错误；
+1. `tests/test_retention.py` 七个 CPU 测试（小随机 Llama）：统一宽度、全保留时与
+   未压缩 prefill 逐 token 一致、sink/近期强制保留、锚点召回、赋值链跟随，以及
+   ragged batch 在两种 padding 下与逐行编译逐槽一致；开发过程中它们抓出打包版
+   `last` 打分的 einsum 秩错误；
 2. `benchmarks/validate_retention_api.py`：4 条真实 RULER 记录，4/4 得分 1.0，
    4608 槽，2.3–3.9 s/条，峰值 6.2–7.3 GiB；
 3. `benchmarks/validate_retention_full.py`：20 条（每任务 5 条）与 benchmark

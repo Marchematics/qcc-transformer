@@ -713,14 +713,17 @@ cache, logits = compile_bounded_cache(model, input_ids, config, tokenizer=tokeni
 It adds no parameters and never touches the pretrained weights, so the retrofit
 property is unchanged. Verification:
 
-* `tests/test_retention.py` - five CPU tests on a tiny randomly-initialised
+* `tests/test_retention.py` - seven CPU tests on a tiny randomly-initialised
   Llama, covering uniform width, "keep everything reproduces the uncompiled
-  prefill's tokens", forced sinks/recent, anchor recall of a repeated key, and
-  assignment-chain following. They caught a real bug during development: the
-  packaged `last`-query scoring had a wrong einsum operand rank.
+  prefill's tokens", forced sinks/recent, anchor recall of a repeated key,
+  assignment-chain following, and (3.19) a ragged batch matching the per-row
+  compile slot for slot under both padding sides. They caught a real bug during
+  development: the packaged `last`-query scoring had a wrong einsum operand rank.
 * `validate_packaged.py` - four real RULER records at ~12K through the packaged
   API: score 1.0 on all four, 4608 slots retained, 2.3-3.9 s per record,
   6.2-7.3 GiB peak.
+* `validate_retention_batch.py` - a ragged two-record batch against the same
+  records compiled alone, reported in 3.19.
 * The repository's full test suite passes (the one pre-existing failure was a
   test bug: it called `delattr` on an *inherited* attribute and asserted an
   empty-cache return value that Transformers 5.x no longer provides; both are
@@ -774,6 +777,64 @@ claim is a number anyone can recompute rather than a chosen figure.
   latency effect but a hard memory wall.
 * The 64-request row is the memory-limited ceiling (7.92 GiB peak), not an SLA
   failure.
+
+### 3.19 Ragged batches: padding is removed before selection, and the filler is exact
+
+Serving rarely hands over equal-length prompts, so the packaged API accepts a
+padded batch:
+
+```python
+cache, logits = compile_bounded_cache(model, batch, config, tokenizer=tokenizer,
+                                      attention_mask=attention_mask)
+# one rectangular cache; reconstruct each row's own positions for decode:
+positions = cache.qcc_prompt_lengths[:, None] + step
+```
+
+* **Selection runs per request on its real tokens.**  Each row is sliced to its
+  masked positions before anything else, so the padding side is irrelevant
+  (left or right), the observation window is that request's own last
+  `observation_window` tokens, and padding is never a candidate and never counts
+  as an attention sink.
+* **Ragged rows merge exactly.**  Rows of different lengths compile to different
+  widths; the short rows are filled up to the widest row by duplicating their own
+  last retained slot.  Duplication is not an approximation: two identical
+  `(key, value)` slots split the original slot's softmax weight between them, so
+  attention over the padded cache is the same computation as attention over the
+  unpadded one.  The filler is marked as padding in `cache.qcc_attention_mask`,
+  which is why it can also simply be masked out.
+* **Positions must still be told, because the cache is shorter than the prompt.**
+  A 15.6K prompt compiled to 4,608 slots cannot recover "15,584" from any
+  cumulative sum over a 0/1 mask, so `cache.qcc_prompt_lengths` is returned and
+  the caller adds it to the step.  With `generate`, which derives positions from
+  the mask, a ragged batch would need an explicit position source; the manual
+  decode loop is the supported path.
+
+`benchmarks/validate_retention_batch.py` packs two RULER records (7,730 and
+15,584 tokens) into one left-padded batch and compares every level against the
+same records compiled and decoded alone:
+
+| config | row | prompt | slots | filler | cache == solo | filler == own last slot | prefill logits == solo | row sliced from merged cache == solo | 2-row batch decode == solo | score |
+|---|---:|---:|---:|---:|---|---|---|---|---|---:|
+| budget 16384 | 0 | 7,730 | 7,730 | 7,854 | yes | yes | yes | yes (24/24 steps) | yes | 1.0 |
+| budget 16384 | 1 | 15,584 | 15,584 | 0 | yes | n/a | yes | yes | yes | 1.0 |
+| 4096 + 512 | 0 | 7,730 | 4,608 | 0 | yes | n/a | yes | yes | step 23 only | 1.0 |
+| 4096 + 512 | 1 | 15,584 | 4,608 | 0 | yes | n/a | yes | yes | yes | 1.0 |
+
+* The compiled cache of every row is **bit-identical** to compiling that row
+  alone, in both the filler-heavy configuration (7,854 duplicated slots) and the
+  shipped one, and a row sliced out of the merged cache decodes to exactly the
+  solo tokens in all four cases.  The merged cache is therefore a faithful
+  single-row cache, and batching does not change what is retained.
+* The one divergence is honest and bounded: in the shipped configuration the
+  two-row batch differs from solo decode at step 23 of 24, at a step whose top-2
+  margin is **0.0** - a perfect tie broken differently because a batched bf16
+  GEMM is not bit-identical to a single-row one (max per-step logit delta
+  0.34-0.77 across all rows).  Both rows still score 1.0 and the retained slots
+  are identical, so this is the usual batched-inference tie-break, not retention
+  error.
+* Cost: compilation runs one chunked prefill per request (linear in the batch,
+  4-6 s for these two rows on the A10).  Decode is unaffected - every row pays
+  the same bounded width.
 
 ## 4. What this establishes, and what it does not
 

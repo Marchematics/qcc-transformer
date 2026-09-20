@@ -126,3 +126,103 @@ def test_lexical_anchors_follow_assignment_chains():
                (tokenizer(prompt).offset_mapping[i] for i in anchors)}
     for name in ("A", "B", "C", "D"):
         assert any(name == word for word in covered), (name, sorted(covered))
+
+
+@torch.no_grad()
+def greedy_from_cache(model, cache, first_token, steps, attention_mask=None):
+    """Greedy decode from a compiled cache, HF-style.
+
+    Position ids come from the attention mask's cumulative sum, exactly as
+    ``prepare_inputs_for_generation`` derives them for a padded batch.
+    """
+    generated = []
+    tokens = first_token
+    mask = attention_mask
+    for _ in range(steps):
+        past = cache.get_seq_length()
+        if mask is None:
+            positions = torch.full((tokens.shape[0], 1), past, dtype=torch.long)
+        else:
+            positions = (mask.long().cumsum(-1) - 1)[:, -1:]
+        out = model(tokens, past_key_values=cache, position_ids=positions,
+                    cache_position=torch.arange(past, past + 1), use_cache=True)
+        tokens = out.logits[:, -1:].argmax(-1)
+        generated.append(tokens)
+        if mask is not None:
+            mask = torch.cat([mask, torch.ones_like(mask[:, :1])], dim=-1)
+    return torch.cat(generated, dim=1)
+
+
+def _rag_batch(side):
+    """Two requests of different lengths, padded on ``side``."""
+    model = tiny_model()
+    ids_long = torch.randint(0, 256, (1, 96))
+    ids_short = torch.randint(0, 256, (1, 60))
+    width = ids_long.shape[1]
+    pad = torch.zeros(1, width - ids_short.shape[1], dtype=torch.long)
+    if side == "right":
+        batch = torch.cat([ids_short, pad], dim=1)
+    else:
+        batch = torch.cat([pad, ids_short], dim=1)
+    batch = torch.cat([ids_long, batch], dim=0)
+    mask = (batch != 0).long()
+    mask[0] = 1                                   # row 0 is full-length
+    return model, ids_long, ids_short, batch, mask
+
+
+def test_batched_compile_matches_per_row_compile():
+    config = RetentionConfig(budget=24, lex_cap=0, observation_window=8,
+                             prefill_chunk=32, key_chunk=32)
+    for side in ("left", "right"):
+        model, ids_long, ids_short, batch, mask = _rag_batch(side)
+        cache, logits = compile_bounded_cache(
+            model, batch, config, attention_mask=mask)
+        assert cache.qcc_attention_mask.shape == (2, cache.get_seq_length())
+        assert cache.qcc_prompt_lengths.tolist() == [96, 60]
+
+        for row, ids in enumerate((ids_long, ids_short)):
+            reference, reference_logits = compile_bounded_cache(model, ids, config)
+            slots = reference.get_seq_length()
+            assert cache.qcc_attention_mask[row].sum() == slots
+            for got, want in zip(cache.layers, reference.layers):
+                assert torch.equal(got.keys[row: row + 1], want.keys), side
+                assert torch.equal(got.values[row: row + 1], want.values), side
+            assert torch.equal(logits[row: row + 1], reference_logits), side
+
+            # duplicated filler must not change what the row attends to
+            mask_row = torch.zeros(1, cache.get_seq_length(), dtype=torch.long)
+            mask_row[0, :slots] = 1
+            batched = greedy_from_cache(
+                model, _clone_cache(cache, row), logits[row: row + 1].argmax(-1),
+                3, mask_row)
+            alone = greedy_from_cache(
+                model, reference, reference_logits.argmax(-1), 3)
+            assert torch.equal(batched, alone), (side, row, batched, alone)
+
+
+@torch.no_grad()
+def _clone_cache(cache, row):
+    """The single row's slot of a merged cache, as its own cache."""
+    from transformers import DynamicCache
+
+    clone = DynamicCache()
+    for layer_idx, layer in enumerate(cache.layers):
+        clone.update(layer.keys[row: row + 1].clone(),
+                     layer.values[row: row + 1].clone(), layer_idx)
+    return clone
+
+
+def test_uniform_batch_has_no_padding_slots():
+    model = tiny_model()
+    ids = torch.randint(1, 256, (2, 80))
+    config = RetentionConfig(budget=16, lex_cap=4, observation_window=8,
+                             prefill_chunk=32, key_chunk=32)
+    cache, logits = compile_bounded_cache(model, ids, config)
+    assert cache.get_seq_length() == 20
+    assert bool(cache.qcc_attention_mask.all())
+    assert logits.shape[0] == 2
+    for row in range(2):
+        reference, reference_logits = compile_bounded_cache(model, ids[row: row + 1], config)
+        assert torch.equal(logits[row: row + 1], reference_logits)
+        assert torch.equal(cache.layers[0].keys[row: row + 1],
+                           reference.layers[0].keys)

@@ -372,14 +372,9 @@ def prune_cache(cache, indices: list[torch.Tensor]) -> None:
 
 
 @torch.no_grad()
-def compile_bounded_cache(model, input_ids: torch.Tensor, config: RetentionConfig,
-                          tokenizer=None):
-    """Exact prefill, then compile the decode cache down to ``budget`` slots.
-
-    Returns ``(cache, last_logits)``.  Decode against ``cache`` exactly as
-    against any other Hugging Face cache; each request keeps its own absolute
-    positions because the retained keys carry their original rotary phases.
-    """
+def _compile_one(model, input_ids: torch.Tensor, config: RetentionConfig,
+                 tokenizer=None):
+    """Compile a single unpadded request; ``(cache, last_logits)``."""
     length = input_ids.shape[1]
     cache, last_logits, captured = prefill_capture(
         model, input_ids, config.observation_window, config.prefill_chunk)
@@ -391,3 +386,96 @@ def compile_bounded_cache(model, input_ids: torch.Tensor, config: RetentionConfi
     indices = select_indices(scores, cache, length, config, anchors)
     prune_cache(cache, indices)
     return cache, last_logits
+
+
+@torch.no_grad()
+def compile_bounded_cache(model, input_ids: torch.Tensor, config: RetentionConfig,
+                          tokenizer=None, attention_mask: torch.Tensor | None = None):
+    """Exact prefill, then compile the decode cache down to ``budget`` slots.
+
+    ``input_ids`` is a single sequence ``(1, L)`` or a batch ``(B, L)``.
+    ``attention_mask`` marks each row's real tokens; when it is given the
+    padding is *removed before selection*, so it does not matter whether the
+    batch is left- or right-padded: every request is compiled from exactly its
+    own tokens, and its observation window is that request's own last
+    ``observation_window`` tokens.
+
+    Rows of different lengths compile to different retained widths.  The
+    returned cache is a single rectangular one, so shorter rows are filled up
+    to the widest row by **duplicating their own retained slots**.  That filler
+    is not a hack: two identical ``(key, value)`` slots split the original
+    slot's softmax weight between them, so attention over a duplicated cache is
+    numerically identical to attention over the unpadded one.  The filler slots
+    are nevertheless marked as padding in ``cache.qcc_attention_mask``.
+
+    Returns ``(cache, last_logits)``.  Decode against ``cache`` exactly as
+    against any other Hugging Face cache; each request keeps its own absolute
+    positions because the retained keys carry their original rotary phases.
+    ``cache.qcc_prompt_lengths`` (the true prompt length of every row) and
+    ``cache.qcc_attention_mask`` (1 for a real slot, 0 for filler) are always
+    attached, so a single-request call needs no special case.
+
+    A ragged batch has one more requirement: the next token of row ``r`` has to
+    be given the absolute position ``lengths[r] + step``, because the compiled
+    cache is shorter than the prompt and no cumulative sum over a mask can
+    recover that.  ``cache.qcc_prompt_lengths`` holds those true lengths, so
+    decode with ``position_ids = cache.qcc_prompt_lengths[:, None] + step``
+    (``cache.qcc_attention_mask`` masks the duplicated filler and may be grown
+    with a one per step, but it is not a position source).
+
+    Compilation runs one exact chunked prefill per request, so its cost is
+    linear in the batch; what decode pays is the same for every row.
+    """
+    if input_ids.dim() == 1:
+        input_ids = input_ids.unsqueeze(0)
+    if attention_mask is None:
+        attention_mask = torch.ones_like(input_ids)
+    mask = attention_mask.bool()
+    lengths = [int(row.sum()) for row in mask]
+    if not lengths or min(lengths) == 0:
+        raise ValueError("every row needs at least one real token")
+    prompt_lengths = torch.tensor(lengths, dtype=torch.long, device=input_ids.device)
+
+    caches, logits = [], []
+    for row, length in enumerate(lengths):
+        ids = (input_ids[row: row + 1] if length == input_ids.shape[1]
+               else input_ids[row][mask[row]].unsqueeze(0))
+        row_cache, row_logits = _compile_one(model, ids, config, tokenizer)
+        caches.append(row_cache)
+        logits.append(row_logits)
+
+    if len(caches) == 1:
+        cache = caches[0]
+        slots = cache.get_seq_length()
+        cache.qcc_attention_mask = torch.ones(1, slots, dtype=torch.long,
+                                              device=input_ids.device)
+        cache.qcc_prompt_lengths = prompt_lengths
+        return cache, logits[0]
+
+    slots = [cache.layers[0].keys.shape[2] for cache in caches]
+    width = max(slots)
+    rows = []
+    for layer_idx in range(len(caches[0].layers)):
+        keys, values = [], []
+        for cache, kept in zip(caches, slots):
+            layer = cache.layers[layer_idx]
+            k, v = layer.keys, layer.values
+            if kept < width:  # exact filler: a duplicate of this row's own last slot
+                duplicate = torch.arange(width, device=k.device).clamp_(max=kept - 1)
+                k = k.index_select(2, duplicate)
+                v = v.index_select(2, duplicate)
+            keys.append(k)
+            values.append(v)
+        rows.append((torch.cat(keys, dim=0), torch.cat(values, dim=0)))
+
+    from transformers import DynamicCache
+
+    merged = DynamicCache()
+    for layer_idx, (keys, values) in enumerate(rows):
+        merged.update(keys, values, layer_idx)
+    merged.qcc_attention_mask = torch.zeros(
+        len(caches), width, dtype=torch.long, device=input_ids.device)
+    for row, kept in enumerate(slots):
+        merged.qcc_attention_mask[row, :kept] = 1
+    merged.qcc_prompt_lengths = prompt_lengths
+    return merged, torch.cat(logits, dim=0)
