@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import inspect
 import re
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 
 import torch
@@ -40,6 +41,7 @@ import torch.nn.functional as F
 
 __all__ = [
     "RetentionConfig",
+    "fixed_rope_length",
     "forward_accepts",
     "observation_scores",
     "lexical_anchors",
@@ -155,6 +157,92 @@ def prefill_capture(model, input_ids: torch.Tensor, observation_window: int,
     return cache, last_logits, tails
 
 
+def _head_dim(model, attn) -> int:
+    return int(getattr(attn, "head_dim",
+                       model.config.hidden_size // model.config.num_attention_heads))
+
+
+def _scaling(attn, head_dim: int) -> float:
+    return float(getattr(attn, "scaling", head_dim ** -0.5))
+
+
+def _query_states(attn, hidden: torch.Tensor, num_heads: int,
+                  head_dim: int) -> torch.Tensor:
+    """``(num_heads, T, head_dim)`` queries of one layer, before rotary.
+
+    Handles a split ``q_proj`` and the Q slice of a fused ``qkv_proj`` (Phi-3),
+    plus a per-head ``q_norm`` (Qwen3) that is applied before RoPE.
+    """
+    if hasattr(attn, "q_proj"):
+        query = attn.q_proj(hidden)
+    else:
+        weight = attn.qkv_proj.weight[: num_heads * head_dim]
+        bias = getattr(attn.qkv_proj, "bias", None)
+        query = F.linear(hidden, weight,
+                         None if bias is None else bias[: num_heads * head_dim])
+    query = query.view(hidden.shape[0], num_heads, head_dim).transpose(0, 1)
+    norm = getattr(attn, "q_norm", None)
+    return query if norm is None else norm(query)
+
+
+def _cos_sin(model, attn, x: torch.Tensor, positions: torch.Tensor):
+    """``(1, T, head_dim)`` rotary tables from whichever module owns them.
+
+    Llama/Qwen keep them on the model, Phi-3 on each attention module.
+    """
+    module = getattr(getattr(model, "model", None), "rotary_emb", None)
+    if module is None:
+        module = attn.rotary_emb
+    cos, sin = module(x, positions.unsqueeze(0))
+    return cos[0].unsqueeze(0), sin[0].unsqueeze(0)
+
+
+class _PinnedRope(torch.nn.Module):
+    """Rotary embedding with its factor-selecting length pinned."""
+
+    def __init__(self, inner, seq_len: int):
+        super().__init__()
+        self.inner = inner
+        self.seq_len = seq_len
+
+    def forward(self, x, position_ids, seq_len=None):
+        del seq_len
+        return self.inner(x, position_ids, seq_len=self.seq_len)
+
+
+@contextmanager
+def fixed_rope_length(model, total_length: int):
+    """Make chunked prefill rope-identical to a one-pass prefill.
+
+    Phi-3.5's LongRoPE picks its short factors for any call whose length is at
+    most ``original_max_position_embeddings`` and its long factors above that.
+    A chunked prefill therefore gives the early chunks the *short* factors while
+    a one-pass forward over the whole prompt would give every position the long
+    ones.  Pinning every rotary call to the true prompt length restores the
+    one-pass semantics; models without ``longrope`` scaling are untouched and
+    the context manager yields whether it changed anything.  Both arms of a
+    comparison must run inside the same context.
+    """
+    scaling = getattr(model.config, "rope_scaling", None) or {}
+    original = getattr(model.config, "original_max_position_embeddings", None)
+    if scaling.get("type") != "longrope" or original is None or total_length <= original:
+        yield False
+        return
+    swapped = []
+    for layer in model.model.layers:
+        attention = getattr(layer, "self_attn", None)
+        rope = getattr(attention, "rotary_emb", None)
+        if rope is None:
+            continue
+        attention.rotary_emb = _PinnedRope(rope, int(total_length))
+        swapped.append((attention, rope))
+    try:
+        yield True
+    finally:
+        for attention, rope in swapped:
+            attention.rotary_emb = rope
+
+
 @torch.no_grad()
 def observation_scores(model, captured: dict[int, torch.Tensor], cache,
                        length: int, config: RetentionConfig) -> list[torch.Tensor]:
@@ -162,7 +250,6 @@ def observation_scores(model, captured: dict[int, torch.Tensor], cache,
     num_heads = model.config.num_attention_heads
     kv_heads = cache.layers[0].keys.shape[1]
     group = num_heads // kv_heads
-    head_dim = model.model.layers[0].self_attn.head_dim
     key_positions = torch.arange(length, device=cache.layers[0].keys.device)
     neg = -1e30
     scores = []
@@ -170,21 +257,28 @@ def observation_scores(model, captured: dict[int, torch.Tensor], cache,
         hidden = captured[layer_idx]
         n_obs = hidden.shape[1]
         attn = model.model.layers[layer_idx].self_attn
-        query = attn.q_proj(hidden[0]).view(n_obs, num_heads, head_dim).transpose(0, 1)
+        head_dim = _head_dim(model, attn)
+        scale = _scaling(attn, head_dim)
+        query = _query_states(attn, hidden[0], num_heads, head_dim)
         positions = torch.arange(length - n_obs, length, device=hidden.device)
-        cos, sin = model.model.rotary_emb(hidden, positions.unsqueeze(0))
-        query = _apply_rope(query, cos[0].unsqueeze(0), sin[0].unsqueeze(0))
+        cos, sin = _cos_sin(model, attn, hidden, positions)
+        query = _apply_rope(query, cos, sin)
         keys = layer.keys[0]
 
+        grouping = (kv_heads, group, n_obs, head_dim)
         if config.scoring == "last":
             # for a fixed query the softmax denominator is constant across keys,
-            # so ranking by the raw final-query score equals ranking by weight
+            # so ranking by the raw final-query score equals ranking by weight.
+            # The singleton query axis is kept so that this is the *same*
+            # contraction as the mean/max path (and as the benchmark harness),
+            # not merely the same arithmetic: an algebraically equal einsum with
+            # a different operand shape rounds differently and flips near-ties.
             parts = []
-            final_query = query[:, -1:, :].reshape(kv_heads, group, head_dim)
+            final_query = query.reshape(grouping)[:, :, -1:, :]
             for start in range(0, length, config.key_chunk):
                 end = min(length, start + config.key_chunk)
-                logits = torch.einsum("god,hld->hgol", final_query.float(),
-                                      keys[:, start:end].float()) * attn.scaling
+                logits = torch.einsum("hgod,hld->hgol", final_query.float(),
+                                      keys[:, start:end].float()) * scale
                 valid = key_positions[start:end][None, :] <= positions[-1]
                 logits = logits.masked_fill(~valid[None, None, :, :], neg).amax(dim=1)
                 parts.append(logits[:, 0, :])
@@ -196,7 +290,7 @@ def observation_scores(model, captured: dict[int, torch.Tensor], cache,
         denominator = torch.zeros_like(running_max)
         for start in range(0, length, config.key_chunk):
             end = min(length, start + config.key_chunk)
-            logits = torch.einsum("hgod,hld->hgol", qf.float(), keys[:, start:end].float()) * attn.scaling
+            logits = torch.einsum("hgod,hld->hgol", qf.float(), keys[:, start:end].float()) * scale
             valid = key_positions[start:end][None, :] <= positions[:, None]
             logits = logits.masked_fill(~valid[None, None, :, :], neg)
             block_max = logits.amax(dim=-1)
@@ -208,7 +302,7 @@ def observation_scores(model, captured: dict[int, torch.Tensor], cache,
         acc = torch.empty((kv_heads, length), device=hidden.device)
         for start in range(0, length, config.key_chunk):
             end = min(length, start + config.key_chunk)
-            logits = torch.einsum("hgod,hld->hgol", qf.float(), keys[:, start:end].float()) * attn.scaling
+            logits = torch.einsum("hgod,hld->hgol", qf.float(), keys[:, start:end].float()) * scale
             valid = key_positions[start:end][None, :] <= positions[:, None]
             logits = logits.masked_fill(~valid[None, None, :, :], neg)
             weights = torch.exp(logits - running_max[..., None]) / denominator[..., None]

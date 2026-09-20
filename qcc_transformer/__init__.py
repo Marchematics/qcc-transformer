@@ -20,6 +20,7 @@ from .model import (
 from .retention import (
     RetentionConfig,
     compile_bounded_cache,
+    fixed_rope_length,
     lexical_anchors,
     observation_scores,
     prune_cache,

@@ -226,3 +226,62 @@ def test_uniform_batch_has_no_padding_slots():
         assert torch.equal(logits[row: row + 1], reference_logits)
         assert torch.equal(cache.layers[0].keys[row: row + 1],
                            reference.layers[0].keys)
+
+
+def test_query_states_reads_a_fused_qkv_projection():
+    """Phi-3 has no q_proj; the Q slice of qkv_proj must be picked out."""
+    import torch.nn as nn
+
+    from qcc_transformer.retention import _query_states
+
+    heads, head_dim = 4, 8
+    attn = nn.Module()
+    attn.qkv_proj = nn.Linear(heads * head_dim, 3 * heads * head_dim, bias=True)
+    hidden = torch.randn(3, heads * head_dim)
+    got = _query_states(attn, hidden, heads, head_dim)
+    want = attn.qkv_proj(hidden)[..., : heads * head_dim]
+    want = want.view(3, heads, head_dim).transpose(0, 1)
+    assert got.shape == (heads, 3, head_dim)
+    assert torch.allclose(got, want)
+
+
+def test_fixed_rope_length_pins_only_longrope_checkpoints():
+    import torch.nn as nn
+
+    from qcc_transformer.retention import fixed_rope_length
+
+    class Recorder(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.seen = []
+
+        def forward(self, x, position_ids, seq_len=None):
+            self.seen.append(seq_len)
+            return x, x
+
+    def stub(rope_scaling, original=4096):
+        model = nn.Module()
+        model.config = type("C", (), {"rope_scaling": rope_scaling,
+                                      "original_max_position_embeddings": original})()
+        model.model = nn.Module()
+        model.model.layers = nn.ModuleList()
+        for _ in range(2):
+            layer = nn.Module()
+            layer.self_attn = nn.Module()
+            layer.self_attn.rotary_emb = Recorder()
+            model.model.layers.append(layer)
+        return model
+
+    model = stub({"type": "longrope"})
+    x, positions = torch.zeros(1, 1, 8), torch.arange(4).unsqueeze(0)
+    with fixed_rope_length(model, 20000) as pinned:
+        assert pinned
+        model.model.layers[0].self_attn.rotary_emb(x, positions)
+    assert model.model.layers[0].self_attn.rotary_emb.seen == [20000]
+    assert isinstance(model.model.layers[0].self_attn.rotary_emb, Recorder)
+
+    short = stub({"type": "longrope"})
+    with fixed_rope_length(short, 2048) as pinned:
+        assert not pinned                      # short prompts keep the checkpoint's own choice
+    with fixed_rope_length(stub(None), 20000) as pinned:
+        assert not pinned                      # not a LongRoPE checkpoint

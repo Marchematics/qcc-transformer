@@ -1,0 +1,460 @@
+{
+ "harness_file": "artifacts/bounded-decode-frontier-ruler-v6.json",
+ "package_file": "artifacts/bounded-decode-frontier-multimodel-llama1b.json",
+ "policy": "lex_obs",
+ "budget": 4096,
+ "arm": "bounded",
+ "compared": 80,
+ "unmatched_package_rows": 0,
+ "predictions_identical": 50,
+ "partial_agreement": 69,
+ "strict_agreement": 73,
+ "package_mean_partial": 0.7725,
+ "harness_mean_partial": 0.765,
+ "per_task": {
+  "niah_multikey_2": {
+   "records": 20,
+   "identical": 19,
+   "package_mean_partial": 1.0,
+   "harness_mean_partial": 0.95
+  },
+  "niah_multikey_3": {
+   "records": 20,
+   "identical": 2,
+   "package_mean_partial": 0.5,
+   "harness_mean_partial": 0.45
+  },
+  "niah_single_1": {
+   "records": 20,
+   "identical": 16,
+   "package_mean_partial": 1.0,
+   "harness_mean_partial": 1.0
+  },
+  "vt": {
+   "records": 20,
+   "identical": 13,
+   "package_mean_partial": 0.59,
+   "harness_mean_partial": 0.66
+  }
+ },
+ "differences": [
+  {
+   "task": "niah_multikey_2",
+   "prompt_tokens": 23382,
+   "harness_prediction": "7113484.",
+   "package_prediction": "9116227.",
+   "harness_partial": 0.0,
+   "package_partial": 1.0,
+   "harness_strict": 0.0,
+   "package_strict": 1.0,
+   "outputs": [
+    "9116227"
+   ]
+  },
+  {
+   "task": "niah_multikey_3",
+   "prompt_tokens": 11685,
+   "harness_prediction": "f9b81b81-b24d-4b46-bdba-f5f787343daf.\nOne of the special mag",
+   "package_prediction": "f9b81b81-b24d-4b46-bdba-f5f787343daf.",
+   "harness_partial": 1.0,
+   "package_partial": 1.0,
+   "harness_strict": 1.0,
+   "package_strict": 1.0,
+   "outputs": [
+    "f9b81b81-b24d-4b46-bdba-f5f787343daf"
+   ]
+  },
+  {
+   "task": "niah_multikey_3",
+   "prompt_tokens": 11678,
+   "harness_prediction": "41004534-dab4-440d-8a49-0d5b1afba8f8.\nOne of the special mag",
+   "package_prediction": "41004534-dab4-440d-8a49-0d5b1afba8f8.",
+   "harness_partial": 1.0,
+   "package_partial": 1.0,
+   "harness_strict": 1.0,
+   "package_strict": 1.0,
+   "outputs": [
+    "41004534-dab4-440d-8a49-0d5b1afba8f8"
+   ]
+  },
+  {
+   "task": "niah_multikey_3",
+   "prompt_tokens": 11694,
+   "harness_prediction": "0f607de8-5596-4277-b092-39eafadf5526.",
+   "package_prediction": "0x0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c",
+   "harness_partial": 0.0,
+   "package_partial": 0.0,
+   "harness_strict": 0.0,
+   "package_strict": 0.0,
+   "outputs": [
+    "9b84e2c0-b782-4d38-9e13-f215c85b4657"
+   ]
+  },
+  {
+   "task": "niah_multikey_3",
+   "prompt_tokens": 10189,
+   "harness_prediction": "44ee8097-f8ac-4b81-8d0a-9e9cabe91379.",
+   "package_prediction": "7e9a0715-6468-4807-a51d-bf8f8b2b2dcc.",
+   "harness_partial": 0.0,
+   "package_partial": 1.0,
+   "harness_strict": 0.0,
+   "package_strict": 1.0,
+   "outputs": [
+    "7e9a0715-6468-4807-a51d-bf8f8b2b2dcc"
+   ]
+  },
+  {
+   "task": "niah_multikey_3",
+   "prompt_tokens": 23353,
+   "harness_prediction": "a01a8e04-d157-4536-974b-699ba31f70a8.",
+   "package_prediction": "3f4ed69f-d8ef-4b60-9288-a18603422835.",
+   "harness_partial": 1.0,
+   "package_partial": 0.0,
+   "harness_strict": 1.0,
+   "package_strict": 0.0,
+   "outputs": [
+    "a01a8e04-d157-4536-974b-699ba31f70a8"
+   ]
+  },
+  {
+   "task": "niah_multikey_3",
+   "prompt_tokens": 23465,
+   "harness_prediction": "137a06ca-287d-4d5f-a0c3-86c6f95a3a92. The special magic uuid",
+   "package_prediction": "137a06ca-287d-4d5f-a0c3-86c6f95a3a92.",
+   "harness_partial": 0.0,
+   "package_partial": 0.0,
+   "harness_strict": 0.0,
+   "package_strict": 0.0,
+   "outputs": [
+    "359de7a2-8efc-4945-bdb6-0ae78bc11c41"
+   ]
+  },
+  {
+   "task": "niah_multikey_3",
+   "prompt_tokens": 23382,
+   "harness_prediction": "9da88584-ac23-402c-8ad9-5c656caaad50.",
+   "package_prediction": "ad4e6fab-6724-43c6-aa00-cb2ff64acaa9.",
+   "harness_partial": 0.0,
+   "package_partial": 1.0,
+   "harness_strict": 0.0,
+   "package_strict": 1.0,
+   "outputs": [
+    "ad4e6fab-6724-43c6-aa00-cb2ff64acaa9"
+   ]
+  },
+  {
+   "task": "niah_multikey_3",
+   "prompt_tokens": 23397,
+   "harness_prediction": "8d02f5a1-2c7f-4e5f-8d0f-5b5d0a4f5f5f.\nOne of the special mag",
+   "package_prediction": "0x0f3a5f5e4c7d6a5e.\nOne of the special magic uuids mentioned",
+   "harness_partial": 0.0,
+   "package_partial": 0.0,
+   "harness_strict": 0.0,
+   "package_strict": 0.0,
+   "outputs": [
+    "ddf5d372-265e-4596-8088-34db7037ccc3"
+   ]
+  },
+  {
+   "task": "niah_multikey_3",
+   "prompt_tokens": 45639,
+   "harness_prediction": "1af7bbf2-ed15-4d7e-ae18-4793e2449726. This is a special magi",
+   "package_prediction": "1af7bbf2-ed15-4d7e-ae18-4793e2449726.",
+   "harness_partial": 0.0,
+   "package_partial": 0.0,
+   "harness_strict": 0.0,
+   "package_strict": 0.0,
+   "outputs": [
+    "3a2596ac-884e-4566-9ffd-2a36b7e418d0"
+   ]
+  },
+  {
+   "task": "niah_multikey_3",
+   "prompt_tokens": 45447,
+   "harness_prediction": "0a6b8f1a-0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0",
+   "package_prediction": "2e1dc855-5eb5-48f9-8894-bbe9f3ba10f8.",
+   "harness_partial": 0.0,
+   "package_partial": 0.0,
+   "harness_strict": 0.0,
+   "package_strict": 0.0,
+   "outputs": [
+    "435f0296-7e46-45fd-9300-882d9edba1b9"
+   ]
+  },
+  {
+   "task": "niah_multikey_3",
+   "prompt_tokens": 45648,
+   "harness_prediction": "55bb5c42-7826-46dc-be95-9c9c0a922705.\nOne of the special mag",
+   "package_prediction": "55bb5c42-7826-46dc-be95-9c9c0a922705.",
+   "harness_partial": 0.0,
+   "package_partial": 0.0,
+   "harness_strict": 0.0,
+   "package_strict": 0.0,
+   "outputs": [
+    "fd22205d-7485-488e-9086-b0b22adeed81"
+   ]
+  },
+  {
+   "task": "niah_multikey_3",
+   "prompt_tokens": 47012,
+   "harness_prediction": "89f773ef-2e82-4632-9869-77252d995488. This is a special magi",
+   "package_prediction": "89f773ef-2e82-4632-9869-77252d995488. This is a special magi",
+   "harness_partial": 0.0,
+   "package_partial": 0.0,
+   "harness_strict": 0.0,
+   "package_strict": 0.0,
+   "outputs": [
+    "6eda5192-e281-41f4-b757-910cc6c28483"
+   ]
+  },
+  {
+   "task": "niah_multikey_3",
+   "prompt_tokens": 45638,
+   "harness_prediction": "0e8a6f0a-4c0f-4e5f-8e0f-3e4f0f0a6f0a.\nOne of the special mag",
+   "package_prediction": "ec949bec-69e6-438c-a112-dbbee4269f8b.",
+   "harness_partial": 0.0,
+   "package_partial": 0.0,
+   "harness_strict": 0.0,
+   "package_strict": 0.0,
+   "outputs": [
+    "969c75bf-dc21-4ba5-8aca-9ec35cbaac77"
+   ]
+  },
+  {
+   "task": "niah_multikey_3",
+   "prompt_tokens": 5772,
+   "harness_prediction": "4b81b190-e2ef-49c0-b907-791843e82de4.\nOne of the special mag",
+   "package_prediction": "4b81b190-e2ef-49c0-b907-195bf0ff1b28.\nOne of the special mag",
+   "harness_partial": 0.0,
+   "package_partial": 1.0,
+   "harness_strict": 0.0,
+   "package_strict": 1.0,
+   "outputs": [
+    "4b81b190-e2ef-49c0-b907-195bf0ff1b28"
+   ]
+  },
+  {
+   "task": "niah_multikey_3",
+   "prompt_tokens": 5836,
+   "harness_prediction": "a3ea9e2b-d442-41bb-80b7-265a4946b2ff.\nOne of the special mag",
+   "package_prediction": "a3ea9e2b-d442-41bb-80b7-265a4946b2ff.\nOne of the special mag",
+   "harness_partial": 1.0,
+   "package_partial": 1.0,
+   "harness_strict": 1.0,
+   "package_strict": 1.0,
+   "outputs": [
+    "a3ea9e2b-d442-41bb-80b7-265a4946b2ff"
+   ]
+  },
+  {
+   "task": "niah_multikey_3",
+   "prompt_tokens": 5791,
+   "harness_prediction": "24a4ad5d-4eb3-478f-b19c-0b63cc2bf8c1.\nOne of the special mag",
+   "package_prediction": "24a4ad5d-4eb3-478f-b19c-0b63cc2bf8c1.\nOne of the special mag",
+   "harness_partial": 1.0,
+   "package_partial": 1.0,
+   "harness_strict": 1.0,
+   "package_strict": 1.0,
+   "outputs": [
+    "24a4ad5d-4eb3-478f-b19c-0b63cc2bf8c1"
+   ]
+  },
+  {
+   "task": "niah_multikey_3",
+   "prompt_tokens": 5783,
+   "harness_prediction": "6b3b360f-b528-41c7-b240-25ebbeeec0ed.\nOne of the special mag",
+   "package_prediction": "6b3b360f-b528-41c7-b240-25ebbeeec0ed.\nOne of the special mag",
+   "harness_partial": 1.0,
+   "package_partial": 1.0,
+   "harness_strict": 1.0,
+   "package_strict": 1.0,
+   "outputs": [
+    "6b3b360f-b528-41c7-b240-25ebbeeec0ed"
+   ]
+  },
+  {
+   "task": "niah_multikey_3",
+   "prompt_tokens": 5757,
+   "harness_prediction": "87bc049c-96fa-49ee-8bc2-7b3911491a98.\nOne of the special mag",
+   "package_prediction": "b0ae2271-e747-4354-85d5-b019726d6591.",
+   "harness_partial": 1.0,
+   "package_partial": 0.0,
+   "harness_strict": 1.0,
+   "package_strict": 0.0,
+   "outputs": [
+    "87bc049c-96fa-49ee-8bc2-7b3911491a98"
+   ]
+  },
+  {
+   "task": "niah_single_1",
+   "prompt_tokens": 15584,
+   "harness_prediction": "2976288.\nThe final answer is: 2976288.",
+   "package_prediction": "2976288.",
+   "harness_partial": 1.0,
+   "package_partial": 1.0,
+   "harness_strict": 1.0,
+   "package_strict": 1.0,
+   "outputs": [
+    "2976288"
+   ]
+  },
+  {
+   "task": "niah_single_1",
+   "prompt_tokens": 31328,
+   "harness_prediction": "2976288.\nThe final answer is: 2976288.",
+   "package_prediction": "2976288.",
+   "harness_partial": 1.0,
+   "package_partial": 1.0,
+   "harness_strict": 1.0,
+   "package_strict": 1.0,
+   "outputs": [
+    "2976288"
+   ]
+  },
+  {
+   "task": "niah_single_1",
+   "prompt_tokens": 62768,
+   "harness_prediction": "2976288.\nThe final answer is: 2976288.",
+   "package_prediction": "2976288.",
+   "harness_partial": 1.0,
+   "package_partial": 1.0,
+   "harness_strict": 1.0,
+   "package_strict": 1.0,
+   "outputs": [
+    "2976288"
+   ]
+  },
+  {
+   "task": "niah_single_1",
+   "prompt_tokens": 7127,
+   "harness_prediction": "4250981.",
+   "package_prediction": "4250981.\nThe grass is green. The sky is blue. The sun is yel",
+   "harness_partial": 1.0,
+   "package_partial": 1.0,
+   "harness_strict": 1.0,
+   "package_strict": 1.0,
+   "outputs": [
+    "4250981"
+   ]
+  },
+  {
+   "task": "vt",
+   "prompt_tokens": 31389,
+   "harness_prediction": "QVAY UYTIR YSRUY BAYLX ZMY REK JFX KBXGL ZMY REK JFX UYTIR Y",
+   "package_prediction": "QVAY UQVAY YSRUY YSRUY YSRUY YSRUY YSRUY YSRUY YSRUY YSRUY Y",
+   "harness_partial": 0.8,
+   "package_partial": 0.2,
+   "harness_strict": 0.0,
+   "package_strict": 0.0,
+   "outputs": [
+    "VQVAY",
+    "UYTIR",
+    "KBXGL",
+    "YSRUY",
+    "BAYLX"
+   ]
+  },
+  {
+   "task": "vt",
+   "prompt_tokens": 31148,
+   "harness_prediction": "HELX XVHYL NPGWO WHELX DMZ XVT HTI VUDEE DMZ XVHYL VHELX DMZ",
+   "package_prediction": "HELX XVHYL NPGWO WHELX DMZ XVT HTI VUDEE DMZ XVHYL DMZ XVT H",
+   "harness_partial": 0.8,
+   "package_partial": 0.8,
+   "harness_strict": 0.0,
+   "package_strict": 0.0,
+   "outputs": [
+    "VUDEE",
+    "WHELX",
+    "XVHYL",
+    "XCSHM",
+    "NPGWO"
+   ]
+  },
+  {
+   "task": "vt",
+   "prompt_tokens": 62827,
+   "harness_prediction": "YSZP EYQLC SDMGO GDMEH CAIRM EDS UPV WDJ VYQLC VYSZP EYQLC S",
+   "package_prediction": "YSZP EYQLC SDMGO GDMEH EDS UPV WDJ CAIRM VDVT UCM VDMEH EDS ",
+   "harness_partial": 1.0,
+   "package_partial": 0.8,
+   "harness_strict": 1.0,
+   "package_strict": 0.0,
+   "outputs": [
+    "GDMEH",
+    "SDMGO",
+    "CAIRM",
+    "VYSZP",
+    "EYQLC"
+   ]
+  },
+  {
+   "task": "vt",
+   "prompt_tokens": 62828,
+   "harness_prediction": "QCGJ YOTEL BTGAX DWTFL YAS GWN FED QKD HPG YAS GWN FQCGJ YOT",
+   "package_prediction": "QCGJ YOTEL BTGAX DWTFL YAS GWN\n\nMemorize and track the chain",
+   "harness_partial": 0.8,
+   "package_partial": 0.6,
+   "harness_strict": 0.0,
+   "package_strict": 0.0,
+   "outputs": [
+    "FQCGJ",
+    "YOTEL",
+    "DWTFL",
+    "IRWGY",
+    "BTGAX"
+   ]
+  },
+  {
+   "task": "vt",
+   "prompt_tokens": 62819,
+   "harness_prediction": "IOGE ISOQU ACQOF BRDAD UKKNL\n\nMemorize and track the chain(s",
+   "package_prediction": "IOGE ISOQU ACQOF BRDAD\n\nMemorize and track the chain(s) of v",
+   "harness_partial": 0.8,
+   "package_partial": 0.6,
+   "harness_strict": 0.0,
+   "package_strict": 0.0,
+   "outputs": [
+    "ISOQU",
+    "BRDAD",
+    "UKKNL",
+    "VIOGE",
+    "ACQOF"
+   ]
+  },
+  {
+   "task": "vt",
+   "prompt_tokens": 62828,
+   "harness_prediction": "UPW VUDEE VHELX VHELQ VHELW\nMemorize and track the chain(s) ",
+   "package_prediction": "UPW VUDEE VELXQ VELZQ VELBXQ \n\nMemorize and track the chain(",
+   "harness_partial": 0.2,
+   "package_partial": 0.2,
+   "harness_strict": 0.0,
+   "package_strict": 0.0,
+   "outputs": [
+    "UBUPW",
+    "OMMSN",
+    "EDLZQ",
+    "VUDEE",
+    "WHELX"
+   ]
+  },
+  {
+   "task": "vt",
+   "prompt_tokens": 7556,
+   "harness_prediction": "HUF IPRUY KFYUV IAUQV AXVAK AEUQHUF WHF KUI AEUQHUF GYBTG WH",
+   "package_prediction": "HUF IPRUY KFYUV AEU GYBTG AEU KUI AEU WHF AEU WHF WHF AEU WH",
+   "harness_partial": 0.8,
+   "package_partial": 0.6,
+   "harness_strict": 0.0,
+   "package_strict": 0.0,
+   "outputs": [
+    "GYBTG",
+    "AXVAK",
+    "EQHUF",
+    "KFYUV",
+    "IPRUY"
+   ]
+  }
+ ]
+}
