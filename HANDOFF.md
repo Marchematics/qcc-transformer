@@ -4,6 +4,36 @@
 交接对象：下一位继续实现、评测或部署 QCC Transformer 的工程师/模型
 状态：代码已推送；99 gate 尚未通过；不要把当前结果包装成已达标结果。
 
+## 当前审计（2026-09-20 晚）：官方 RULER 与 serving 的真实差距
+
+全部新证据在 `artifacts/bounded-decode-frontier-20260920.md` 及其 JSON。
+本轮做了三件事，结论都比上一节更严格：
+
+1. **官方 RULER（80 条，4 任务）**：matched Full-KV 只答对 51/80——1B
+   checkpoint 自身在 niah_multikey_3(UUID) 只有 9/20、vt 只有 3/20。在 Full-KV
+   答对的 51 条上，`obs_last`+dilation 的 retention 是 0.529/0.608/0.667
+   （B=512/1024/2048）；加上**词面锚点并集**（把问句里罕见串——连字符 key、
+   UUID、长数字——在上下文中出现的位置连同左 16/右 32 token 强制保留，约
+   50-125 个槽）后升到 **0.863/0.882/0.882**：niah_single_1 `1.000`、
+   niah_multikey_2 `0.947-1.000`、niah_multikey_3 `0.667-0.778`、vt `0.000`。
+   vt 是多跳链式任务而非检索，词面锚点只能保住被查值的直接赋值行。**因此
+   99%/97% 目标仍未达到，最差任务是 0.000。**
+2. **合成 60 条复现**：`obs_last` 在 B=128/256/512 上是 0.897/0.897/0.931
+   （18 条子集 B=1024 为 1.000），recency 全 0/18。上一节"B=1024 达 100%"
+   只成立于 18 条子集，60 条才是诚实数字。
+3. **Serving（32K，单卡）**：Full-KV batch 1/2/4 = 61.6/103.2/124.7 tok/s、
+   TPOT 16.2/19.4/32.1ms；有界 B=1024 = 73.6/142.7/281.0 tok/s、TPOT
+   13.6/14.0/14.2ms；**两者 batch 8 全部 OOM，并发比 1.0x**。原因是 prefill
+   仍按整批持有 full KV，有界只影响 decode。要达到 8x 并发必须让 prefill
+   也有界/分阶段（`benchmarks/benchmark_bounded_decode_serving_sequential.py`
+   是原型，尚未验证）。
+
+**已撤回**：CUDA-graph / StaticCache 的 6.87ms TPOT 数字。新加的 parity 检查
+要求每个解码路径逐 token 复现 dynamic 路径，static/graph 两条都不通过（输出
+退化为重复串），所以其耗时无效、不得引用。仍然成立的是：有界 decode TPOT 在
+32K/64K/128K 恒为 13.5ms，而 matched Full-KV 从 15.6ms 涨到 27.4ms，即
+**128K batch-1 约 2.0x**，5x 未达标，地板是每步框架开销而非 KV 流量。
+
 ## 当前审计（2026-09-20）：有界 decode 缓存的选择律已找到
 
 新证据在 `artifacts/bounded-decode-frontier-20260920.md`，原始结果在
