@@ -4,6 +4,41 @@
 交接对象：下一位继续实现、评测或部署 QCC Transformer 的工程师/模型
 状态：代码已推送；99 gate 尚未通过；不要把当前结果包装成已达标结果。
 
+## 当前审计（2026-09-20 深夜）：检索质量达标，serving 两项达标
+
+在第 4 轮基础上修掉三个选择实现缺陷后（lex_obs 曾把 head 0 的排序广播给
+所有 head；frontier harness 把 lex_obs 误当作 obs_max 评分；单个 2-D mask
+无法表达逐层不同的保留宽度，导致批量 decode 注意力混入 padding 槽），官方
+RULER 的正确数字是：
+
+| 策略 | B | retention | single_1 | multikey_2 | multikey_3 | vt |
+|---|---:|---:|---:|---:|---:|---:|
+| `obs_last` | 2048 | 0.667 | 1.000 | 0.737 | 0.000 | 0.000 |
+| `lex_obs` | 1024 | **0.941** | **1.000** | **1.000** | **1.000** | 0.000 |
+
+即三个检索任务在 B=1024（decode 缓存 32 MiB）上**全部 100% 保留**（48/48
+条 Full-KV 答对的记录）。聚合 0.941、最差任务 0.000 完全由 vt 拖累：vt 是
+多跳链式任务而非检索，1B 基座自身在 Full-KV 下也只答对 3/20，`lex_obs` 对这
+3 条仍失败。朴素多跳词面扩展（沿匹配行里的标识符继续匹配）已实测为负结果，
+会导致锚点集合涨到上限并把 multikey_2/3 拉垮，默认关闭（`hops=0`）。
+
+Serving（32K，单卡，continuous batching 模式：逐请求精确 prefill + 常驻有界
+缓存 + 批量 decode）：
+
+| batch | decode tok/s | TPOT | peak | recall |
+|---:|---:|---:|---:|---:|
+| 4 | 291.1 | 13.7 ms | 5.35 GiB | 4/4 |
+| 32 | 1946.8 | 16.4 ms | 6.62 GiB | 32/32 |
+| 64 | 741.2 | 86.4 ms | 7.92 GiB | 60/64 |
+
+matched Full-KV 在 32K 的硬上限是 batch 4（batch 8 必 OOM），124.7 tok/s、
+TPOT 32.1 ms、peak 15.06 GiB。因此**固定 SLA（TPOT ≤ 50 ms）下并发 8x**
+（32 对 4）、**吞吐 15.6x**（1946.8 对 124.7）。注意 prefill 是串行的：batch 32
+的 prefill 墙钟 139.7s，本结果衡量的是显存受限并发而非 prefill 吞吐。batch-1
+TPOT 仍是约 2.0x，5x 未达标（地板是每步框架开销。）
+
+CUDA-graph/StaticCache 的 TPOT 数字仍然无效（parity 检查不过），不得引用。
+
 ## 当前审计（2026-09-20 晚）：官方 RULER 与 serving 的真实差距
 
 全部新证据在 `artifacts/bounded-decode-frontier-20260920.md` 及其 JSON。
