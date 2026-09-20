@@ -52,7 +52,7 @@ def multimodel(paths):
         aggregates.append((model, aggregate))
         print(f"| **{model}** | **all** | {aggregate['matched_records']} | "
               f"| | **{aggregate['mean_retention']}** | **{aggregate['worst_task_retention']}** "
-              f"| {slots:.0f} | {mib(state_bytes(data['config']['model'], slots))} MiB |")
+              f"| {slots:.0f} | {mib(state_bytes(model_path, slots))} MiB |")
     if aggregates:
         mean = sum(a["mean_retention"] for _m, a in aggregates) / len(aggregates)
         worst = min(a["worst_task_retention"] for _m, a in aggregates)
@@ -63,6 +63,10 @@ def multimodel(paths):
 def baselines(path):
     data = json.load(open(path))
     rows = data["results"]
+    model_path = (data.get("config") or {}).get("model") or data.get("model")
+    if model_path is None:                      # partial writes carry rows only
+        model_path = json.load(open(rows[0]["source_json"]))["config"]["model"] \
+            if "source_json" in rows[0] else "/root/qcc/models/Llama-3.2-1B-Instruct"
     policies = sorted({row["policy"] for row in rows})
     tasks = sorted({row["task"] for row in rows})
     full = {(row["task"], tuple(row["outputs"])): row for row in rows if row["policy"] == "full"}
@@ -83,7 +87,7 @@ def baselines(path):
         slots = sum(row["kept_slots"] for row in selected) / len(selected)
         print(f"| {policy} | " + " | ".join(f"{per_task[task]:.3f}" for task in tasks) +
               f" | {len(ratios)} | {sum(ratios) / len(ratios):.4f} | {min(ratios):.3f} "
-              f"| {slots:.0f} | {mib(state_bytes(data['config']['model'], slots))} MiB |")
+              f"| {slots:.0f} | {mib(state_bytes(model_path, slots))} MiB |")
     reference = [row for row in rows if row["policy"] == "full"]
     per_task = {task: round(sum(r["answer_recall"] for r in reference if r["task"] == task) /
                             max(1, len([r for r in reference if r["task"] == task])), 3)
