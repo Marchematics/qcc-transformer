@@ -61,7 +61,7 @@ normalisation pass is needed.
 
 ### 3.1 Mechanism check (single record per length, 4 key/value pairs)
 
-`frontier.py`, `sweep_v1.json`:
+`benchmark_selection_frontier.py`, `sweep_v1.json`:
 
 | Length | Full-KV | obs_last | obs_mean | obs_max | h2o | keynorm | recent | random | oracle_needle |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -78,7 +78,7 @@ the surrounding context, not just the fact itself.
 
 ### 3.2 Aggregate (6 records, 2 key/value pairs, chunked exact prefill)
 
-`longctx.py`, `aggregate_v2.json`. Full-KV is correct on **18/18** records
+`benchmark_bounded_decode_frontier.py`, `aggregate_v2.json`. Full-KV is correct on **18/18** records
 (6 lengths of ~32K, 6 of ~64K, 6 of ~128K), so retention is meaningful
 everywhere.
 
