@@ -191,8 +191,15 @@ SLA, and the harness synchronises once per decode loop rather than per step.
 ### 3.6 Official RULER JSONL (80 records, 4 tasks, 8K-64K nominal)
 
 The same prefill/selection/decode path, driven from real RULER records
-(`benchmark_bounded_decode_ruler.py`), scored with official answer recall over
-all expected output strings. Records were prepared for a 32K-vocabulary
+(`benchmark_bounded_decode_ruler.py`).
+
+> **Note on scoring.** The numbers in this section were produced with an
+> all-or-nothing rule that is *stricter than RULER's own metric*. RULER uses
+> `string_match_all`, i.e. the per-record fraction of references found, which
+> only differs for `vt` (the one multi-reference task). Section 3.13 re-scores
+> the same predictions with the official metric and reports both; the
+> correction raises the aggregate above the 99% target and takes the worst task
+> from 0.000 to 0.86-1.00 depending on budget. Records were prepared for a 32K-vocabulary
 tokenizer, so the Llama-3.2 tokenizer yields ~0.72x the nominal length; both
 arms see identical tokens.
 
@@ -514,6 +521,69 @@ across the four RULER tasks is 0.941 at a 3% budget, and no single budget
 satisfies every task family at once. A deployment that needs both retrieval and
 list-answer quality should choose the budget per workload, or add a readout
 stage for list answers, rather than keep growing the cache.
+
+### 3.13 Scoring correction: RULER uses partial recall, and that changes the verdict
+
+The harness scored each record as all-or-nothing: every reference string had to
+appear in the prediction. RULER's own definition, in
+`scripts/eval/synthetic/constants.py`, is
+
+```python
+def string_match_all(preds, refs):
+    score = sum([sum([1.0 if r.lower() in pred.lower() else 0.0 for r in ref]) / len(ref)
+                 for pred, ref in zip(preds, refs)]) / len(preds) * 100
+```
+
+i.e. **the per-record fraction of references found**, averaged over records. The
+harness was therefore stricter than the benchmark. Only `vt` is affected — the
+three NIAH tasks have a single reference each, where the two definitions agree —
+but `vt` is exactly the task that was failing: a prediction listing 4 of the 5
+chained variables scores 0.8 officially and 0.0 strict.
+
+Re-scoring the *same* stored predictions (`analyze_ruler.py`,
+`rescore_ruler.py`; no new GPU work) gives:
+
+| policy | budget | official retention | strict | worst task |
+|---|---:|---:|---:|---|
+| `lex_obs` | 512 | 0.957 | 0.941 | 0.800 (vt) |
+| `lex_obs` | 1024 | **1.003** | 0.980 | 0.862 (vt) |
+| `lex_obs` | 2048 | **1.013** | 0.980 | 0.908 (vt) |
+| `obs_last` | 2048 | 0.751 | 0.686 | 0.000 (niah_multikey_3) |
+
+Aggregate retention is **above the 99% target** once the official metric is
+used, and the worst task is `vt` at 0.86-0.91 rather than 0.00. (Ratios above
+1.0 are possible because the ratio is the sum of QCC scores over the sum of
+Full-KV scores, and on some UUID multi-key records the bounded cache scores
+higher than Full-KV.)
+
+The full 80-record suite re-run with the official metric and a 128-token
+generation budget applied to **both** arms (`ruler_v6.json`), retention budget
+4096 slots (+512 lexical anchors):
+
+| budget | aggregate | strict | single_1 | multikey_2 | multikey_3 | vt |
+|---:|---:|---:|---:|---:|---:|---:|
+| 2048 | 0.997 | 0.942 | 1.000 | 0.947 | 1.222 | 0.909 |
+| **4096** | **1.000** | 0.942 | **1.000** | **1.000** | **1.000** | **1.000** |
+| 8192 | 1.020 | 1.000 | 1.000 | 1.000 | 1.111 | 1.015 |
+
+**Both quality targets are met at a 4096-slot budget: aggregate 1.000 (>= 99%)
+and worst task 1.000 (>= 97%)**, with all four RULER tasks at parity with matched
+Full-KV. The `vt` budget curve explains why a large budget is needed for it while
+retrieval needs 3%:
+
+| vt budget | share of a 32K context | vt retention (official) |
+|---:|---:|---:|
+| 1024 | 3% | 0.864 |
+| 2048 | 6% | 0.970 |
+| 4096 | 13% | 0.985-1.000 |
+| 8192 | 25% | 1.000 |
+
+Scope: this is the 80-record RULER split with four tasks. LongBench and PG-19 are
+still unmeasured, so the target is met on the suite that was actually run, not on
+every suite the repository's handoff mentions. In state terms 4096 slots is
+151 MiB per request at this model's geometry — 27x smaller than the 4.00 GiB
+Full-KV cache at 128K, but far from the 4 MiB that the 1024-slot retrieval
+configuration uses.
 
 ## 4. What this establishes, and what it does not
 
