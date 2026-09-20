@@ -1,0 +1,187 @@
+{
+ "model": "/root/qcc/models/Llama-3.2-1B-Instruct",
+ "config": {
+  "model": "/root/qcc/models/Llama-3.2-1B-Instruct",
+  "length": 32768,
+  "batches": [
+   1,
+   2,
+   4,
+   8,
+   16,
+   32
+  ],
+  "policies": [
+   "full",
+   "obs_last"
+  ],
+  "budget": 1024,
+  "obs": 64,
+  "nsink": 4,
+  "pool": 7,
+  "max_new": 32,
+  "prefill_chunk": 8192,
+  "seed": 4242,
+  "out": "serving_32k_v2.json"
+ },
+ "results": [
+  {
+   "policy": "full",
+   "batch": 1,
+   "context_tokens": 32741,
+   "budget": null,
+   "prefill_s": 4.492,
+   "kept_slots": 32741,
+   "decode_s": 0.519,
+   "decode_tokens_per_s": 61.63,
+   "tpot_ms": 16.227,
+   "peak_cuda_gib": 5.436,
+   "recall": [
+    1.0
+   ],
+   "sample": "7547540.?\n\nThere is no special magic num",
+   "status": "ok"
+  },
+  {
+   "policy": "full",
+   "batch": 2,
+   "context_tokens": 32741,
+   "budget": null,
+   "prefill_s": 9.523,
+   "kept_slots": 32741,
+   "decode_s": 0.62,
+   "decode_tokens_per_s": 103.21,
+   "tpot_ms": 19.379,
+   "peak_cuda_gib": 8.686,
+   "recall": [
+    1.0,
+    1.0
+   ],
+   "sample": "7547540.?\n\nThere is no special magic num",
+   "status": "ok"
+  },
+  {
+   "policy": "full",
+   "batch": 4,
+   "context_tokens": 32741,
+   "budget": null,
+   "prefill_s": 19.726,
+   "kept_slots": 32741,
+   "decode_s": 1.027,
+   "decode_tokens_per_s": 124.66,
+   "tpot_ms": 32.086,
+   "peak_cuda_gib": 15.06,
+   "recall": [
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "sample": "7547540.?\n\nThere is no special magic num",
+   "status": "ok"
+  },
+  {
+   "policy": "full",
+   "batch": 8,
+   "context_tokens": 32741,
+   "budget": null,
+   "status": "oom",
+   "error": "CUDA out of memory. Tried to allocate 3.00 GiB. GPU 0 has a total capacity of 23.55 GiB of which 1.82 GiB is free. Process 2890824 has 21.38 GiB memory in use. "
+  },
+  {
+   "policy": "full",
+   "batch": 16,
+   "context_tokens": 32741,
+   "budget": null,
+   "status": "oom",
+   "error": "CUDA out of memory. Tried to allocate 2.00 GiB. GPU 0 has a total capacity of 23.55 GiB of which 1.57 GiB is free. Process 2890824 has 21.62 GiB memory in use. "
+  },
+  {
+   "policy": "full",
+   "batch": 32,
+   "context_tokens": 32741,
+   "budget": null,
+   "status": "oom",
+   "error": "CUDA out of memory. Tried to allocate 4.00 GiB. GPU 0 has a total capacity of 23.55 GiB of which 2.07 GiB is free. Process 2890824 has 21.12 GiB memory in use. "
+  },
+  {
+   "policy": "obs_last",
+   "batch": 1,
+   "context_tokens": 32741,
+   "budget": 1024,
+   "prefill_s": 4.968,
+   "kept_slots": 1024,
+   "decode_s": 0.435,
+   "decode_tokens_per_s": 73.62,
+   "tpot_ms": 13.583,
+   "peak_cuda_gib": 5.937,
+   "recall": [
+    1.0
+   ],
+   "sample": "7547540.assistant!\n\n## Step 1: Identify ",
+   "status": "ok"
+  },
+  {
+   "policy": "obs_last",
+   "batch": 2,
+   "context_tokens": 32741,
+   "budget": 1024,
+   "prefill_s": 10.184,
+   "kept_slots": 1024,
+   "decode_s": 0.448,
+   "decode_tokens_per_s": 142.73,
+   "tpot_ms": 14.013,
+   "peak_cuda_gib": 8.644,
+   "recall": [
+    1.0,
+    1.0
+   ],
+   "sample": "7547540.assistant!\n\n## Step 1: Identify ",
+   "status": "ok"
+  },
+  {
+   "policy": "obs_last",
+   "batch": 4,
+   "context_tokens": 32741,
+   "budget": 1024,
+   "prefill_s": 21.026,
+   "kept_slots": 1024,
+   "decode_s": 0.455,
+   "decode_tokens_per_s": 281.04,
+   "tpot_ms": 14.233,
+   "peak_cuda_gib": 14.971,
+   "recall": [
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "sample": "7547540.assistant!\n\n## Step 1: Identify ",
+   "status": "ok"
+  },
+  {
+   "policy": "obs_last",
+   "batch": 8,
+   "context_tokens": 32741,
+   "budget": 1024,
+   "status": "oom",
+   "error": "CUDA out of memory. Tried to allocate 3.00 GiB. GPU 0 has a total capacity of 23.55 GiB of which 2.81 GiB is free. Process 2890824 has 20.38 GiB memory in use. "
+  },
+  {
+   "policy": "obs_last",
+   "batch": 16,
+   "context_tokens": 32741,
+   "budget": 1024,
+   "status": "oom",
+   "error": "CUDA out of memory. Tried to allocate 2.00 GiB. GPU 0 has a total capacity of 23.55 GiB of which 1.81 GiB is free. Process 2890824 has 21.38 GiB memory in use. "
+  },
+  {
+   "policy": "obs_last",
+   "batch": 32,
+   "context_tokens": 32741,
+   "budget": 1024,
+   "status": "oom",
+   "error": "CUDA out of memory. Tried to allocate 4.00 GiB. GPU 0 has a total capacity of 23.55 GiB of which 3.16 GiB is free. Process 2890824 has 20.38 GiB memory in use. "
+  }
+ ]
+}

@@ -285,6 +285,37 @@ What survives:
 The 5x batch-1 TPOT target is not met: ~2x is demonstrated, and the floor is
 per-step framework overhead rather than KV traffic.
 
+### 3.8 Batched serving: throughput, TPOT and concurrency (32K)
+
+`benchmark_bounded_decode_serving.py` (`serving_32k_v2.json`). One homogeneous
+prompt of 32,741 tokens replicated across the batch, exact chunked prefill for
+the whole batch, then batched greedy decode (32 tokens). Every row answered
+correctly in every configuration that fit.
+
+| policy | batch | decode tok/s | TPOT | peak |
+|---|---:|---:|---:|---:|
+| Full-KV | 1 | 61.6 | 16.2 ms | 5.44 GiB |
+| Full-KV | 2 | 103.2 | 19.4 ms | 8.69 GiB |
+| Full-KV | 4 | 124.7 | 32.1 ms | 15.06 GiB |
+| Full-KV | 8/16/32 | OOM | - | - |
+| bounded B=1024 | 1 | 73.6 | 13.6 ms | 5.94 GiB |
+| bounded B=1024 | 2 | 142.7 | 14.0 ms | 8.64 GiB |
+| bounded B=1024 | 4 | **281.0** | **14.2 ms** | 14.97 GiB |
+| bounded B=1024 | 8/16/32 | OOM | - | - |
+
+* **Throughput: 2.25x at batch 4** (281.0 vs 124.7 tok/s) and TPOT is 2.26x
+  lower, because the bounded decode reads 32 MiB instead of 1 GiB per step.
+* **Concurrency: 1.0x.** Both policies OOM at batch 8, so on this workload the
+  bounded cache buys *no* additional concurrency. The reason is structural: this
+  harness prefills every request together, so peak memory is
+  `batch_size x full KV` during prefill and the retained cache only affects
+  decode. Peak at batch 4 is 15.0 GiB for both policies.
+* Reaching the >=8x concurrency target therefore requires bounding or staging
+  **prefill** state, not decode state: e.g. prefill requests one at a time and
+  keep only their compiled caches resident, then decode the batch. A prototype
+  of that pattern (`serve_sequential.py`) is written but not yet numerically
+  validated, so no concurrency claim is made from it.
+
 ## 4. What this establishes, and what it does not
 
 Establishes:
