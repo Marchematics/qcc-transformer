@@ -1065,6 +1065,37 @@ Three things follow, and one caveat.
   would very likely recover part of the int4 loss, so this table should be read
   as "this int4 configuration", not as "int4".
 
+### 3.24 Cross-family: the same configuration, three model families
+
+The law is not tuned per model. `benchmarks/benchmark_retention_multimodel.py`
+runs one configuration (`budget=4096`, `lex_cap=512`, `chain_hops=6`,
+`observation_window=64`, sinks 4, dilate 9, pool 7) through the packaged entry
+point on the same RULER records, with a matched Full-KV arm in the same process.
+Retention is the bounded/full ratio over records Full-KV answers.
+
+| model | family / shape | prompt limit | records matched | single_1 | multikey_2 | multikey_3 | vt | aggregate | worst task | slots | decode state |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Llama-3.2-1B-Instruct | GQA 32:8, 16L | 128K native | 68/80 | 1.000 | 1.000 | 1.000 | 1.028 | **1.007** | **1.000** | 4,608 | 144 MiB |
+| Qwen2.5-3B-Instruct | GQA 16:2, 36L | 32K native | 57/60 | 1.000 | 1.000 | 0.917 | 0.983 | **0.975** | 0.917 | 4,608 | 162 MiB |
+| Phi-3.5-mini-instruct | MHA 32:32, 32L, LongRoPE | 128K native | 39/40 | 1.000 | 1.000 | 0.889 | 1.000 | **0.972** | 0.889 | 4,608 | 1,728 MiB |
+
+* **Three families, one configuration, no per-model tuning**, and the packaged
+  API is the only code path involved. Two of the three are different
+  architectures, not different sizes of the same one: Qwen uses a 2-head GQA
+  projection with a 128-wide head, Phi a 32-head MHA with a 96-wide head and
+  LongRoPE position scaling, which the package has to handle explicitly (3.5).
+* The **worst task is `niah_multikey_3` on every model**, which is also the task
+  where the models themselves are weakest (Llama-1B's Full-KV arm answers only
+  45% of it): the retention ratio there is measuring a handful of records where
+  the model is near chance. The 1B checkpoint reaches 1.000 on it; the two
+  larger checkpoints reach 0.92 and 0.89, so "worst task >= 97%" is currently a
+  Llama-3.2-1B result, not a universal one.
+* The decode-state column is why cross-family matters for serving: at the *same*
+  retained slot count Phi's MHA cache is 12x larger than Qwen's GQA cache
+  (1,728 MiB against 162 MiB). A slot budget is a quality knob; the bytes it
+  costs are an architectural property, and both are reported here rather than
+  assumed.
+
 ## 4. What this establishes, and what it does not
 
 Establishes (every number produced by the shipped `compile_bounded_cache`, see
