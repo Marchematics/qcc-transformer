@@ -317,3 +317,32 @@ def test_rare_anchor_mode_ignores_words_that_are_not_rare():
     covered = {prompt[a:b] for a, b in
                (tokenizer(prompt).offset_mapping[i] for i in anchors)}
     assert covered == {"alpha"}, covered
+
+
+def test_compile_touches_no_parameter():
+    """Retrofit property: the law adds nothing and changes no weight."""
+    model = tiny_model()
+    before = {name: tensor.clone() for name, tensor in model.state_dict().items()}
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    ids = torch.randint(0, 256, (1, 72))
+    config = RetentionConfig(budget=16, lex_cap=4, observation_window=8,
+                             prefill_chunk=32, key_chunk=32)
+    cache, _ = compile_bounded_cache(model, ids, config)
+    after = model.state_dict()
+    assert set(after) == set(before)
+    assert all(torch.equal(after[name], before[name]) for name in before)
+    assert sum(p.numel() for p in model.parameters() if p.requires_grad) == trainable
+    assert torch.is_tensor(cache.layers[0].keys)           # a cache holds tensors, not layers
+
+
+def test_state_size_is_independent_of_prompt_length():
+    """O(1) persistent history: the retained width is a config property."""
+    model = tiny_model()
+    config = RetentionConfig(budget=16, lex_cap=4, observation_window=8,
+                             prefill_chunk=32, key_chunk=32)
+    widths = []
+    for length in (40, 96, 200):
+        ids = torch.randint(0, 256, (1, length))
+        cache, _ = compile_bounded_cache(model, ids, config)
+        widths.append(cache.get_seq_length())
+    assert widths == [20, 20, 20], widths

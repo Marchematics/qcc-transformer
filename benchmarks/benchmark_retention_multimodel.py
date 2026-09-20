@@ -48,6 +48,9 @@ def parse_args():
     parser.add_argument("--pool", type=int, default=7)
     parser.add_argument("--dilate", type=int, default=9)
     parser.add_argument("--scoring", default="last")
+    parser.add_argument("--anchor-mode", default="pattern",
+                        choices=["pattern", "rare", "both"])
+    parser.add_argument("--min-anchor-len", type=int, default=3)
     parser.add_argument("--max-new", type=int, default=128)
     parser.add_argument("--prefill-chunk", type=int, default=8192)
     parser.add_argument("--key-chunk", type=int, default=4096)
@@ -144,7 +147,8 @@ def main():
     config = RetentionConfig(
         budget=args.budget, observation_window=args.obs, attention_sinks=args.nsink,
         pool=args.pool, dilate=args.dilate, lex_cap=args.lex_cap, chain_hops=args.hops,
-        prefill_chunk=args.prefill_chunk, key_chunk=args.key_chunk, scoring=args.scoring)
+        prefill_chunk=args.prefill_chunk, key_chunk=args.key_chunk, scoring=args.scoring,
+        anchor_mode=args.anchor_mode, min_anchor_len=args.min_anchor_len)
     eos_ids = set()
     for source in (model.config.eos_token_id,
                    getattr(getattr(model, "generation_config", None), "eos_token_id", None)):
