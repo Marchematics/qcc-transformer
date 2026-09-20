@@ -749,6 +749,32 @@ multikey_3 0.800, vt 0.600); that is *not* the retention figure - retention is a
 ratio against matched Full-KV over records Full-KV answers, and it is what the
 0.941-1.000 numbers elsewhere in this document refer to.
 
+### 3.18 Fixed-SLA concurrency, made auditable
+
+`benchmarks/analyze_sla_concurrency.py` derives the largest batch that meets a
+per-request TPOT SLA from the serving sweeps already recorded, so the concurrency
+claim is a number anyone can recompute rather than a chosen figure.
+
+| case | SLA | Full-KV max batch | bounded max batch | ratio |
+|---|---:|---:|---:|---:|
+| 32K, B=1024 (speed) | 25 ms | 2 | 32 | **16x** |
+| 32K, B=1024 (speed) | 50 ms | 4 | 32 | **8x** |
+| 32K, B=1024 (speed) | 100 ms | 4 | 64 | **16x** |
+| 32K, B=4096 (quality) | 25 ms | 2 | 8 | 4x |
+| 32K, B=4096 (quality) | 50 ms | 4 | 16 | 4x |
+| 32K, B=4096 (quality) | 100 ms | 4 | 32 | **8x** |
+| 128K, B=1024 | 50-100 ms | 1 | 8 | **8x** |
+
+* The **>=8x target holds at a 50 ms SLA** for the speed configuration at both
+  32K and 128K, and at 100 ms for the quality configuration - whose measured
+  TPOTs (21-52 ms at 32K) come from a contended window, so its row is a lower
+  bound rather than a best case.
+* Full-KV's ceiling is 4 concurrent 32K requests (2 at 25 ms) and exactly **1**
+  at 128K, because batch 2 at 128K OOMs - the ratio at 128K is therefore not a
+  latency effect but a hard memory wall.
+* The 64-request row is the memory-limited ceiling (7.92 GiB peak), not an SLA
+  failure.
+
 ## 4. What this establishes, and what it does not
 
 Establishes:
