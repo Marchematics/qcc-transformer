@@ -49,7 +49,7 @@ def prefill_one(model, ids, obs, chunk):
 
 
 @torch.no_grad()
-def decode_batched(model, batch_cache, next_ids, Lc, max_new, keep_mask=None):
+def decode_batched(model, batch_cache, next_ids, Lc_vec, max_new, keep_mask=None):
     B = next_ids.shape[0]
     kept = batch_cache.layers[0].keys.shape[2]
     if keep_mask is None:
@@ -61,9 +61,13 @@ def decode_batched(model, batch_cache, next_ids, Lc, max_new, keep_mask=None):
     torch.cuda.synchronize()
     t0 = time.time()
     for step in range(max_new):
-        cp = torch.tensor([Lc + step], device="cuda")
+        # cache_position only drives causality (all retained keys are past for
+        # any value >= kept); each row's own absolute positions come from pos
+        cp = torch.tensor([int(Lc_vec.max()) + step], device="cuda")
+        # each request has its own prompt length, so its absolute positions differ
+        pos = (Lc_vec + step).unsqueeze(1)
         o = model(cur, past_key_values=batch_cache, attention_mask=mask, cache_position=cp,
-                  position_ids=cp.unsqueeze(0).expand(B, -1), use_cache=True)
+                  position_ids=pos, use_cache=True)
         tok = o.logits[:, -1:].argmax(-1)
         gen = torch.cat([gen, tok], dim=1)
         mask = torch.cat([mask, torch.ones(B, 1, device="cuda", dtype=torch.long)], dim=1)
@@ -110,7 +114,7 @@ def main():
         torch.cuda.reset_peak_memory_stats()
         entry = {"batch": batch, "budget": args.budget, "length": args.length}
         try:
-            keys, values, next_ids, recs, sizes = [], [], [], [], []
+            keys, values, next_ids, recs, sizes, lengths = [], [], [], [], [], []
             t0 = time.time()
             for b in range(batch):
                 rec, ids = build_one(tok, args.length, args.seed + 1000 * b)
@@ -133,6 +137,7 @@ def main():
                 sizes.append(args.budget + args.lex_cap)  # uniform width by construction
                 next_ids.append(next_id)
                 recs.append(rec)
+                lengths.append(Lc)
                 del cache, captured, last_logits, scores, idxs
                 torch.cuda.empty_cache()
             torch.cuda.synchronize()
@@ -167,7 +172,8 @@ def main():
                 bc.layers.append(lyr)
             keep_mask = keep_mask[:, :max_kept]
             cur = torch.stack(next_ids, dim=0).reshape(batch, 1)
-            gen, dec_s = decode_batched(model, bc, cur, Lc, args.max_new, keep_mask)
+            lc_vec = torch.tensor(lengths, device="cuda", dtype=torch.long)
+            gen, dec_s = decode_batched(model, bc, cur, lc_vec, args.max_new, keep_mask)
             entry["decode_s"] = round(dec_s, 3)
             entry["decode_tokens_per_s"] = round(batch * args.max_new / dec_s, 2)
             entry["tpot_ms"] = round(1000 * dec_s / args.max_new, 3)
