@@ -236,6 +236,20 @@ then by score up to `budget + 128` slots — takes official-RULER retention from
 | `lex_obs` | 1024 | **0.941** | **1.000** | **1.000** | **1.000** | 0.000 |
 | `lex_obs` | 2048 | **0.941** | **1.000** | **1.000** | **1.000** | 0.000 |
 
+**Variable tracking, precisely.** The residual gap is *not* the selection law.
+Adding assignment-chain following — after anchoring the queried value, follow
+only identifiers that are themselves defined by an assignment, hop by hop, and
+keep the whole matched lines — makes the lexical selection contain the complete
+answer set for **20/20 vt records** (~290 of the 1152 retained slots), verified
+by decoding the selected token positions offline. The test-set result does not
+move (`ruler_v5.json` reproduces `ruler_v4.json` exactly): on the three vt
+records that matched Full-KV answers, the bounded cache now holds every chain
+line, yet the model still emits an incomplete list (for example `ZJWJL BBNES
+PGYAS` plus a truncated `XFE`, where `CDXFE` and `DQKDH` are required and
+present in the cache). So the remaining vt gap is the checkpoint's ability to
+emit a multi-item list from a compacted context, not the retention law's
+ability to find the chain. Raising the budget to 2048 does not change it.
+
 All three retrieval tasks reach **100% retention** (48/48 records) at B=1024, a
 32 MiB decode cache. The aggregate is held at 0.941 and the worst task at 0.000
 by variable tracking alone: Full-KV answers only 3/20 vt records with this 1B
@@ -288,6 +302,18 @@ What survives:
 
 The 5x batch-1 TPOT target is not met: ~2x is demonstrated, and the floor is
 per-step framework overhead rather than KV traffic.
+
+**Why 5x batch-1 is out of reach on this hardware (bound, not a measurement).**
+A decode step must read the weights whatever the cache policy is. For
+Llama-3.2-1B in bf16 that is 2.47 GB, i.e. **4.12 ms at the A10G's ~600 GB/s**.
+Full-KV at 128K additionally reads 4.00 GiB of KV (7.16 ms); the bounded cache
+reads 32 MiB (0.056 ms). So the bandwidth-limited batch-1 ratio is
+`(4.12+7.16)/(4.12+0.056) = 2.70x` — **a perfect implementation cannot exceed
+2.7x at batch 1**, and the measured 2.03x is already 75% of that bound. The
+weight term amortises over the batch while the KV term does not, so the same
+model reaches 4.36x at batch 2, 7.54x at batch 4 and 13.4x at batch 8. The
+target is therefore attainable in a serving configuration and not in batch-1
+decoding.
 
 ### 3.8 Serving: throughput, TPOT and concurrency at 32K
 
