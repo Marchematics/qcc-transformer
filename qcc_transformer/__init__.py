@@ -17,6 +17,14 @@ from .model import (
     SinusoidalPositionEmbedding,
     count_archive_elements,
 )
+from .retention import (
+    RetentionConfig,
+    compile_bounded_cache,
+    lexical_anchors,
+    observation_scores,
+    prune_cache,
+    select_indices,
+)
 from .retrofit import (
     FidelityReport,
     HFQCCAttention,
@@ -35,6 +43,12 @@ from .vllm_plugin import register_vllm_backend
 
 __all__ = [
     "AssociativeLandmarkState",
+    "RetentionConfig",
+    "compile_bounded_cache",
+    "lexical_anchors",
+    "observation_scores",
+    "prune_cache",
+    "select_indices",
     "SetAssociativeLandmarkBank",
     "CausalWeightedKVBank",
     "CausalWeightedKVState",

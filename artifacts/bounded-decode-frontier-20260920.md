@@ -686,6 +686,46 @@ So the honest summary of the trade-off is: a 1024-slot cache maximises speed and
 state reduction and reaches 0.862 on the worst task; a 4096-slot cache meets both
 quality targets and keeps 8x concurrency and 5x throughput.
 
+### 3.16 The retention law is now part of the package, not just a benchmark
+
+Everything above was measured with a standalone harness. The law now ships as
+`qcc_transformer/retention.py` with an HF entry point:
+
+```python
+from qcc_transformer import RetentionConfig, compile_bounded_cache
+
+config = RetentionConfig(budget=4096, lex_cap=512, chain_hops=6)
+cache, logits = compile_bounded_cache(model, input_ids, config, tokenizer=tokenizer)
+# decode against `cache` exactly as against any other HF cache
+```
+
+* `prefill_capture` runs the model's own exact causal attention in fixed chunks
+  and keeps only `O(obs * d)` hidden state per layer.
+* `observation_scores` computes the question-window importance (final query, or
+  a two-pass mean/max over the window).
+* `lexical_anchors` finds the question's rare strings earlier in the prompt and
+  optionally follows assignment chains.
+* `select_indices` produces a **uniform** retained width (`budget + lex_cap`) for
+  every head and layer, which is what makes one 2-D mask able to describe a whole
+  batch, and `prune_cache` gathers the survivors in place so each key keeps its
+  original rotary phase.
+
+It adds no parameters and never touches the pretrained weights, so the retrofit
+property is unchanged. Verification:
+
+* `tests/test_retention.py` - five CPU tests on a tiny randomly-initialised
+  Llama, covering uniform width, "keep everything reproduces the uncompiled
+  prefill's tokens", forced sinks/recent, anchor recall of a repeated key, and
+  assignment-chain following. They caught a real bug during development: the
+  packaged `last`-query scoring had a wrong einsum operand rank.
+* `validate_packaged.py` - four real RULER records at ~12K through the packaged
+  API: score 1.0 on all four, 4608 slots retained, 2.3-3.9 s per record,
+  6.2-7.3 GiB peak.
+* The repository's full test suite passes (the one pre-existing failure was a
+  test bug: it called `delattr` on an *inherited* attribute and asserted an
+  empty-cache return value that Transformers 5.x no longer provides; both are
+  fixed).
+
 ## 4. What this establishes, and what it does not
 
 Establishes:
