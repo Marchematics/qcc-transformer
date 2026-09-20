@@ -471,6 +471,8 @@ def main():
     ap.add_argument("--obs", type=int, default=64)
     ap.add_argument("--nsink", type=int, default=4)
     ap.add_argument("--pool", type=int, default=7)
+    ap.add_argument("--dilate", type=int, default=0)
+    ap.add_argument("--top-v", type=int, default=64)
     ap.add_argument("--max-new", type=int, default=16)
     ap.add_argument("--prefill-chunk", type=int, default=8192)
     ap.add_argument("--out", required=True)
