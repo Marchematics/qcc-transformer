@@ -631,6 +631,31 @@ dynamic decode, i.e. **1.83x** rather than the 4.21x the 1024-slot cache
 achieves. The retained set is four times larger, so attention over it is no
 longer negligible next to the weight read.
 
+### 3.14b Measurement conditions for every latency number
+
+This box is shared with other tenants, and that matters more than any tuning
+detail. The same bounded-graph configuration measured **6.87 ms** per token when
+the card was otherwise idle and **11.0-18.4 ms** while a co-tenant was running;
+the matched Full-KV arm went from 28.95 ms to 94.2 ms and often fails outright
+with OOM at 128K. Contention penalises the Full-KV arm harder because its decode
+copies a 4 GiB cache every step, so a contended window *inflates* the speedup
+ratio.
+
+Consequences, applied throughout this document:
+
+* Every latency claim names the window it came from. The headline **4.21x** is
+  bounded-graph 6.87 ms (measured 23:04) against Full-KV dynamic 28.95 ms
+  (measured 22:20-22:26), both inside the same quiet period; the bounded number
+  was reproduced at 6.86-6.87 ms in three separate runs.
+* The quality budget (4096 slots) measured 11.02 ms in a less contended window
+  and 13.4-17.7 ms in busier ones, i.e. **2.6x-1.6x** against the same 28.95 ms
+  baseline. The spread is measurement noise, not a cache effect.
+* The TPOT-floor harness now reports the minimum of five repetitions rather than
+  a single sample, and its parity check still gates every number.
+* Because full-KV at 128K needs ~23 GiB while prefilling, it can only be measured
+  on an otherwise empty card - which is itself part of why the concurrency
+  comparison is lopsided.
+
 ### 3.15 Cross-model check: blocked by the second checkpoint's remote code
 
 The quality result rests on one checkpoint (Llama-3.2-1B). Testing it on

@@ -35,21 +35,29 @@ except ImportError:
 BYTES_PER_TOKEN = 16 * 8 * 64 * 2 * 2  # Llama-3.2-1B geometry
 
 
-def timeit(fn, n, warmup=1, reps=2):
+def timeit(fn, n, warmup=1, reps=5):
+    """Return (min, mean) per-step seconds.
+
+    This box is shared with other tenants and a single sample can be inflated by
+    50% or more, so the *minimum* across reps is the least-contaminated estimate
+    of the true per-step cost; the mean is reported alongside it.
+    """
     for _ in range(warmup):
         fn(n)
     torch.cuda.synchronize()
-    t0 = time.time()
+    samples = []
     for _ in range(reps):
+        t0 = time.time()
         fn(n)
-    torch.cuda.synchronize()
-    return (time.time() - t0) / reps / n
+        torch.cuda.synchronize()
+        samples.append((time.time() - t0) / n)
+    return min(samples), sum(samples) / len(samples)
 
 
 class Runner:
     """Decode `n` greedy steps against a fixed retained K/V set."""
 
-    def __init__(self, model, keys, values, kept, max_new, mode):
+    def __init__(self, model, keys, values, kept, max_new, mode, clone=True):
         self.model = model
         self.kept = kept
         self.mode = mode
@@ -58,8 +66,13 @@ class Runner:
         self.cache_position = None
         self.position_ids = None
         self.logits_buf = None
+        self.clone = clone
         if mode == "dynamic":
-            self._base = [(k, v) for k, v in zip(keys, values)]
+            # clone=False lets the matched Full-KV arm reuse the prefill tensors
+            # instead of duplicating a 4 GiB cache at 128K, so both arms can be
+            # timed inside one process, back to back, under identical conditions
+            self._base = [(k.clone() if clone else k, v.clone() if clone else v)
+                          for k, v in zip(keys, values)]
             self.cache = DynamicCache()
             for k, v in self._base:
                 lyr = DynamicLayer()
@@ -86,8 +99,8 @@ class Runner:
             self.cache = DynamicCache()
             for k, v in base:
                 lyr = DynamicLayer()
-                lyr.keys = k.clone()
-                lyr.values = v.clone()
+                lyr.keys = k.clone() if self.clone else k
+                lyr.values = v.clone() if self.clone else v
                 lyr.is_initialized = True
                 lyr.dtype = lyr.keys.dtype
                 lyr.device = lyr.keys.device
@@ -272,16 +285,20 @@ def main():
         try:
             if name.endswith("graph"):
                 runner.prepare_graph()
-            tpot = timeit(lambda n: runner(n, next_id, Lc), args.max_new)
-            results["variants"][name] = {"tpot_ms": round(tpot * 1000, 3), "state_bytes": state_bytes}
-            print(f"  {name:22s} TPOT={tpot*1000:8.3f} ms", flush=True)
+            best, mean = timeit(lambda n: runner(n, next_id, Lc), args.max_new)
+            results["variants"][name] = {"tpot_ms": round(best * 1000, 3),
+                                         "tpot_mean_ms": round(mean * 1000, 3),
+                                         "state_bytes": state_bytes}
+            print(f"  {name:22s} TPOT min={best*1000:8.3f} ms  mean={mean*1000:8.3f} ms",
+                  flush=True)
         except Exception as exc:  # noqa: BLE001
             results["variants"][name] = {"error": str(exc)[:300]}
             print(f"  {name:22s} FAILED: {str(exc)[:140]}", flush=True)
 
     for mode in args.modes:
         record(f"full_kv_{mode}", BYTES_PER_TOKEN * Lc,
-               Runner(model, [k for k, _ in orig], [v for _, v in orig], Lc, args.max_new, mode))
+               Runner(model, [k for k, _ in orig], [v for _, v in orig], Lc, args.max_new, mode,
+                      clone=False))
         torch.cuda.empty_cache()
     for mode in args.modes:
         record(f"bounded_{mode}", BYTES_PER_TOKEN * kept,
