@@ -4,6 +4,42 @@
 交接对象：下一位继续实现、评测或部署 QCC Transformer 的工程师/模型
 状态：代码已推送；99 gate 尚未通过；不要把当前结果包装成已达标结果。
 
+## 当前审计（2026-09-20）：有界 decode 缓存的选择律已找到
+
+新证据在 `artifacts/bounded-decode-frontier-20260920.md`，原始结果在
+`artifacts/bounded-decode-frontier-aggregate-v2.json` 与
+`...-sweep-v1.json`，复现脚本为 `benchmarks/benchmark_selection_frontier.py`、
+`benchmarks/benchmark_bounded_decode_frontier.py` 和
+`benchmarks/summarize_bounded_decode.py`。
+
+在真实 frozen `Llama-3.2-1B-Instruct`（16 层、8 KV heads、原生 128K）、
+bf16、A10G 上做的独立诊断：prefill 用精确分块因果注意力（等价于一次长
+forward，activation 有界），只在 prompt 末尾用**最后 64 个 token（问题本身）
+的注意力**对每个 (layer, kv-head) 的 key 打分，做 7-token 块 max-pool 后保留
+top-B，加上 4 个 attention sink 和一个近期窗口；decode 只对这个有界集合做精确
+softmax 注意力，key 保留原生 RoPE 相位。
+
+结果（6 条记录 × 3 个长度 × 2 个 key/value 对，Full-KV 在 18/18 条上正确）：
+
+| 长度 | recent 1024 | obs_mean 1024 | obs_max 512 | obs_last 128 | obs_last 1024 |
+|---|---:|---:|---:|---:|---:|
+| ~32K | 0/6 | 6/6 | 3/6 | 6/6 | 6/6 |
+| ~64K | 0/6 | 5/6 | 6/6 | 4/6 | 6/6 |
+| ~128K | 0/6 | 6/6 | 3/6 | 6/6 | 6/6 |
+| 合计 /18 | 0 | 17 | 12 | 16 | **18** |
+
+B=128 即每 (layer, kv-head) 128 个槽位，decode 缓存 4 MiB；128K 的 Full-KV
+是 4.00 GiB，缩小 `1024x`；B=1024 是 32 MiB，缩小 `128x`，并达到 `18/18`
+（100% retention）。`128K -> 1M` 的有界 decode 状态增长是 `1.00x`。该策略
+**零新增参数、无需校准或重训**，也**不使用未来 query**（观测窗口就是问题本身）。
+
+边界（必须一起读）：prefill 仍是精确的，瞬时 KV 为 `O(L)`，所以“有界”只成立
+于持久 decode 状态；这里只有合成 RULER-style NIAH，没有官方 RULER/LongBench/
+PG-19，没有 1M-native checkpoint 结果，也没有 vLLM/TPOT/吞吐/并发测量。旧递推
+archive、quality-first future-query 选择、H2O 累积质量、key-norm、recency 都在
+同一 harness 下失败，说明此前的失败来自选择律与 archive 读出/混合路径，而不是
+“有界状态”本身。
+
 ## 当前审计（2026-09-16）
 
 最新真实 Phi-3.5-mini 32K 结果已记录在
