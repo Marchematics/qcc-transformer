@@ -236,19 +236,32 @@ then by score up to `budget + 128` slots — takes official-RULER retention from
 | `lex_obs` | 1024 | **0.941** | **1.000** | **1.000** | **1.000** | 0.000 |
 | `lex_obs` | 2048 | **0.941** | **1.000** | **1.000** | **1.000** | 0.000 |
 
-**Variable tracking, precisely.** The residual gap is *not* the selection law.
-Adding assignment-chain following — after anchoring the queried value, follow
-only identifiers that are themselves defined by an assignment, hop by hop, and
-keep the whole matched lines — makes the lexical selection contain the complete
-answer set for **20/20 vt records** (~290 of the 1152 retained slots), verified
-by decoding the selected token positions offline. The test-set result does not
-move (`ruler_v5.json` reproduces `ruler_v4.json` exactly): on the three vt
-records that matched Full-KV answers, the bounded cache now holds every chain
-line, yet the model still emits an incomplete list (for example `ZJWJL BBNES
-PGYAS` plus a truncated `XFE`, where `CDXFE` and `DQKDH` are required and
-present in the cache). So the remaining vt gap is the checkpoint's ability to
-emit a multi-item list from a compacted context, not the retention law's
-ability to find the chain. Raising the budget to 2048 does not change it.
+**Variable tracking, precisely.** The residual gap is *not* the selection law,
+and four separate experiments now show that (`vt_probe.json`, `vt_probe2.json`,
+`vt_probe3.json`):
+
+1. **Selection is solved.** With assignment-chain following the lexical
+   selection contains the complete answer set for **20/20 vt records**
+   (~290 of 1152 retained slots), verified by decoding the selected positions
+   offline. The model needs 5 names; the cache holds all 5.
+2. **Not capacity.** Raising the budget from 1024 to 2048, 4096 and 8192 slots
+   (25% of a 32K context) does not fix it. At B=8192 two of the four
+   Full-KV-correct records pass, at B<=4096 none do.
+3. **Not noise.** `lex_only` — chain lines plus sinks and the recent window, with
+   *no* attention-selected filler at all, a cache of ~800-2300 tokens — also
+   fails at every budget.
+4. **Not the header, and not the generation budget.** Raising the attention sink
+   from 4 to 96 tokens (so the instruction header is retained) changes nothing,
+   and raising the generation budget from 32/48 to 128 tokens changes nothing.
+
+What happens instead is visible in the outputs: the model emits a partial list
+and stops. With Full-KV it writes `XFE ZJWJL BBNES PGYAS DQKDH PGYAS CDXFE ...`,
+a repetition that eventually contains all five names; with any bounded cache it
+writes `XFE ZJWJL BBNES PGYAS [DQKDH]` and then drifts back into the
+instruction. (`CDXFE` tokenises as `CD|X|FE`, and the model's first generated
+token is the suffix `XFE` in *both* arms, so this is a generation-stability
+property of the checkpoint, not a cache artefact.) The checker requires all five
+names, so vt retention is 0.
 
 All three retrieval tasks reach **100% retention** (48/48 records) at B=1024, a
 32 MiB decode cache. The aggregate is held at 0.941 and the worst task at 0.000
@@ -390,6 +403,31 @@ concurrency.
   like-for-like speedup is **2.07x** — consistent with the 2.70x bandwidth
   bound above.
 * Recall is 100% through batch 4 and 7/8 at batch 8.
+
+### 3.10 Language modelling under bounded retention
+
+Retrieval asks whether one fact survives. `benchmark_bounded_decode_lm_nll.py`
+asks the broader question: with an exact prefill and a bounded decode cache, how
+much does the next-token distribution degrade on ordinary long text? A 32,768
+token document is assembled from local sources, prefilled exactly, and its last
+256 tokens are scored by teacher forcing under each cache. There is no question
+to anchor on, so the observation window is simply the last 64 prefix tokens (the
+SnapKV setting) and no lexical anchors are used.
+
+| cache | kept slots | NLL | perplexity | ppl ratio to Full-KV |
+|---|---:|---:|---:|---:|
+| Full-KV | 32,512 | 2.921 | 18.56 | 1.00x |
+| `obs_last` B=1024 | 1,024 | 3.393 | 29.76 | **1.60x** |
+| `obs_last` B=2048 | 2,048 | pending | pending | pending |
+| `obs_last` B=4096 | 4,096 | pending | pending | pending |
+| `obs_last` B=8192 | 8,192 | pending | pending | pending |
+
+At a 3% budget the retention law costs 60% perplexity on general text, even
+though it preserves retrieval perfectly. That is the expected shape: a top-k
+cache selected by a 64-token observation window keeps what the recent context
+asks about, and long-range *language modelling* needs far more of the document
+than long-range *retrieval* does. It is also why the quality target should be
+read per task family rather than as one number.
 
 ## 4. What this establishes, and what it does not
 

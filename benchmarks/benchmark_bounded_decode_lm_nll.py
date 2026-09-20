@@ -151,9 +151,8 @@ def main():
         print(f"  {name:12s} kept={kept:>7} NLL={nll:.5f} ppl={ppl:.3f}", flush=True)
         return nll
 
-    full_nll = run("full_kv", None)
-    results["variants"]["full_kv"]["is_reference"] = True
-
+    # Score every policy *before* any variant runs: teacher forcing appends the
+    # suffix to the cache, which would make later key indices inconsistent.
     scores = {}
     for policy in args.policies:
         mode = "last" if policy.startswith("obs_last") else (
@@ -161,6 +160,11 @@ def main():
         if mode is not None:
             scores[policy] = L.obs_scores(model, captured, cache, prefix_len, args.obs, mode,
                                           key_chunk=4096)
+
+    full_nll = run("full_kv", None)
+    results["variants"]["full_kv"]["is_reference"] = True
+
+    for policy in args.policies:
         nrecent = max(1, int(args.budget * 0.25))
         if policy == "recent":
             sel = sorted(range(max(0, prefix_len - args.budget), prefix_len))
