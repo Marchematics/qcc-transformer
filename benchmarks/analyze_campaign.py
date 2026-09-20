@@ -32,6 +32,20 @@ def mib(value):
     return round(value / 2**20, 1)
 
 
+def official(prediction, outputs):
+    """RULER's string_match_all: mean fraction of references present."""
+    refs = [out for out in outputs if out]
+    if not refs:
+        return 0.0
+    low = prediction.lower()
+    return sum(1.0 for ref in refs if ref.lower() in low) / len(refs)
+
+
+def strict(prediction, outputs):
+    refs = [out for out in outputs if out]
+    return 1.0 if refs and all(ref.lower() in prediction.lower() for ref in refs) else 0.0
+
+
 def multimodel(paths):
     print("| model | task | records | Full-KV | bounded | retention mean | worst | slots | decode state |")
     print("|---|---|---:|---:|---:|---:|---:|---:|---:|")
@@ -80,17 +94,21 @@ def baselines(path):
         per_task, ratios = {}, []
         for task in tasks:
             entries = [row for row in selected if row["task"] == task]
-            per_task[task] = round(sum(row["answer_recall"] for row in entries) / len(entries), 3)
+            per_task[task] = round(sum(official(row["prediction"], row["outputs"])
+                                       for row in entries) / len(entries), 3)
             for row in entries:
                 reference = full.get((row["task"], tuple(row["outputs"])))
-                if reference and reference["answer_recall"] > 0:
-                    ratios.append(row["answer_recall"] / reference["answer_recall"])
+                score = official(row["prediction"], row["outputs"])
+                base = official(reference["prediction"], reference["outputs"]) if reference else 0.0
+                if base > 0:
+                    ratios.append(score / base)
         slots = sum(row["kept_slots"] for row in selected) / len(selected)
         print(f"| {policy} | " + " | ".join(f"{per_task[task]:.3f}" for task in tasks) +
               f" | {len(ratios)} | {sum(ratios) / len(ratios):.4f} | {min(ratios):.3f} "
               f"| {slots:.0f} | {mib(state_bytes(model_path, slots))} MiB |")
     reference = [row for row in rows if row["policy"] == "full"]
-    per_task = {task: round(sum(r["answer_recall"] for r in reference if r["task"] == task) /
+    per_task = {task: round(sum(official(r["prediction"], r["outputs"]) for r in reference
+                                if r["task"] == task) /
                             max(1, len([r for r in reference if r["task"] == task])), 3)
                 for task in tasks}
     print(f"| full (reference) | " + " | ".join(f"{per_task[task]:.3f}" for task in tasks) + " |")
@@ -108,9 +126,11 @@ def baselines(path):
             other = shipped.get((row["task"], tuple(row["outputs"])))
             if not other:
                 continue
-            if row["answer_recall"] > other["answer_recall"]:
+            score = official(row["prediction"], row["outputs"])
+            other_score = official(other["prediction"], other["outputs"])
+            if score > other_score:
                 wins += 1
-            elif row["answer_recall"] < other["answer_recall"]:
+            elif score < other_score:
                 losses += 1
             else:
                 ties += 1

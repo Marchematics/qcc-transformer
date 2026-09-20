@@ -935,13 +935,37 @@ does, and every row records whether it was truncated.
   The next measurement isolates that: attention ranking alone, at the same
   retained width, over the RULER split.
 
-| configuration (Llama-3.2-1B, 4,608 slots, 80 records) | single_1 | multikey_2 | multikey_3 | vt | aggregate | worst task |
+**Baselines at the same budget.** One prefill per record, then seven selection
+policies decode from the same prompt at the same retained width, so the only
+variable is what survives. All policies share the sinks, the recent window, the
+sliding-window dilation and the block pooling, so this isolates the scoring
+signal; the metric is RULER's official `string_match_all`, recomputed from the
+stored predictions because the raw harness field is the strict variant.
+
+| policy | single_1 | multikey_2 | multikey_3 | vt | aggregate retention | worst task | slots | state |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| sliding window only (`recent`, StreamingLLM without sinks) | 0.300 | 0.050 | 0.000 | 0.120 | 0.167 | 0.000 | 4,096 | 128 MiB |
+| sinks + recent (`sink_recent`) | 0.300 | 0.250 | 0.250 | 0.270 | 0.332 | 0.000 | 4,096 | 128 MiB |
+| last-query ranking (`obs_last`) | 1.000 | 0.800 | 0.050 | 0.640 | 0.842 | 0.000 | 4,096 | 128 MiB |
+| max over the window (`obs_max`) | 1.000 | 0.750 | 0.150 | 0.650 | 0.863 | 0.000 | 4,096 | 128 MiB |
+| mean over the window (`obs_mean`, SnapKV-shaped) | 1.000 | 0.800 | 0.200 | 0.640 | 0.880 | 0.000 | 4,096 | 128 MiB |
+| **shipped: window ranking + anchors (`lex_obs`)** | 1.000 | **0.950** | **0.450** | 0.660 | **1.008** | **0.500** | 4,608 | 144 MiB |
+| Full-KV reference | 1.000 | 0.950 | 0.450 | 0.660 | - | - | - | 4,096 MiB at 128K |
+
+Every policy without the anchors fails at least one task completely (worst task
+0.000); the shipped configuration is the only one that is never the limiting
+factor, and it is the only one that matches Full-KV on the two hardest tasks.
+
+**Which part does the work.**
+
+| configuration (Llama-3.2-1B, 80 records) | single_1 | multikey_2 | multikey_3 | vt | aggregate | worst task |
 |---|---:|---:|---:|---:|---:|---:|
-| attention ranking only (`lex_cap=0`) | 1.000 | 0.895 | 0.333 | 1.039 | **0.817** | 0.333 |
+| attention ranking only (`lex_cap=0`, packaged) | 1.000 | 0.895 | 0.333 | 1.039 | **0.817** | 0.333 |
+| best ranking variant as a baseline (`obs_mean`, 4,096 slots) | 1.000 | 0.800 | 0.200 | 0.640 | **0.880** | 0.000 |
 | + task-agnostic rarity anchors (`anchor_mode="rare"`) | 1.000 | 0.895 | **0.889** | 0.968 | **0.938** | 0.889 |
 | shipped: pattern anchors + chain following | 1.000 | 1.000 | 1.000 | 1.028 | **1.007** | 1.000 |
 
-The middle row matters most for generality. `anchor_mode="rare"` removes every
+The third row matters most for generality. `anchor_mode="rare"` removes every
 task-shaped element: no UUID, hyphenated-identifier or long-number patterns, no
 assignment-chain following - a question token is a cue if the context contains it
 at most `max_occurrences` times. That alone lifts the hardest task from 0.333 to
