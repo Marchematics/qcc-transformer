@@ -50,6 +50,8 @@ def main():
     ap.add_argument("--prefill-chunk", type=int, default=8192)
     ap.add_argument("--obs", type=int, default=64)
     ap.add_argument("--seed", type=int, default=9001)
+    ap.add_argument("--skip-dynamic", action="store_true",
+                    help="the plain dynamic path grows a 4 GiB cache per step and can OOM at 128K")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
 
@@ -102,11 +104,16 @@ def main():
             dyn_tokens.append(int(st["cur"]))
         torch.cuda.synchronize()
 
-    dt = timeit(run_dynamic, args.max_new)
-    out["variants"]["full_kv_dynamic"] = {"tpot_ms": round(dt * 1000, 3)}
-    print(f"  full_kv_dynamic  TPOT={dt*1000:8.3f} ms", flush=True)
-    ref_tokens = list(dyn_tokens)
-    del mask
+    if args.skip_dynamic:
+        ref_tokens = None
+        del mask
+        print("  full_kv_dynamic  skipped", flush=True)
+    else:
+        dt = timeit(run_dynamic, args.max_new)
+        out["variants"]["full_kv_dynamic"] = {"tpot_ms": round(dt * 1000, 3)}
+        print(f"  full_kv_dynamic  TPOT={dt*1000:8.3f} ms", flush=True)
+        ref_tokens = list(dyn_tokens)
+        del mask
 
     # ---- 2. Full-KV, StaticCache + CUDA graph (ownership is moved, not copied) ----
     max_len = Lc + args.max_new
@@ -175,16 +182,20 @@ def main():
         gt = timeit(run_graph, args.max_new)
         out["variants"]["full_kv_graph"] = {"tpot_ms": round(gt * 1000, 3)}
         print(f"  full_kv_graph    TPOT={gt*1000:8.3f} ms", flush=True)
-        out["parity_full_kv"] = {"matches_dynamic": graph_tokens == ref_tokens,
-                                 "graph": graph_tokens[:8], "dynamic": ref_tokens[:8]}
-        print(f"  parity Full-KV graph vs dynamic: "
-              f"{'OK' if graph_tokens == ref_tokens else 'MISMATCH'}", flush=True)
+        if ref_tokens is not None:
+            out["parity_full_kv"] = {"matches_dynamic": graph_tokens == ref_tokens,
+                                     "graph": graph_tokens[:8], "dynamic": ref_tokens[:8]}
+            print(f"  parity Full-KV graph vs dynamic: "
+                  f"{'OK' if graph_tokens == ref_tokens else 'MISMATCH'}", flush=True)
+        else:
+            out["parity_full_kv"] = {"checked": False, "graph": graph_tokens[:8]}
+            print(f"  graph tokens: {graph_tokens[:8]}", flush=True)
     except Exception as exc:  # noqa: BLE001
         out["variants"]["full_kv_graph"] = {"error": str(exc)[:200]}
         print(f"  full_kv_graph    FAILED: {str(exc)[:120]}", flush=True)
 
     out["peak_cuda_gib"] = round(torch.cuda.max_memory_allocated() / 2**30, 3)
-    if "tpot_ms" in out["variants"].get("full_kv_graph", {}):
+    if "tpot_ms" in out["variants"].get("full_kv_graph", {}) and "tpot_ms" in out["variants"].get("full_kv_dynamic", {}):
         out["graph_speedup"] = round(
             out["variants"]["full_kv_dynamic"]["tpot_ms"] /
             out["variants"]["full_kv_graph"]["tpot_ms"], 3)

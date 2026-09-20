@@ -475,6 +475,15 @@ Reading this honestly:
   bounded+graph NF4 configuration is nonetheless a real result on its own:
   **4.98 ms per token, i.e. 201 tok/s single-stream at 128K context, with a
   1024x smaller cache**, verified token-identical to the dynamic path.
+* **Full-KV cannot be given the same optimisation at 128K on this card.**
+  `benchmark_fullkv_tpot_graph.py` builds a StaticCache that *takes ownership*
+  of the prefilled tensors (so only one cache exists at a time; peak 10.48 GiB)
+  and then tries to capture the decode step. The capture itself OOMs: a 128K
+  forward needs activation workspace on the order of the per-layer MLP
+  intermediate (2.1 GiB per tensor at this length) on top of the 4 GiB cache.
+  The bounded path captures fine because its attention runs over 1,152 keys.
+  The 4.21x is therefore not an artefact of withholding an optimisation from
+  the baseline: at 128K the baseline cannot use it.
 * **No matched configuration reaches 5x.** The target is not met at batch 1 on
   this card; the bandwidth bound says it cannot be for a 1B model whose weights
   alone are 4.12 ms of the step.

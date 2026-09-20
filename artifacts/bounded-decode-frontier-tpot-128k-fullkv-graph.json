@@ -1,0 +1,11 @@
+{
+ "context_tokens": 127465,
+ "model": "/root/qcc/models/Llama-3.2-1B-Instruct",
+ "max_new": 32,
+ "variants": {
+  "full_kv_graph": {
+   "error": "CUDA out of memory. Tried to allocate 500.00 MiB. GPU 0 has a total capacity of 23.55 GiB of which 190.31 MiB is free. Process 3012971 has 358.00 MiB memory in use. Process 3012969 has 358.00 MiB memo"
+  }
+ },
+ "peak_cuda_gib": 19.105
+}
