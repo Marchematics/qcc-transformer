@@ -119,6 +119,30 @@ def apply_rope(q, cos, sin):
     return q * cos + rotate_half(q) * sin
 
 
+_FORWARD_ARGS: dict[int, set[str]] = {}
+
+
+def forward_accepts(model, name: str) -> bool:
+    """Whether the model's own forward advertises `name`.
+
+    Older remote-code checkpoints (Phi-3/Phi-4) do not accept `cache_position`,
+    so it must be omitted rather than passed and rejected.
+    """
+    key = id(model)
+    if key not in _FORWARD_ARGS:
+        try:
+            import inspect as _inspect
+            _FORWARD_ARGS[key] = set(_inspect.signature(model.forward).parameters)
+        except (TypeError, ValueError):
+            _FORWARD_ARGS[key] = set()
+    return name in _FORWARD_ARGS[key]
+
+
+def model_kwargs(model, **kw):
+    """Drop kwargs the model's forward does not accept."""
+    return {k: v for k, v in kw.items() if v is not None and forward_accepts(model, k)}
+
+
 @torch.no_grad()
 def prefill_capture(model, ids, obs, chunk):
     """Exact causal prefill in bounded chunks.
@@ -149,8 +173,9 @@ def prefill_capture(model, ids, obs, chunk):
             seg = ids[:, start:end]
             pos = torch.arange(start, end, device=ids.device)
             mask = torch.ones(1, end, device=ids.device, dtype=torch.long)
-            o = model(seg, past_key_values=cache, attention_mask=mask,
-                      position_ids=pos.unsqueeze(0), cache_position=pos, use_cache=True)
+            o = model(seg, **model_kwargs(model, past_key_values=cache, attention_mask=mask,
+                                          position_ids=pos.unsqueeze(0), cache_position=pos,
+                                          use_cache=True))
             last_logits = o.logits[:, -1:]
     finally:
         for h in handles:
@@ -508,20 +533,18 @@ def build_idxs(policy, scores, cache, record, budget, nsink, nrecent, L, pool, d
             s_forced = scores_layer_with_forcing(sc, nsink, nrecent, L, pool, dilate)
             order = torch.argsort(s_forced, descending=True)
             rows = []
+            k = min(target, sc.shape[-1])
+            topk = torch.topk(s_forced, k, dim=-1).indices   # vectorised, O(target)
+            anchor_list = [p for p in anchors if p < sc.shape[-1]]
+            anchor_set = set(anchor_list)
             for h in range(sc.shape[0]):
-                chosen, seen = [], set()
-                for p in anchors:                      # lexical anchors first
-                    if len(chosen) >= target:
-                        break
-                    if p not in seen:
-                        chosen.append(p)
-                        seen.add(p)
-                for p in order[h].tolist():            # then the attention ranking
-                    if len(chosen) >= target:
-                        break
-                    if p not in seen:
-                        chosen.append(p)
-                        seen.add(p)
+                chosen = list(anchor_list[:target])
+                if len(chosen) < target:
+                    for p in topk[h].tolist():
+                        if len(chosen) >= target:
+                            break
+                        if p not in anchor_set:
+                            chosen.append(p)
                 rows.append(sorted(chosen[:target]))
             out.append(torch.tensor(rows, device=device, dtype=torch.long))
         return out
@@ -545,8 +568,9 @@ def decode(model, cache, next_id, L, max_new, eos_ids):
     gen, cur, t0 = [], next_id, time.time()
     for step in range(max_new):
         cp = torch.tensor([L + step], device=dev)
-        o = model(cur, past_key_values=cache, attention_mask=mask,
-                  cache_position=cp, position_ids=cp.unsqueeze(0), use_cache=True)
+        o = model(cur, **model_kwargs(model, past_key_values=cache, attention_mask=mask,
+                                      cache_position=cp, position_ids=cp.unsqueeze(0),
+                                      use_cache=True))
         tok = o.logits[:, -1:].argmax(-1)
         gen.append(tok.item())
         mask = torch.cat([mask, torch.ones(1, 1, device=dev, dtype=torch.long)], dim=1)

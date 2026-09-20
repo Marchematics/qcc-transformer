@@ -585,6 +585,45 @@ every suite the repository's handoff mentions. In state terms 4096 slots is
 Full-KV cache at 128K, but far from the 4 MiB that the 1024-slot retrieval
 configuration uses.
 
+### 3.14 The configuration that meets quality, and what it costs
+
+The objective's metrics have to hold *simultaneously*, so the serving sweeps were
+re-run at the retention budget that meets the quality targets (4096 slots + 512
+lexical anchors, `serving_seq_*_q4096.json`).
+
+| configuration | aggregate quality | worst task | decode state @128K | max batch | peak | throughput @32K |
+|---|---:|---:|---:|---:|---:|---:|
+| B=1024 (retrieval-tuned) | 1.003 | 0.862 (vt) | 4 MiB | 32 | 6.6 GiB | 1947 tok/s |
+| **B=4096 (quality)** | **1.000** | **1.000** | 151 MiB | 32 | 11.9 GiB | 620 tok/s |
+
+Details at the quality budget:
+
+| context | batch | decode tok/s | TPOT | peak | recall |
+|---:|---:|---:|---:|---:|---:|
+| 32K | 1 | 18.4 | 54.3 ms | 5.17 GiB | 1/1 |
+| 32K | 8 | 377.2 | 21.2 ms | 6.17 GiB | 8/8 |
+| 32K | 16 | 464.1 | 34.5 ms | 7.36 GiB | 16/16 |
+| 32K | 32 | 620.1 | 51.6 ms | 11.90 GiB | **32/32** |
+| 128K | 1 | 60.9 | 16.4 ms | 10.48 GiB | 1/1 |
+| 128K | 2 | 122.4 | 16.4 ms | 11.39 GiB | 2/2 |
+
+* **Concurrency is unchanged at 8x** (32 concurrent 32K requests against matched
+  Full-KV's ceiling of 4), and recall is 100% at every batch size, so the
+  quality targets and the concurrency target are met by the same configuration.
+* **Throughput falls from 15.6x to 5.0x** (620 vs 124.7 tok/s at the largest
+  batch each policy fits): still above the 3x target, but the margin shrinks
+  because every decode step now reads 4x more retained KV.
+* **TPOT at 32K is noisy and higher** (21-54 ms against 13.7 ms at B=1024); the
+  128K numbers are steady at 16.4 ms, and the 32K batch-1 figure is inflated by
+  warm-up and by other tenants on this shared GPU (the 32K batch-1 number is
+  larger than the 128K one, which cannot be a real cache effect).
+* State grows from 4 MiB to 151 MiB per request at 128K - still 27x smaller than
+  the 4.00 GiB Full-KV cache, but no longer a rounding error.
+
+So the honest summary of the trade-off is: a 1024-slot cache maximises speed and
+state reduction and reaches 0.862 on the worst task; a 4096-slot cache meets both
+quality targets and keeps 8x concurrency and 5x throughput.
+
 ## 4. What this establishes, and what it does not
 
 Establishes:
