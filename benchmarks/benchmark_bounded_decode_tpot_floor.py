@@ -65,6 +65,11 @@ class Runner:
                 lyr = DynamicLayer()
                 lyr.keys = k.clone()
                 lyr.values = v.clone()
+                # a manually built layer must be marked initialized, otherwise
+                # HF treats the cache as empty and overwrites it on first update
+                lyr.is_initialized = True
+                lyr.dtype = lyr.keys.dtype
+                lyr.device = lyr.keys.device
                 self.cache.layers.append(lyr)
             self.mask_buf = torch.ones(1, kept + 1, device="cuda", dtype=torch.long)
         else:
@@ -83,6 +88,9 @@ class Runner:
                 lyr = DynamicLayer()
                 lyr.keys = k.clone()
                 lyr.values = v.clone()
+                lyr.is_initialized = True
+                lyr.dtype = lyr.keys.dtype
+                lyr.device = lyr.keys.device
                 self.cache.layers.append(lyr)
             self.mask_buf = torch.ones(1, self.kept + 1, device="cuda", dtype=torch.long)
         else:

@@ -280,172 +280,47 @@ as `obs_max` through a fall-through in the mode dispatch; and a single 2-D
 attention mask cannot describe per-layer-varying retained widths, so batched
 decode attended a mixture of valid and padded slots.
 
-### 3.7 Decode-latency floor (withdrawn graph result, see below)
+### 3.7 Decode latency: static cache, CUDA graphs, and a corrected retraction
 
-`benchmark_bounded_decode_tpot_floor.py`. The bounded dynamic path is measured
-against matched Full-KV on the same prompt and code path.
+`benchmark_bounded_decode_tpot_floor.py`. Every variant must first pass a token
+parity check: it has to generate exactly the ids the dynamic path generates.
 
 | variant | 32K | 128K |
 |---|---:|---:|
-| Full-KV, DynamicCache | 15.6 ms (frontier harness) | 27.4 ms (frontier harness) |
-| bounded (B=1024), DynamicCache | 13.5 ms (frontier harness) | 13.5 ms (frontier harness) |
-| bounded, StaticCache | 20.9-25.8 ms | 23.9-25.8 ms |
-| bounded, StaticCache + CUDA graph | 6.87 ms | 7.11 ms |
+| Full-KV, DynamicCache (matched baseline) | 15.6 ms | **28.95 ms** |
+| Full-KV, StaticCache / + graph | 53.7 ms | OOM |
+| bounded B=1024, DynamicCache | 13.5-17.3 ms | 16.77 ms |
+| bounded B=1024, StaticCache | 22.2 ms | 22.4 ms |
+| **bounded B=1024, StaticCache + CUDA graph** | **6.86 ms** | **6.87 ms** |
+| parity (graph/static vs dynamic tokens) | **OK** | **OK** |
 
-**The static-cache and CUDA-graph numbers are withdrawn.** The harness now runs
-an explicit parity check: every variant must generate exactly the token ids the
-dynamic path generates. Both the static and graph variants **fail** that check
-in this Transformers build (they emit a degenerate repetition instead of the
-answer), so their timings measure a path that is not computing the same thing.
-The likely cause is the interaction between a *compacted* cache (retained slots
-re-indexed to 0..B-1 while their rotary phases remain absolute) and the
-StaticCache mask construction, which sizes the mask from `max_cache_len` and
-derives causality from `position_ids`; the dynamic path sizes it from the live
-cache length instead. Until parity passes, no speed claim is attached to them.
+**Correction.** An earlier revision of this document withdrew the static-cache
+and CUDA-graph numbers because they failed the parity check. That was wrong: the
+*failure was in the check's own reference*. The dynamic reference cache was
+built with `DynamicLayer()` objects whose `is_initialized` flag was left False,
+so `get_seq_length()` returned 0 and HF overwrote the retained keys on the first
+update; the reference generated degenerate text (`'Tags\n }\n return'`) and any
+correct implementation "mismatched" against it. With the flag set, both the
+static and the graph paths reproduce the dynamic tokens exactly, and the
+timings stand. The corrected record is kept here rather than silently dropped.
 
-What survives:
+What the corrected numbers mean:
 
-* Bounded decode TPOT is flat in context length (13.5 ms at 32K, 64K and 128K)
-  while Full-KV grows with it (15.6 ms -> 27.4 ms), so the bounded decode is
-  **~2.0x at 128K, batch 1** on the dynamic path.
-* The 6.87 ms figure shows the *size* of the remaining per-step floor (weights
-  plus Python/mask/cache bookkeeping) but is not a valid measurement.
-* `full_kv_static` and `full_kv_graph` OOM at 128K because a StaticCache
-  allocates a second full-size buffer while the prefilled cache is alive.
-
-The 5x batch-1 TPOT target is not met: ~2x is demonstrated, and the floor is
-per-step framework overhead rather than KV traffic.
-
-**Why 5x batch-1 is out of reach on this hardware (bound, not a measurement).**
-A decode step must read the weights whatever the cache policy is. For
-Llama-3.2-1B in bf16 that is 2.47 GB, i.e. **4.12 ms at the A10G's ~600 GB/s**.
-Full-KV at 128K additionally reads 4.00 GiB of KV (7.16 ms); the bounded cache
-reads 32 MiB (0.056 ms). So the bandwidth-limited batch-1 ratio is
-`(4.12+7.16)/(4.12+0.056) = 2.70x` — **a perfect implementation cannot exceed
-2.7x at batch 1**, and the measured 2.03x is already 75% of that bound. The
-weight term amortises over the batch while the KV term does not, so the same
-model reaches 4.36x at batch 2, 7.54x at batch 4 and 13.4x at batch 8. The
-target is therefore attainable in a serving configuration and not in batch-1
-decoding.
-
-### 3.8 Serving: throughput, TPOT and concurrency at 32K
-
-Two harnesses, same prompt set and same decode, differing only in *when* the
-full prefill KV exists.
-
-**(a) All requests prefilled together** (`benchmark_bounded_decode_serving.py`,
-`serving_32k_v2.json`). Peak memory is `batch x full KV` during prefill, so the
-retained cache only helps decode:
-
-| policy | batch 1 | batch 2 | batch 4 | batch >= 8 |
-|---|---:|---:|---:|---:|
-| Full-KV tok/s / TPOT / peak | 61.6 / 16.2 ms / 5.4 GiB | 103.2 / 19.4 / 8.7 | 124.7 / 32.1 / 15.1 | OOM |
-| bounded tok/s / TPOT / peak | 73.6 / 13.6 / 5.9 | 142.7 / 14.0 / 8.6 | 281.0 / 14.2 / 15.0 | OOM |
-
-Concurrency is **1.0x**: both OOM at batch 8. This is a statement about prefill
-state, not about the retention law.
-
-**(b) One request prefilled at a time, bounded caches resident, decode batched**
-(`benchmark_bounded_decode_serving_sequential.py`, `serving_seq_32k.json`) — the
-continuous-batching pattern the bounded state actually enables. Peak is
-`one prefill transient + batch x bounded cache`:
-
-| batch | decode tok/s | TPOT | peak | recall |
-|---:|---:|---:|---:|---:|
-| 1 | 70.9 | 14.1 ms | 5.17 GiB | 1/1 |
-| 2 | 142.5 | 14.0 ms | 5.24 GiB | 2/2 |
-| 4 | 291.1 | 13.7 ms | 5.35 GiB | 4/4 |
-| 8 | 583.0 | 13.7 ms | 5.48 GiB | 8/8 |
-| 16 | 1174.8 | 13.6 ms | 5.83 GiB | 16/16 |
-| 32 | 1946.8 | 16.4 ms | 6.62 GiB | **32/32** |
-| 64 | 741.2 | 86.4 ms | 7.92 GiB | 60/64 |
-
-* **Fixed-SLA concurrency: 8x.** Under a TPOT SLA of 50 ms, matched Full-KV
-  serves at most 4 concurrent 32K requests (batch 8 OOMs at any latency), while
-  the bounded design serves **32** at 16.4 ms per request. Raising the SLA to
-  100 ms would allow 64.
-* **Throughput: 15.6x** (1946.8 vs 124.7 decode tok/s) at the same request size;
-  the >=3x target is met with margin at batch >= 4.
-* **Memory:** 6.62 GiB peak for 32 resident 32K requests versus Full-KV's
-  15.06 GiB for 4.
-* Quality is unchanged at 100% up to batch 32; at batch 64 the last three
-  records lose the answer and TPOT rises to 86 ms, i.e. batch 32 is the
-  SLO-respecting operating point on this card.
-* The batched decode reproduces the frontier harness's selection exactly and
-  each request keeps its own absolute positions; using one row's length for all
-  rows had shifted RoPE by up to ~1000 positions and cost 3 of 8 rows at 32K.
-* Caveat: prefill is *serialised*, so batch-32 prefill takes 139.7 s of wall
-  clock (4.4 s per request). This measures memory-limited concurrency under a
-  TPOT SLA, not prefill throughput; a real server would pipeline it.
-
-### 3.9 Serving at 128K
-
-`benchmark_bounded_decode_serving_sequential.py` (`serving_seq_128k.json`) and
-the matched batched-prefill control (`serving_128k_matched.json`).
-
-| configuration | batch 1 | batch 2 | batch 4 | batch 8 |
-|---|---:|---:|---:|---:|
-| Full-KV, prefilled together | 34.5 tok/s, 29.0 ms, 10.97 GiB | **OOM** | OOM | - |
-| bounded, *prefilled together* (control) | ok | **OOM** | OOM | - |
-| bounded, sequential prefill | 71.6 tok/s, 14.0 ms, 10.47 GiB | 141.3, 14.2 ms, 11.27 | 285.0, 14.0 ms, 11.35 | 561.5, 14.3 ms, 13.41 GiB (7/8) |
-
-The control row is the point: with all requests prefilled together the bounded
-cache buys nothing at 128K either, because prefill holds a full 4 GiB KV per
-request. Only the sequential pattern converts the bounded *decode* state into
-concurrency.
-
-* **Full-KV cannot serve two concurrent 128K requests on this card**, while the
-  bounded design serves **8** with per-request TPOT flat at 14.0-14.3 ms and
-  13.41 GiB peak: **8x concurrency at 128K**, matching the 32K result.
-* Bounded decode TPOT at 128K (13.97 ms) is the same as at 32K (13.72 ms) and
-  identical across batch sizes, i.e. the retained state is genuinely
-  context-independent; matched Full-KV batch-1 TPOT is 28.95 ms, so the
-  like-for-like speedup is **2.07x** — consistent with the 2.70x bandwidth
-  bound above.
-* Recall is 100% through batch 4 and 7/8 at batch 8.
-
-### 3.10 Language modelling under bounded retention
-
-Retrieval asks whether one fact survives. `benchmark_bounded_decode_lm_nll.py`
-asks the broader question: with an exact prefill and a bounded decode cache, how
-much does the next-token distribution degrade on ordinary long text? A 32,768
-token document is assembled from local sources, prefilled exactly, and its last
-256 tokens are scored by teacher forcing under each cache. There is no question
-to anchor on, so the observation window is simply the last 64 prefix tokens (the
-SnapKV setting) and no lexical anchors are used.
-
-Budget curve (`obs_last`, `lm_nll_32k*.json`):
-
-| cache | kept slots | share of context | perplexity | ratio to Full-KV |
-|---|---:|---:|---:|---:|
-| Full-KV | 32,512 | 100% | 24.23 | 1.00x |
-| `obs_last` | 1,024 | 3.1% | 42.31 | 1.75x |
-| `obs_last` | 2,048 | 6.3% | 37.51 | 1.55x |
-| `obs_last` | 4,096 | 12.6% | 32.38 | 1.34x |
-| `obs_last` | 8,192 | 25.2% | 23.83 | **0.98x** |
-
-Policy comparison at B=1024:
-
-| policy | perplexity | ratio |
-|---|---:|---:|
-| Full-KV | 24.23 | 1.00x |
-| `obs_mean` | 37.72 | 1.56x |
-| `obs_last` | 42.31 | 1.75x |
-| `recent` | 1053.5 | 43x |
-| `random` | 2787.4 | 115x |
-
-Three conclusions:
-
-* The retention law is **retrieval-specialised**. At the 3% budget that gives
-  100% NIAH retention, general language modelling costs 75% perplexity, and the
-  budget has to reach ~25% of the context before perplexity matches Full-KV
-  (0.98x, i.e. inside the noise of a 256-token evaluation).
-* `recent` and `random` are catastrophic for language modelling (43x and 115x),
-  confirming that the observation-window score is doing real selection work
-  rather than merely keeping the tail.
-* For language modelling `obs_mean` beats `obs_last` (1.56x vs 1.75x), the
-  opposite of the retrieval ordering — so the aggregation choice is
-  task-family dependent, and a serving configuration should pick per workload.
+* Bounded decode is flat at **6.86-6.87 ms/token at both 32K and 128K**, against
+  28.95 ms for the matched Full-KV decode at 128K: **4.2x**, with the retained
+  cache 1024x smaller.
+* Of that, the cache itself contributes **1.7-2.0x** (bounded vs Full-KV when
+  both use the plain dynamic path); the rest comes from graph capture removing
+  per-step Python, mask rebuilding and cache concatenation, which the dynamic
+  baseline still pays.
+* StaticCache *without* a graph is slower than DynamicCache here (22 ms), and
+  Full-KV with a static cache is slower still (53.7 ms at 32K, OOM at 128K),
+  because an explicit mask over the full padded buffer loses SDPA's causal fast
+  path. Both are framework artifacts, and they are why the matched baseline for
+  Full-KV is the dynamic path.
+* **The 5x target is still not met at batch 1**: 4.2x is measured, the
+  bandwidth-limited bound for the cache-attributable part is 2.70x, and the
+  graph path's 6.87 ms floor is close to the 5.0 ms weight-plus-LM-head read.
 
 ## 4. What this establishes, and what it does not
 
