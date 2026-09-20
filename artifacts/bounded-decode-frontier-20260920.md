@@ -625,6 +625,38 @@ at 128K with per-request TPOT of 16 ms against 29 ms.
 * State grows from 4 MiB to 151 MiB per request at 128K - still 27x smaller than
   the 4.00 GiB Full-KV cache, but no longer a rounding error.
 
+Decode latency at the quality budget (`tpot_q4096_128k.json`, 128K, parity OK):
+15.84 ms/token with a CUDA graph against 28.95 ms for the matched Full-KV
+dynamic decode, i.e. **1.83x** rather than the 4.21x the 1024-slot cache
+achieves. The retained set is four times larger, so attention over it is no
+longer negligible next to the weight read.
+
+### 3.15 Cross-model check: blocked by the second checkpoint's remote code
+
+The quality result rests on one checkpoint (Llama-3.2-1B). Testing it on
+Phi-3.5-mini (3.8B, 128K native, the model this repository's earlier sessions
+used) was attempted and is **blocked**, not skipped:
+
+* Phi-3.5 ships `modeling_phi3.py` with a legacy cache API. `cache_position` is
+  not in its `forward` signature (handled: the harness now drops unsupported
+  kwargs), and `get_usable_length`/`from_legacy_cache` are missing from
+  Transformers 5.x (handled: the repository's own `_ensure_remote_code_compat`
+  shim).
+* Its attention is eager, so a 16K prefill materialises a
+  `(1, 32, 16384, 16384)` score matrix (~15 GiB). Even chunked, the 16K band
+  OOMs on a 24 GiB card; the 8K band fits (peak 10.98 GiB) but the continuation
+  path then fails with a shape mismatch between the legacy cache and the
+  Transformers 5.x cache (`3072` vs `2048` at the attention dimension).
+* With a correct prompt (verified against `apply_chat_template`, and with the
+  answer prefix after the `<|assistant|>` header as RULER does), Phi's Full-KV
+  output on an 8K record was still degenerate (`'.7.\n.\n...'`), and its
+  first-chunk logits were flat at ~-29 across digit tokens.
+
+So the cross-model claim is **not made**: the retention law is verified on
+Llama-3.2-1B only, and making Phi-3.5 work needs a Transformers version matched
+to its remote code (or a converted checkpoint), which is a separate piece of
+work.
+
 So the honest summary of the trade-off is: a 1024-slot cache maximises speed and
 state reduction and reaches 0.862 on the worst task; a 4096-slot cache meets both
 quality targets and keeps 8x concurrency and 5x throughput.
