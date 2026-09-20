@@ -1043,46 +1043,71 @@ Three things follow, and one caveat.
 
 ## 4. What this establishes, and what it does not
 
-Establishes:
+Establishes (every number produced by the shipped `compile_bounded_cache`, see
+`CLAIMS.md` for the command behind each):
 
 * A **causal**, **training-free**, **zero-new-parameter** retention law preserves
   the retrieval quality of exact Full-KV. On the official 80-record RULER split
-  it reaches **0.941 aggregate retention** at B=1024 (a 32 MiB decode cache),
-  with **niah_single_1, niah_multikey_2 and niah_multikey_3 all at 1.000**
-  (48/48 records that matched Full-KV answers).
-* Bounded decode state is context-independent: 4 MiB at 128K with B=128
-  (1024x smaller than the 4.00 GiB Full-KV cache) and 32 MiB at B=1024.
-* At 32K, the continuous-batching pattern this enables gives **8x concurrency**
-  (32 resident 32K requests vs Full-KV's 4), **15.6x decode throughput**, flat
-  per-request **TPOT of 13.6-16.4 ms**, and **6.62 GiB peak versus 15.06 GiB**.
-* The previous QCC failures on these records are attributable to the selection
-  law and to the archive read/mix path, not to bounded decode state as such.
-  Recency (0/18), random, key-norm, H2O-style cumulative mass and naive
-  multi-hop lexical expansion all fail; the question-window plus lexical-anchor
-  law is doing the work.
+  through the packaged entry point: **aggregate retention 1.0071, worst task
+  1.000** at 4,608 retained slots (144 MiB), with the harness run agreeing on all
+  80 records (3.20).
+* It is **not a RULER artefact**. On nine official LongBench tasks (20 records
+  each, 122 matched records, real documents, official per-task metrics):
+  **aggregate retention 1.0049** (macro mean 0.2514 Full-KV vs 0.2527 bounded),
+  worst task 0.897, narrativeqa +10.7% (3.21).
+* **Decode state is context-independent**: measured at 8K/32K/64K/128K, the
+  compiled cache is 4,608 slots and 144 MiB at *every* length, a growth of
+  exactly **1.00x** while the Full-KV cache grows 16x; 28.4x smaller at 128K
+  (3.22).
+* **The cheapest useful cache is far smaller than the budget**: anchors plus
+  sinks and a recent window alone reach 0.930 aggregate retention in **1,105
+  slots / 34.5 MiB**, and the attention-selected filler buys the last 7%
+  (3.22).
+* **At matched decode-state bytes, eviction beats quantization, and they
+  compose**: 144 MiB bounded bf16 scores 0.825 against 107 MiB Full-KV int4 at
+  0.413; bounded + int8 reaches Full-KV quality at **72.3 MiB**, 5.9x smaller
+  than the bf16 Full-KV cache (3.23).
+* **The quality decomposes cleanly.** Attention ranking alone retains 0.817
+  aggregate (single_1 and vt at parity); a *task-agnostic* rarity cue lifts that
+  to 0.938; the pattern anchors and chain following of the shipped configuration
+  add the last 0.07 and the worst-task floor (3.21).
+* **Reproducibility is checked, not assumed.** The packaged API reproduces the
+  benchmark harness on all eighty records, with bitwise-equal scores and
+  identical selected slot sets; ragged batches compile per request and merge by
+  exact slot duplication (3.19, 3.20).
+* The serving consequences measured earlier stand: at 32K, 8x fixed-SLA
+  concurrency (32 resident requests against Full-KV's 4), 15.6x decode
+  throughput in the speed configuration and 5.0x in the quality configuration,
+  and 4.21x single-stream TPOT at 128K against a baseline that cannot use the
+  same CUDA-graph optimisation on this card (3.7-3.11, 3.18).
 
 Does not establish:
 
-* **Aggregate >= 99% or worst task >= 97%.** Aggregate is 0.941 and the worst
-  task is 0.000, both held down by variable tracking: vt is multi-hop chaining
-  rather than retrieval, and the 1B checkpoint itself answers only 3/20 vt
-  records with full attention.
-* **Official suites beyond RULER NIAH + vt.** LongBench and PG-19 are untouched.
-* **Bounded prefill state.** The concurrency result serialises prefill, so total
-  prefill wall clock still scales with the number of requests; peak *resident*
-  memory is bounded, peak prefill transient is `O(L)` for one request.
-* **5x batch-1 TPOT.** Measured ~2.0x at 128K on the dynamic path, with a
-  13.5 ms floor set by per-step framework overhead rather than KV traffic.
-* **A validated CUDA-graph path.** The graph/StaticCache variants fail the
-  token-parity check in this Transformers build and their timings are withdrawn.
-* **1M retrieval.** Llama-3.2-1B is a 128K-native checkpoint, so 1M is out of
-  its native range and no 1M-native model is available here.
-* **Integration.** The mechanism is not yet implemented in `qcc_transformer`;
-  this is a standalone harness plus benchmarks.
-* **Nominal-length overshoot.** The 128K synthetic records are 131.0K-131.5K
-  tokens, marginally above the checkpoint's nominal 131072 limit. Full-KV
-  answers every one of them, so the comparison is not an artefact of prefix
-  overflow, but future runs should target 130K or tighten the tolerance.
+* **1M retrieval (>= 99.5%) or 1M TPOT.** Blocked by hardware and checkpoints,
+  not by the method: a 1M bf16 Full-KV cache for this model is 32 GiB against
+  24 GiB of HBM, so the baseline cannot be run at 1M either, and no 1M-native
+  checkpoint is available here. The state-growth claim is closed-form plus
+  measured to 128K; the 256K/512K rows are recorded as OOM from a co-tenant.
+* **128K TPOT >= 5x.** The matched comparison is 1.73x; the strongest
+  defensible system number is 4.21x (bounded + CUDA graph against Full-KV
+  dynamic), and the bandwidth bound for a 1B model is 2.70x before weights are
+  counted.
+* **Latency percentiles or a clean systems table.** The card is shared: the same
+  configuration measured between 6.87 and 18.4 ms depending on co-tenants, so
+  every latency number here names its measurement window, and percentiles need
+  exclusive hardware.
+* **Cross-model generality beyond Llama-3.2-1B-Instruct** (the Phi-3.5,
+  Qwen2.5-3B and Llama-3.1-8B runs are in flight; until they land, the
+  architecture adapter and the LongRoPE chunking fix are the only cross-family
+  evidence).
+* **Bounded prefill transient memory.** Retained decode state is bounded; the
+  chunked prefill of one long prompt still holds that prompt's exact KV until
+  the compile step, which is `O(L)` for one request.
+* **That this int4 configuration is the best int4.** The key axis used a single
+  scale per (layer, kv-head); finer granularity was not tried.
+* **That language-modelling perplexity is preserved.** Bounded retention costs
+  NLL relative to Full-KV (3.10): the retrieved facts survive, the full
+  distribution does not.
 
 ## 5. Design implied for QCC
 
