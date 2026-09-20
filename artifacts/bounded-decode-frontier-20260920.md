@@ -372,8 +372,14 @@ the matched batched-prefill control (`serving_128k_matched.json`).
 
 | configuration | batch 1 | batch 2 | batch 4 | batch 8 |
 |---|---:|---:|---:|---:|
-| Full-KV (prefilled together) | 34.5 tok/s, 29.0 ms, 10.97 GiB | **OOM** | OOM | - |
+| Full-KV, prefilled together | 34.5 tok/s, 29.0 ms, 10.97 GiB | **OOM** | OOM | - |
+| bounded, *prefilled together* (control) | ok | **OOM** | OOM | - |
 | bounded, sequential prefill | 71.6 tok/s, 14.0 ms, 10.47 GiB | 141.3, 14.2 ms, 11.27 | 285.0, 14.0 ms, 11.35 | 561.5, 14.3 ms, 13.41 GiB (7/8) |
+
+The control row is the point: with all requests prefilled together the bounded
+cache buys nothing at 128K either, because prefill holds a full 4 GiB KV per
+request. Only the sequential pattern converts the bounded *decode* state into
+concurrency.
 
 * **Full-KV cannot serve two concurrent 128K requests on this card**, while the
   bounded design serves **8** with per-request TPOT flat at 14.0-14.3 ms and

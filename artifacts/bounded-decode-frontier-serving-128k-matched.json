@@ -1,0 +1,92 @@
+{
+ "model": "/root/qcc/models/Llama-3.2-1B-Instruct",
+ "config": {
+  "model": "/root/qcc/models/Llama-3.2-1B-Instruct",
+  "length": 131072,
+  "batches": [
+   1,
+   2,
+   4
+  ],
+  "policies": [
+   "full",
+   "obs_last"
+  ],
+  "budget": 1024,
+  "obs": 64,
+  "nsink": 4,
+  "pool": 7,
+  "max_new": 32,
+  "prefill_chunk": 8192,
+  "seed": 4242,
+  "out": "serving_128k_matched.json"
+ },
+ "results": [
+  {
+   "policy": "full",
+   "batch": 1,
+   "context_tokens": 131174,
+   "budget": null,
+   "prefill_s": 50.441,
+   "kept_slots": 131174,
+   "decode_s": 0.926,
+   "decode_tokens_per_s": 34.54,
+   "tpot_ms": 28.951,
+   "peak_cuda_gib": 10.975,
+   "recall": [
+    1.0
+   ],
+   "sample": "7547540.?\u201d\n\nThe text is a daily temperat",
+   "status": "ok"
+  },
+  {
+   "policy": "full",
+   "batch": 2,
+   "context_tokens": 131174,
+   "budget": null,
+   "status": "oom",
+   "error": "CUDA out of memory. Tried to allocate 4.00 GiB. GPU 0 has a total capacity of 23.55 GiB of which 3.67 GiB is free. Process 2924082 has 19.88 GiB memory in use. "
+  },
+  {
+   "policy": "full",
+   "batch": 4,
+   "context_tokens": 131174,
+   "budget": null,
+   "status": "oom",
+   "error": "CUDA out of memory. Tried to allocate 4.00 GiB. GPU 0 has a total capacity of 23.55 GiB of which 3.67 GiB is free. Process 2924082 has 19.88 GiB memory in use. "
+  },
+  {
+   "policy": "obs_last",
+   "batch": 1,
+   "context_tokens": 131174,
+   "budget": 1024,
+   "prefill_s": 49.891,
+   "kept_slots": 1024,
+   "decode_s": 0.423,
+   "decode_tokens_per_s": 75.71,
+   "tpot_ms": 13.208,
+   "peak_cuda_gib": 11.476,
+   "recall": [
+    1.0
+   ],
+   "sample": "7547540.assistant.\n\nThere is no special ",
+   "status": "ok"
+  },
+  {
+   "policy": "obs_last",
+   "batch": 2,
+   "context_tokens": 131174,
+   "budget": 1024,
+   "status": "oom",
+   "error": "CUDA out of memory. Tried to allocate 4.00 GiB. GPU 0 has a total capacity of 23.55 GiB of which 3.79 GiB is free. Process 2924082 has 19.76 GiB memory in use. "
+  },
+  {
+   "policy": "obs_last",
+   "batch": 4,
+   "context_tokens": 131174,
+   "budget": 1024,
+   "status": "oom",
+   "error": "CUDA out of memory. Tried to allocate 3.50 GiB. GPU 0 has a total capacity of 23.55 GiB of which 1.79 GiB is free. Process 2924082 has 21.76 GiB memory in use. "
+  }
+ ]
+}

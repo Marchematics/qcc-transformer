@@ -4,6 +4,24 @@
 交接对象：下一位继续实现、评测或部署 QCC Transformer 的工程师/模型
 状态：代码已推送；99 gate 尚未通过；不要把当前结果包装成已达标结果。
 
+## 推送凭据（重要，2026-09-20）
+
+本机 git 推送依赖 VS Code 的 askpass：`GIT_ASKPASS` 会通过
+`VSCODE_GIT_IPC_HANDLE` 指向的 unix socket 向 VS Code server 要 token。会话
+重启后环境变量可能仍指向**已死**的 socket（表现为
+`remote: No anonymous write access` / `鉴权失败`）。修法是找到活的 socket：
+
+```bash
+python - <<'EOF'
+import socket, glob, os
+for p in sorted(glob.glob('/tmp/vscode-git-*.sock'), key=os.path.getmtime, reverse=True)[:5]:
+    s=socket.socket(socket.AF_UNIX); s.settimeout(1.5)
+    try: s.connect(p); print("ALIVE", p)
+    except Exception: pass
+EOF
+VSCODE_GIT_IPC_HANDLE=<alive.sock> git push origin main
+```
+
 ## 当前审计（2026-09-20 深夜）：检索质量达标，serving 两项达标
 
 在第 4 轮基础上修掉三个选择实现缺陷后（lex_obs 曾把 head 0 的排序广播给
