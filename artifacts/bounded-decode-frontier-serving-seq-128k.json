@@ -1,0 +1,142 @@
+{
+ "model": "/root/qcc/models/Llama-3.2-1B-Instruct",
+ "config": {
+  "model": "/root/qcc/models/Llama-3.2-1B-Instruct",
+  "length": 131072,
+  "batches": [
+   1,
+   2,
+   4,
+   8
+  ],
+  "budget": 1024,
+  "obs": 64,
+  "nsink": 4,
+  "pool": 7,
+  "dilate": 9,
+  "lex_cap": 128,
+  "max_new": 32,
+  "prefill_chunk": 8192,
+  "seed": 7000,
+  "out": "serving_seq_128k.json"
+ },
+ "results": [
+  {
+   "batch": 1,
+   "budget": 1024,
+   "length": 131072,
+   "prefill_total_s": 49.105,
+   "kept_slots": 1152,
+   "decode_s": 0.447,
+   "decode_tokens_per_s": 71.55,
+   "tpot_ms": 13.975,
+   "peak_cuda_gib": 10.475,
+   "recall": [
+    1.0
+   ],
+   "answers": [
+    "4752819"
+   ],
+   "samples": [
+    "4752819."
+   ],
+   "status": "ok"
+  },
+  {
+   "batch": 2,
+   "budget": 1024,
+   "length": 131072,
+   "prefill_total_s": 100.351,
+   "kept_slots": 1152,
+   "decode_s": 0.453,
+   "decode_tokens_per_s": 141.25,
+   "tpot_ms": 14.159,
+   "peak_cuda_gib": 11.267,
+   "recall": [
+    1.0,
+    1.0
+   ],
+   "answers": [
+    "4752819",
+    "1822649"
+   ],
+   "samples": [
+    "4752819.",
+    "1822649."
+   ],
+   "status": "ok"
+  },
+  {
+   "batch": 4,
+   "budget": 1024,
+   "length": 131072,
+   "prefill_total_s": 203.207,
+   "kept_slots": 1152,
+   "decode_s": 0.449,
+   "decode_tokens_per_s": 284.95,
+   "tpot_ms": 14.038,
+   "peak_cuda_gib": 11.354,
+   "recall": [
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "answers": [
+    "4752819",
+    "1822649",
+    "3462975",
+    "1611495"
+   ],
+   "samples": [
+    "4752819.",
+    "1822649.",
+    "3462975.\n\nThe old library held thousands of volu",
+    "1611495."
+   ],
+   "status": "ok"
+  },
+  {
+   "batch": 8,
+   "budget": 1024,
+   "length": 131072,
+   "prefill_total_s": 405.874,
+   "kept_slots": 1152,
+   "decode_s": 0.456,
+   "decode_tokens_per_s": 561.5,
+   "tpot_ms": 14.247,
+   "peak_cuda_gib": 13.415,
+   "recall": [
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    0.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "answers": [
+    "4752819",
+    "1822649",
+    "3462975",
+    "1611495",
+    "7473355",
+    "8470177",
+    "5578705",
+    "4236415"
+   ],
+   "samples": [
+    "4752819.",
+    "1822649.",
+    "3462975.\n\nThe old library held thousands of volu",
+    "1611495.",
+    "5972042.",
+    "8470177.",
+    "5578705.assistant!\n\n## Step 1: Identify the spec",
+    "4236415.`\n\nThe special magic number for fable is"
+   ],
+   "status": "ok"
+  }
+ ]
+}

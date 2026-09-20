@@ -365,6 +365,26 @@ continuous-batching pattern the bounded state actually enables. Peak is
   clock (4.4 s per request). This measures memory-limited concurrency under a
   TPOT SLA, not prefill throughput; a real server would pipeline it.
 
+### 3.9 Serving at 128K
+
+`benchmark_bounded_decode_serving_sequential.py` (`serving_seq_128k.json`) and
+the matched batched-prefill control (`serving_128k_matched.json`).
+
+| configuration | batch 1 | batch 2 | batch 4 | batch 8 |
+|---|---:|---:|---:|---:|
+| Full-KV (prefilled together) | 34.5 tok/s, 29.0 ms, 10.97 GiB | **OOM** | OOM | - |
+| bounded, sequential prefill | 71.6 tok/s, 14.0 ms, 10.47 GiB | 141.3, 14.2 ms, 11.27 | 285.0, 14.0 ms, 11.35 | 561.5, 14.3 ms, 13.41 GiB (7/8) |
+
+* **Full-KV cannot serve two concurrent 128K requests on this card**, while the
+  bounded design serves **8** with per-request TPOT flat at 14.0-14.3 ms and
+  13.41 GiB peak: **8x concurrency at 128K**, matching the 32K result.
+* Bounded decode TPOT at 128K (13.97 ms) is the same as at 32K (13.72 ms) and
+  identical across batch sizes, i.e. the retained state is genuinely
+  context-independent; matched Full-KV batch-1 TPOT is 28.95 ms, so the
+  like-for-like speedup is **2.07x** — consistent with the 2.70x bandwidth
+  bound above.
+* Recall is 100% through batch 4 and 7/8 at batch 8.
+
 ## 4. What this establishes, and what it does not
 
 Establishes:
