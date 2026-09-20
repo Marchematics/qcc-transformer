@@ -898,6 +898,57 @@ this workload an "equivalent" rewrite of a scoring kernel is a behavioural
 change, and the only way to know is to compare the *selected sets*, not the
 scores.
 
+### 3.21 Non-RULER evidence: LongBench, and what the lexical anchors are actually for
+
+RULER is synthetic, so its retention number cannot carry a generality claim on
+its own. `benchmarks/benchmark_retention_longbench.py` runs the same law - same
+configuration, same packaged entry point, same greedy decode loop - over nine
+official LongBench tasks with their own metrics (token F1, ROUGE-L, retrieval
+accuracy), 20 records each, against a matched Full-KV arm on the same prompts.
+These are real documents: novels, papers, government reports, news, dialogue.
+Long-context prompts are truncated head+tail exactly as the official harness
+does, and every row records whether it was truncated.
+
+| task | metric | Full-KV | bounded (4,608 slots) | retention | matched |
+|---|---|---:|---:|---:|---:|
+| 2wikimqa | F1 | 0.1154 | 0.1297 | 1.000 | 4 |
+| gov_report | ROUGE-L | 0.2932 | 0.2615 | **0.897** | 20 |
+| hotpotqa | F1 | 0.3383 | 0.3388 | 1.011 | 10 |
+| multi_news | ROUGE-L | 0.2403 | 0.2387 | 0.993 | 20 |
+| narrativeqa | F1 | 0.2198 | 0.2476 | **1.107** | 13 |
+| passage_retrieval_en | accuracy | 0.0350 | 0.0350 | 1.000 | 7 |
+| qasper | F1 | 0.2072 | 0.2104 | 1.032 | 16 |
+| samsum | ROUGE-L | 0.3835 | 0.3824 | 1.005 | 20 |
+| triviaqa | F1 | 0.4298 | 0.4298 | 1.000 | 12 |
+| **macro mean** | | **0.2514** | **0.2527** | **1.0049** | 122 |
+
+* The aggregate is **1.0049**: on real long-document tasks the bounded cache is
+  not merely close to Full-KV, it is level with it, and it *gains* 10.7% on
+  narrativeqa - where Full-KV's 128K window is diluted by a long novel and the
+  retained set is a cleaner context for the question.
+* The worst task is gov_report at 0.897. It is a summarisation task scored by
+  ROUGE-L, the metric most sensitive to surface realisation; the two
+  summarisation tasks that are dialogue- and news-shaped (samsum 1.005,
+  multi_news 0.993) are at parity.
+* No task here contains synthetic needles, and none of them is a multi-key
+  disambiguation puzzle, which is the situation the lexical anchors exist for.
+  The next measurement isolates that: attention ranking alone, at the same
+  retained width, over the RULER split.
+
+| configuration (Llama-3.2-1B, 4,608 slots, 80 records) | single_1 | multikey_2 | multikey_3 | vt | aggregate | worst task |
+|---|---:|---:|---:|---:|---:|---:|
+| attention ranking only (`lex_cap=0`) | 1.000 | 0.895 | 0.333 | 1.039 | **0.817** | 0.333 |
+| shipped: ranking + rare-string anchors | 1.000 | 1.000 | 1.000 | 1.028 | **1.007** | 1.000 |
+
+So the honest decomposition is: the observation-window ranking is what makes the
+law work at all - it is already exact on single-needle retrieval and on value
+tracking, and it is what transfers to LongBench - while the anchors are what
+close **multi-key disambiguation**, the task where dozens of near-identical
+distractor keys differ only in the string the question mentions. That is a much
+narrower and more defensible role than "the benchmark needs a trick": it is the
+retrieval step that a question-answering system needs anyway, and section 3.22
+reports the task-agnostic version of it.
+
 ## 4. What this establishes, and what it does not
 
 Establishes:
