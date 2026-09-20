@@ -31,7 +31,8 @@ except ImportError:  # authoring workspace layout
     import longctx as L
 
 
-def load_ruler(path, tasks, lengths, max_records=None, answer_prefix=True):
+def load_ruler(path, tasks, lengths, max_records=None, answer_prefix=True, tokenizer=None,
+               question_tokens=64):
     records = []
     for line in Path(path).read_text(encoding="utf-8").splitlines():
         if not line.strip():
@@ -62,6 +63,8 @@ def load_ruler(path, tasks, lengths, max_records=None, answer_prefix=True):
         if isinstance(pos, int) and pos >= 0:
             rec.answer_positions = [pos]
             rec.needle_positions = [pos]
+        if tokenizer is not None:
+            rec.lexical_positions = L.question_lexical_positions(tokenizer, prompt, question_tokens)
         records.append(rec)
         if max_records and len(records) >= max_records:
             break
@@ -96,7 +99,8 @@ def run_record(model, rec, args, eos_ids, row_id):
 
     def get_scores(policy):
         if policy not in score_cache:
-            score_cache[policy] = L.obs_scores(model, captured, cache, Lc, args.obs, policy[4:], args.key_chunk)
+            mode = "last" if policy == "lex_obs" else policy[4:]
+            score_cache[policy] = L.obs_scores(model, captured, cache, Lc, args.obs, mode, args.key_chunk)
         return score_cache[policy]
 
     rows = []
@@ -109,7 +113,7 @@ def run_record(model, rec, args, eos_ids, row_id):
         for budget in budgets:
             eff = budget if budget is not None else Lc
             nrecent = max(1, int(eff * 0.25)) if budget is not None else 0
-            idxs = L.build_idxs(policy, scores, cache, rec, eff, args.nsink, nrecent, Lc, args.pool, ids.device, args.dilate)
+            idxs = L.build_idxs(policy, scores, cache, rec, eff, args.nsink, nrecent, Lc, args.pool, ids.device, args.dilate, args.lex_cap)
             diag = L.selection_stats(idxs, rec.answer_positions, Lc)
             if idxs is None:
                 for layer, (ok, ov) in zip(cache.layers, orig):
@@ -161,6 +165,7 @@ def main():
     ap.add_argument("--nsink", type=int, default=4)
     ap.add_argument("--pool", type=int, default=7)
     ap.add_argument("--dilate", type=int, default=0)
+    ap.add_argument("--lex-cap", type=int, default=128)
     ap.add_argument("--key-chunk", type=int, default=4096)
     ap.add_argument("--max-new", type=int, default=24)
     ap.add_argument("--prefill-chunk", type=int, default=8192)
@@ -187,7 +192,8 @@ def main():
     eos_ids = set(eos) if isinstance(eos, (list, tuple)) else {eos}
 
     records = load_ruler(args.ruler_jsonl, args.tasks, args.lengths,
-                         args.max_records, not args.no_answer_prefix)
+                         args.max_records, not args.no_answer_prefix, tokenizer=tokenizer,
+                         question_tokens=args.obs)
     print(f"[setup] {len(records)} RULER records", flush=True)
 
     rows = []

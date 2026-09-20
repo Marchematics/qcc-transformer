@@ -82,6 +82,7 @@ def main():
     ap.add_argument("--nsink", type=int, default=4)
     ap.add_argument("--pool", type=int, default=7)
     ap.add_argument("--dilate", type=int, default=9)
+    ap.add_argument("--lex-cap", type=int, default=128)
     ap.add_argument("--max-new", type=int, default=32)
     ap.add_argument("--prefill-chunk", type=int, default=8192)
     ap.add_argument("--seed", type=int, default=7000)
@@ -115,19 +116,21 @@ def main():
                 rec, ids = build_one(tok, args.length, args.seed + 1000 * b)
                 Lc = ids.shape[1]
                 cache, last_logits, captured = prefill_one(model, ids, args.obs, args.prefill_chunk)
-                next_id = last_logits.argmax(-1)
+                next_id = last_logits[:, -1:].argmax(-1).reshape(-1)  # (1,) -> stack to (B,1)
                 scores = L.obs_scores(model, captured, cache, Lc, args.obs, "last")
                 nrecent = max(1, int(args.budget * 0.25))
                 idxs = [L.topk_indices(s, args.budget, args.nsink, nrecent, Lc, args.pool, args.dilate)
                         for s in scores]
+                # same selection primitive as the frontier harness, so the
+                # batched path cannot drift from the measured policy
+                idxs = L.build_idxs("lex_obs", scores, cache, rec, args.budget, args.nsink,
+                                    nrecent, Lc, args.pool, "cuda", args.dilate, args.lex_cap)
                 for layer, idx in zip(cache.layers, idxs):
-                    merged = sorted(set(idx[0].tolist()) | {p for p in rec.lexical_positions if p < Lc})
-                    midx = torch.tensor([merged], device="cuda", dtype=torch.long)
-                    ek = midx.unsqueeze(0).unsqueeze(-1).expand(
-                        1, layer.keys.shape[1], midx.shape[1], layer.keys.shape[-1])
+                    ek = idx.unsqueeze(0).unsqueeze(-1).expand(
+                        1, layer.keys.shape[1], idx.shape[1], layer.keys.shape[-1])
                     keys.append(layer.keys.gather(2, ek).contiguous()[0])
                     values.append(layer.values.gather(2, ek).contiguous()[0])
-                sizes.append(len(merged))  # one entry per request, shared by its layers
+                sizes.append(args.budget + args.lex_cap)  # uniform width by construction
                 next_ids.append(next_id)
                 recs.append(rec)
                 del cache, captured, last_logits, scores, idxs
@@ -156,9 +159,14 @@ def main():
                 lyr = DynamicLayer()
                 lyr.keys = kk
                 lyr.values = vv
+                # a manually built layer must be marked initialized, otherwise
+                # HF treats the cache as empty and overwrites it on first update
+                lyr.is_initialized = True
+                lyr.dtype = kk.dtype
+                lyr.device = kk.device
                 bc.layers.append(lyr)
             keep_mask = keep_mask[:, :max_kept]
-            cur = torch.stack(next_ids, dim=0)
+            cur = torch.stack(next_ids, dim=0).reshape(batch, 1)
             gen, dec_s = decode_batched(model, bc, cur, Lc, args.max_new, keep_mask)
             entry["decode_s"] = round(dec_s, 3)
             entry["decode_tokens_per_s"] = round(batch * args.max_new / dec_s, 2)
@@ -166,6 +174,8 @@ def main():
             entry["peak_cuda_gib"] = round(torch.cuda.max_memory_allocated() / 2**30, 3)
             texts = [tok.decode(gen[b].tolist(), skip_special_tokens=True).strip() for b in range(batch)]
             entry["recall"] = [1.0 if recs[b].answer in texts[b] else 0.0 for b in range(batch)]
+            entry["answers"] = [recs[b].answer for b in range(batch)]
+            entry["samples"] = [t[:48] for t in texts]
             entry["status"] = "ok"
             del bc, keys, values
         except Exception as exc:  # noqa: BLE001

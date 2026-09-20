@@ -292,6 +292,31 @@ def keynorm_scores(cache):
     return [layer.keys[0].float().norm(dim=-1) for layer in cache.layers]
 
 
+def scores_layer_with_forcing(scores_layer, nsink, nrecent, L, pool=1, dilate=0):
+    """Apply the dilation/pooling transform and sink/recent forcing, returning
+    the transformed scores (used where the retained width must be controlled
+    explicitly rather than by a plain top-k)."""
+    out = []
+    forced = sorted(set(list(range(min(nsink, L))) + list(range(max(0, L - nrecent), L))))
+    for head in range(scores_layer.shape[0]):
+        s = scores_layer[head].clone().float()
+        if dilate > 1:
+            k = dilate if dilate % 2 == 1 else dilate + 1
+            pad = k // 2
+            padded = torch.nn.functional.pad(s.view(1, 1, -1), (pad, pad), value=float("-inf"))
+            s = torch.nn.functional.max_pool1d(padded, kernel_size=k, stride=1).view(-1)[:L]
+        if pool > 1:
+            padn = (-L) % pool
+            if padn:
+                s = torch.cat([s, torch.full((padn,), float("-inf"), device=s.device)])
+            nb = s.numel() // pool
+            s = s.view(nb, pool).amax(dim=1, keepdim=True).expand(nb, pool).reshape(-1)[:L]
+        if forced:
+            s[torch.tensor(forced, device=s.device)] = float("inf")
+        out.append(s)
+    return torch.stack(out, dim=0)
+
+
 def topk_indices(scores_layer, budget, nsink, nrecent, L, pool=1, dilate=0):
     """Return (kv_heads, <=budget) index tensor, always including sink+recent.
 
@@ -404,7 +429,8 @@ def selection_stats(idxs, positions, L):
             "all_answer_unit_fraction": units_all / len(fracs)}
 
 
-def build_idxs(policy, scores, cache, record, budget, nsink, nrecent, L, pool, device, dilate=0):
+def build_idxs(policy, scores, cache, record, budget, nsink, nrecent, L, pool, device, dilate=0,
+               lex_cap=128):
     if policy == "full":
         return None
     if policy == "recent":
@@ -414,12 +440,34 @@ def build_idxs(policy, scores, cache, record, budget, nsink, nrecent, L, pool, d
         sel = sorted(set(list(range(min(nsink, L))) + list(range(max(0, L - (budget - nsink)), L))))
         return [torch.tensor([sel] * layer.keys.shape[1], device=device) for layer in cache.layers]
     if policy == "lex_obs":
-        # attention ranking plus the question's rare strings found in the context
-        keep = sorted({p for p in record.lexical_positions if p < L})
+        # Each head keeps its own attention ranking and additionally receives the
+        # question's rare strings found in the context.  The retained width is
+        # forced to exactly `budget + lex_cap` for every head, layer and request,
+        # so a single batched attention mask can describe all of them (a
+        # per-layer-varying width cannot be expressed by one 2-D mask).
+        target = budget + lex_cap
+        anchors = sorted({p for p in record.lexical_positions if p < L})
         out = []
-        for idx in (topk_indices(s, budget, nsink, nrecent, L, pool, dilate) for s in scores):
-            merged = sorted(set(idx[0].tolist()) | set(keep))
-            out.append(torch.tensor([merged] * idx.shape[0], device=device, dtype=torch.long))
+        for sc in scores:
+            s_forced = scores_layer_with_forcing(sc, nsink, nrecent, L, pool, dilate)
+            order = torch.argsort(s_forced, descending=True)
+            rows = []
+            for h in range(sc.shape[0]):
+                chosen, seen = [], set()
+                for p in anchors:                      # lexical anchors first
+                    if len(chosen) >= target:
+                        break
+                    if p not in seen:
+                        chosen.append(p)
+                        seen.add(p)
+                for p in order[h].tolist():            # then the attention ranking
+                    if len(chosen) >= target:
+                        break
+                    if p not in seen:
+                        chosen.append(p)
+                        seen.add(p)
+                rows.append(sorted(chosen[:target]))
+            out.append(torch.tensor(rows, device=device, dtype=torch.long))
         return out
     if policy == "oracle_needle":
         keep = set(record.needle_positions)
@@ -490,7 +538,10 @@ def run_one(model, tokenizer, length, args, eos_ids, seed):
             elif policy == "obs_vote":
                 score_cache[policy] = obs_vote_scores(model, captured, cache, L, args.obs, args.top_v)
             else:
-                score_cache[policy] = obs_scores(model, captured, cache, L, args.obs, policy[4:])
+                mode = "last" if policy == "lex_obs" else policy[4:]
+                if mode not in ("last", "mean", "max"):
+                    raise ValueError(f"unknown scoring mode for policy {policy!r}")
+                score_cache[policy] = obs_scores(model, captured, cache, L, args.obs, mode)
         return score_cache[policy]
 
     rows = []
@@ -503,7 +554,7 @@ def run_one(model, tokenizer, length, args, eos_ids, seed):
         for budget in budgets:
             eff = budget if budget is not None else L
             nrecent = max(1, int(eff * 0.25)) if budget is not None else 0
-            idxs = build_idxs(policy, scores, cache, rec, eff, args.nsink, nrecent, L, args.pool, ids.device, args.dilate)
+            idxs = build_idxs(policy, scores, cache, rec, eff, args.nsink, nrecent, L, args.pool, ids.device, args.dilate, args.lex_cap)
             diag = selection_stats(idxs, rec.answer_positions, L)
             if idxs is None:
                 for layer, (ok, ov) in zip(cache.layers, orig):
@@ -546,6 +597,7 @@ def main():
     ap.add_argument("--pool", type=int, default=7)
     ap.add_argument("--dilate", type=int, default=0)
     ap.add_argument("--top-v", type=int, default=64)
+    ap.add_argument("--lex-cap", type=int, default=128)
     ap.add_argument("--max-new", type=int, default=16)
     ap.add_argument("--prefill-chunk", type=int, default=8192)
     ap.add_argument("--out", required=True)
