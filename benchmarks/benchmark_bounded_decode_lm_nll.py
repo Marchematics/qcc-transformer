@@ -97,6 +97,8 @@ def main():
                              "/root/qcc/repo/qcc-transformer/benchmarks/*.py",
                              "/root/qcc/repo/qcc-transformer/qcc_transformer/*.py",
                              "/usr/lib/python3.12/*.py"])
+    ap.add_argument("--document", default=None, help="pinned token-id JSON to reuse")
+    ap.add_argument("--save-document", default=None, help="write the built document here")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
 
@@ -115,7 +117,14 @@ def main():
 
     model.lm_head = _Last(inner)
 
-    ids = build_document(args.length, tok, args.sources)
+    if args.document and Path(args.document).exists():
+        ids = json.loads(Path(args.document).read_text())[: args.length]
+        print(f"[doc] reused pinned document ({len(ids)} tokens)", flush=True)
+    else:
+        ids = build_document(args.length, tok, args.sources)
+        if args.save_document:
+            Path(args.save_document).write_text(json.dumps(ids))
+            print(f"[doc] pinned document written to {args.save_document}", flush=True)
     full_ids = torch.tensor(ids, dtype=torch.long, device="cuda").unsqueeze(0)
     prefix_len = args.length - args.suffix
     prefix = full_ids[:, :prefix_len]
