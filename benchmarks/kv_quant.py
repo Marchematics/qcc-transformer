@@ -161,10 +161,12 @@ __all__ = [
     "CACHE_METADATA_BYTES",
     "QuantizedLayer",
     "QuantizedCache",
+    "check_mode",
     "dtype_nbytes",
     "group_layout",
     "quantize_tensor",
     "dequantize_tensor",
+    "per_element_scale",
     "quantize_cache",
     "dequantize_cache",
     "state_bytes",
@@ -192,8 +194,6 @@ LAYER_METADATA_BYTES = 32
 #: Documented per-cache metadata record: mode id, scale-dtype id, layer count,
 #: default group size.
 CACHE_METADATA_BYTES = 16
-
-_NF4_CODEBOOK_SIZE = 16  # values in bitsandbytes' NF4 lookup table (a constant)
 
 
 # ---------------------------------------------------------------------------
@@ -357,8 +357,7 @@ def quantize_tensor(x: torch.Tensor, mode: str = "int8", group_size: int | None 
 
 def dequantize_tensor(packed: torch.Tensor, scale: torch.Tensor, mode: str,
                       group_size: int | None, axis: int, shape: Sequence[int],
-                      dtype: torch.dtype = torch.float32, state: Any = None,
-                      scale_dtype: torch.dtype | None = None) -> torch.Tensor:
+                      dtype: torch.dtype = torch.float32, state: Any = None) -> torch.Tensor:
     """Inverse of :func:`quantize_tensor`; returns a dense ``dtype`` tensor.
 
     ``shape`` is the original ``(B, H, T, D)`` shape and ``group_size`` the
@@ -383,6 +382,22 @@ def dequantize_tensor(packed: torch.Tensor, scale: torch.Tensor, mode: str,
     grouped = _grouped_view(codes, ax, n_groups, g)
     out = grouped * scale.to(torch.float32)
     return _ungroup_view(out, ax, n_groups, g, size).to(dtype)
+
+
+def per_element_scale(scale: torch.Tensor, shape: Sequence[int], axis: int,
+                      group_size: int | None, mode: str = "int4") -> torch.Tensor:
+    """Broadcast a stored ``scale`` back to the shape of the tensor it quantized.
+
+    The result is the per-element bound ``|x - x_hat| <= per_element_scale``
+    (before the cast back to the cache dtype), i.e. the documentation of the
+    invariant is directly checkable.
+    """
+    shape = tuple(int(s) for s in shape)
+    ax = axis % len(shape)
+    size = shape[ax]
+    g, n_groups = group_layout(size, 1 if mode == "int8" else group_size)
+    grouped_shape = (*shape[:ax], n_groups, g, *shape[ax + 1:])
+    return _ungroup_view(scale.expand(grouped_shape), ax, n_groups, g, size)
 
 
 # ---------------------------------------------------------------------------
@@ -482,6 +497,18 @@ def is_quantized(cache: Any) -> bool:
     return isinstance(cache, QuantizedCache)
 
 
+def check_mode(mode: str) -> None:
+    """Raise if ``mode`` cannot be used in this environment.
+
+    ``int8``/``int4`` are always available; ``nf4`` raises the documented
+    ``RuntimeError`` when bitsandbytes is not importable.
+    """
+    if mode not in MODES:
+        raise ValueError(f"unknown mode {mode!r}; expected one of {MODES}")
+    if mode == "nf4":
+        _bitsandbytes()
+
+
 def _iter_cache_kv(cache: Any) -> Iterator[tuple[torch.Tensor, torch.Tensor]]:
     """Yield ``(keys, values)`` per layer of a DynamicCache-like object."""
     layers = getattr(cache, "layers", None)
@@ -514,8 +541,7 @@ def quantize_cache(cache: Any, mode: str = "int8", group_size: int = 128, *,
     by ``nf4``.  Passing an already quantized cache dequantizes it first, so
     ``int8 -> int4`` re-quantization is well defined.
     """
-    if mode not in MODES:
-        raise ValueError(f"unknown mode {mode!r}; expected one of {MODES}")
+    check_mode(mode)
     if isinstance(cache, QuantizedCache):
         cache = dequantize_cache(cache)
     extras = {name: value for name, value in vars(cache).items()
@@ -566,12 +592,10 @@ def dequantize_cache(quantized: QuantizedCache):
     for index, layer in enumerate(quantized.layers):
         keys = dequantize_tensor(
             layer.keys_packed, layer.keys_scale, layer.mode, layer.key_group_size,
-            layer.key_axis, layer.shape, layer.dtype, state=layer.keys_state,
-            scale_dtype=quantized.scale_dtype)
+            layer.key_axis, layer.shape, layer.dtype, state=layer.keys_state)
         values = dequantize_tensor(
             layer.values_packed, layer.values_scale, layer.mode, layer.value_group_size,
-            layer.value_axis, layer.shape, layer.dtype, state=layer.values_state,
-            scale_dtype=quantized.scale_dtype)
+            layer.value_axis, layer.shape, layer.dtype, state=layer.values_state)
         dense.update(keys, values, index)
     for name, value in quantized.extras.items():
         setattr(dense, name, value)
