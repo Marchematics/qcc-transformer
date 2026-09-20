@@ -1,0 +1,82 @@
+{
+ "config": {
+  "model": "/root/qcc/models/Llama-3.2-1B-Instruct",
+  "lengths": [
+   8192,
+   32768,
+   65536,
+   131072,
+   262144,
+   524288
+  ],
+  "budget": 4096,
+  "lex_cap": 512,
+  "prefill_chunk": 8192,
+  "key_chunk": 4096,
+  "load_4bit": false,
+  "out": "artifacts/bounded-decode-frontier-state-growth.json"
+ },
+ "summary": {
+  "model": "/root/qcc/models/Llama-3.2-1B-Instruct",
+  "budget": 4096,
+  "lex_cap": 512,
+  "state_growth_first_to_last": 1.0,
+  "slots_growth_first_to_last": 1.0
+ },
+ "rows": [
+  {
+   "prompt_tokens": 8192,
+   "status": "ok",
+   "retained_slots": 4608,
+   "slots_per_prompt_token": 0.5625,
+   "bounded_state_mib": 144.0,
+   "fullkv_state_mib": 256.0,
+   "fullkv_over_bounded": 1.78,
+   "compile_seconds": 3.5,
+   "peak_gib": 5.21
+  },
+  {
+   "prompt_tokens": 32768,
+   "status": "ok",
+   "retained_slots": 4608,
+   "slots_per_prompt_token": 0.140625,
+   "bounded_state_mib": 144.0,
+   "fullkv_state_mib": 1024.0,
+   "fullkv_over_bounded": 7.11,
+   "compile_seconds": 7.3,
+   "peak_gib": 9.72
+  },
+  {
+   "prompt_tokens": 65536,
+   "status": "ok",
+   "retained_slots": 4608,
+   "slots_per_prompt_token": 0.070312,
+   "bounded_state_mib": 144.0,
+   "fullkv_state_mib": 2048.0,
+   "fullkv_over_bounded": 14.22,
+   "compile_seconds": 18.2,
+   "peak_gib": 10.89
+  },
+  {
+   "prompt_tokens": 131072,
+   "status": "ok",
+   "retained_slots": 4608,
+   "slots_per_prompt_token": 0.035156,
+   "bounded_state_mib": 144.0,
+   "fullkv_state_mib": 4096.0,
+   "fullkv_over_bounded": 28.44,
+   "compile_seconds": 67.6,
+   "peak_gib": 14.89
+  },
+  {
+   "prompt_tokens": 262144,
+   "status": "oom",
+   "detail": "CUDA out of memory. Tried to allocate 2.62 GiB. GPU 0 has a total capacity of 23.55 GiB of which 1.36 GiB is free. Proce"
+  },
+  {
+   "prompt_tokens": 524288,
+   "status": "oom",
+   "detail": "CUDA out of memory. Tried to allocate 2.75 GiB. GPU 0 has a total capacity of 23.55 GiB of which 1.52 GiB is free. Proce"
+  }
+ ]
+}
