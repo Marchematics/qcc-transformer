@@ -1003,6 +1003,44 @@ multi-key task (1.000 vs 0.950), which is the same "a cleaner context helps a
 multi-item answer" effect noted in 3.12. The attention-selected filler is what
 buys the last 7% and the worst-task floor.
 
+### 3.23 Quality against decode-state bytes: eviction, quantization, and both
+
+Quantization is the other way to shrink decode state, so a bounded cache has to
+be compared with it at matched bytes rather than at matched slots.
+`benchmarks/kv_quant.py` implements KIVI-axis symmetric quantization (keys
+grouped along the head axis, values along the token axis, zero point exactly 0,
+`scale = max|X|/qmax` per group, int4 packed two codes per byte) and
+`benchmarks/benchmark_kv_quant_ruler.py` runs every arm over the same RULER
+records (16 records, four per task, lengths 8K-64K, greedy 64 tokens, official
+partial recall):
+
+| arm | decode state | vs Full-KV | partial recall | strict recall |
+|---|---:|---:|---:|---:|
+| Full-KV bf16 | 427.5 MiB | 1.0x | 0.8125 | 0.688 |
+| Full-KV int8 | 214.6 MiB | 2.0x | 0.8125 | 0.688 |
+| Full-KV int4 | 106.9 MiB | 4.0x | 0.4125 | 0.375 |
+| bounded 4,608 slots bf16 | 144.0 MiB | - | **0.8250** | 0.688 |
+| bounded 4,608 slots int8 | 72.3 MiB | - | **0.8250** | 0.688 |
+| bounded 4,608 slots int4 | 36.0 MiB | - | 0.4625 | 0.438 |
+
+Three things follow, and one caveat.
+
+* **In this range int8 KV is free**: identical recall at half the bytes, on both
+  the Full-KV and the bounded arm. Any comparison that gives the bounded cache
+  bf16 bytes against a quantized baseline is therefore being generous to the
+  baseline's memory, not to us.
+* **int4 KV is not free at this granularity**: recall falls from 0.81 to 0.41,
+  far below what the bounded arm keeps at comparable bytes.
+* **Eviction wins at matched bytes here, and the two compose**: 144 MiB of
+  bounded bf16 beats 107 MiB of Full-KV int4 by 0.41 absolute recall, and adding
+  int8 on top gives Full-KV's exact quality at 72.3 MiB - 5.9x smaller than the
+  bf16 Full-KV cache, 2.0x smaller than full-int8, with the same score.
+* Caveat, stated because it bounds the claim: with `group_size=128` and a
+  64-wide head, the key axis gets a single scale per (layer, kv-head), which is
+  the coarsest KIVI configuration. A finer key granularity, or per-token keys,
+  would very likely recover part of the int4 loss, so this table should be read
+  as "this int4 configuration", not as "int4".
+
 ## 4. What this establishes, and what it does not
 
 Establishes:
