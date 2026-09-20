@@ -249,37 +249,41 @@ aggregate retention is 0.667 and the worst task is 0.000, far from the
 >=99% / >=97% targets.** The synthetic 2-pair NIAH task that gave 0.897-0.931
 is materially easier than RULER's many-distractor multi-key and UUID records.
 
-### 3.7 Removing the per-step floor: static cache and CUDA graphs
+### 3.7 Decode-latency floor (withdrawn graph result, see below)
 
-`benchmark_bounded_decode_tpot_floor.py` (`lean_decode_32k.json`,
-`lean_decode_128k.json`). Every variant decodes the same retained K/V set.
+`benchmark_bounded_decode_tpot_floor.py`. The bounded dynamic path is measured
+against matched Full-KV on the same prompt and code path.
 
 | variant | 32K | 128K |
 |---|---:|---:|
-| Full-KV, DynamicCache + per-step mask concat | 18.17 ms | 17.54 ms |
-| Full-KV, StaticCache | OOM | OOM |
-| Full-KV, StaticCache + CUDA graph | 53.70 ms | OOM |
-| bounded (B=1024), DynamicCache | 22.95 ms | 15.86 ms |
-| bounded, StaticCache | 44.39 ms | 23.91 ms |
-| **bounded, StaticCache + CUDA graph** | **6.86 ms** | **6.86 ms** |
+| Full-KV, DynamicCache | 15.6 ms (frontier harness) | 27.4 ms (frontier harness) |
+| bounded (B=1024), DynamicCache | 13.5 ms (frontier harness) | 13.5 ms (frontier harness) |
+| bounded, StaticCache | 20.9-25.8 ms | 23.9-25.8 ms |
+| bounded, StaticCache + CUDA graph | 6.87 ms | 7.11 ms |
 
-* The CUDA-graph bounded path is **6.86 ms/token at both 32K and 128K** — exactly
-  the context-independence the bounded state predicts — and **2.0x faster than
-  the 13.5 ms dynamic bounded path**, i.e. the per-step Python/mask/cache-concat
-  overhead was about half the floor.
-* Against matched Full-KV on the same code path (frontier harness, one process,
-  no contention: 15.6 ms at 32K, 27.4 ms at 128K) the graph-optimized bounded
-  path is **~2.3x at 32K and ~4.0x at 128K**.
-* The in-run Full-KV numbers here (18.17 ms at 32K, 17.54 ms at 128K) are
-  inconsistent with each other and with the frontier harness, so this run's
-  Full-KV column is not used for the speedup claim; only the bounded column is
-  internally consistent across lengths.
-* StaticCache without a graph is *slower* than DynamicCache in this Transformers
-  build, and the Full-KV static/graph variants OOM at 128K because the static
-  buffer is allocated alongside the prefilled cache.
+**The static-cache and CUDA-graph numbers are withdrawn.** The harness now runs
+an explicit parity check: every variant must generate exactly the token ids the
+dynamic path generates. Both the static and graph variants **fail** that check
+in this Transformers build (they emit a degenerate repetition instead of the
+answer), so their timings measure a path that is not computing the same thing.
+The likely cause is the interaction between a *compacted* cache (retained slots
+re-indexed to 0..B-1 while their rotary phases remain absolute) and the
+StaticCache mask construction, which sizes the mask from `max_cache_len` and
+derives causality from `position_ids`; the dynamic path sizes it from the live
+cache length instead. Until parity passes, no speed claim is attached to them.
 
-So cache bounding plus graph capture reaches ~4x at 128K, not 5x, and the
-5x batch-1 target remains unmet.
+What survives:
+
+* Bounded decode TPOT is flat in context length (13.5 ms at 32K, 64K and 128K)
+  while Full-KV grows with it (15.6 ms -> 27.4 ms), so the bounded decode is
+  **~2.0x at 128K, batch 1** on the dynamic path.
+* The 6.87 ms figure shows the *size* of the remaining per-step floor (weights
+  plus Python/mask/cache bookkeeping) but is not a valid measurement.
+* `full_kv_static` and `full_kv_graph` OOM at 128K because a StaticCache
+  allocates a second full-size buffer while the prefilled cache is alive.
+
+The 5x batch-1 TPOT target is not met: ~2x is demonstrated, and the floor is
+per-step framework overhead rather than KV traffic.
 
 ## 4. What this establishes, and what it does not
 

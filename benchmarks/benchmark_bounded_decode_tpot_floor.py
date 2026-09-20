@@ -59,8 +59,9 @@ class Runner:
         self.position_ids = None
         self.logits_buf = None
         if mode == "dynamic":
+            self._base = [(k, v) for k, v in zip(keys, values)]
             self.cache = DynamicCache()
-            for k, v in zip(keys, values):
+            for k, v in self._base:
                 lyr = DynamicLayer()
                 lyr.keys = k.clone()
                 lyr.values = v.clone()
@@ -75,6 +76,14 @@ class Runner:
 
     def _reset(self):
         if self.mode == "dynamic":
+            # rebuild the cache: otherwise every warmup/repeat run appends to it
+            base = self._base
+            self.cache = DynamicCache()
+            for k, v in base:
+                lyr = DynamicLayer()
+                lyr.keys = k.clone()
+                lyr.values = v.clone()
+                self.cache.layers.append(lyr)
             self.mask_buf = torch.ones(1, self.kept + 1, device="cuda", dtype=torch.long)
         else:
             for lyr in self.cache.layers:
@@ -119,25 +128,35 @@ class Runner:
         cur = next_id
         if self.mode == "graph":
             for step in range(n):
-                pos = self.kept + step
+                slot = self.kept + step          # index inside the static buffer
+                abs_pos = Lc + step              # position in the original sequence
                 self.input_ids.copy_(cur)
-                self.cache_position.fill_(pos)
-                self.position_ids.fill_(pos)
+                self.cache_position.fill_(slot)
+                self.position_ids.fill_(abs_pos)
                 if step + 1 < n:
-                    self.mask_buf[:, pos + 1] = 1
+                    self.mask_buf[:, slot + 1] = 1
                 self.graph.replay()
                 cur = self.logits_buf[:, -1:].argmax(-1)
                 out.append(int(cur.item()))
             return out
         for step in range(n):
-            pos = Lc + step
-            cp = torch.tensor([pos], device="cuda")
-            o = self.model(cur, past_key_values=self.cache, attention_mask=self.mask_buf,
-                           cache_position=cp, position_ids=cp.unsqueeze(0), use_cache=True)
+            if self.mode == "static":
+                slot, abs_pos = self.kept + step, Lc + step
+                cp = torch.tensor([slot], device="cuda")
+                pos_ids = torch.tensor([[abs_pos]], device="cuda")
+                o = self.model(cur, past_key_values=self.cache, attention_mask=self.mask_buf,
+                               cache_position=cp, position_ids=pos_ids, use_cache=True)
+                if step + 1 < n:
+                    self.mask_buf[:, slot + 1] = 1
+            else:
+                abs_pos = Lc + step
+                cp = torch.tensor([abs_pos], device="cuda")
+                o = self.model(cur, past_key_values=self.cache, attention_mask=self.mask_buf,
+                               cache_position=cp, position_ids=cp.unsqueeze(0), use_cache=True)
+                self.mask_buf = torch.cat(
+                    [self.mask_buf, torch.ones(1, 1, device="cuda", dtype=torch.long)], dim=1)
             cur = o.logits[:, -1:].argmax(-1)
             out.append(int(cur.item()))
-            self.mask_buf = torch.cat(
-                [self.mask_buf, torch.ones(1, 1, device="cuda", dtype=torch.long)], dim=1)
         return out
 
     def __call__(self, n, next_id, Lc):
@@ -145,24 +164,34 @@ class Runner:
         cur = next_id
         if self.mode == "graph":
             for step in range(n):
-                pos = self.kept + step
+                slot = self.kept + step          # index inside the static buffer
+                abs_pos = Lc + step              # position in the original sequence
                 self.input_ids.copy_(cur)
-                self.cache_position.fill_(pos)
-                self.position_ids.fill_(pos)
+                self.cache_position.fill_(slot)
+                self.position_ids.fill_(abs_pos)
                 if step + 1 < n:
-                    self.mask_buf[:, pos + 1] = 1
+                    self.mask_buf[:, slot + 1] = 1
                 self.graph.replay()
                 cur = self.logits_buf[:, -1:].argmax(-1)
             torch.cuda.synchronize()
             return
         for step in range(n):
-            pos = Lc + step
-            cp = torch.tensor([pos], device="cuda")
-            o = self.model(cur, past_key_values=self.cache, attention_mask=self.mask_buf,
-                           cache_position=cp, position_ids=cp.unsqueeze(0), use_cache=True)
+            if self.mode == "static":
+                slot, abs_pos = self.kept + step, Lc + step
+                cp = torch.tensor([slot], device="cuda")
+                pos_ids = torch.tensor([[abs_pos]], device="cuda")
+                o = self.model(cur, past_key_values=self.cache, attention_mask=self.mask_buf,
+                               cache_position=cp, position_ids=pos_ids, use_cache=True)
+                if step + 1 < n:
+                    self.mask_buf[:, slot + 1] = 1
+            else:
+                abs_pos = Lc + step
+                cp = torch.tensor([abs_pos], device="cuda")
+                o = self.model(cur, past_key_values=self.cache, attention_mask=self.mask_buf,
+                               cache_position=cp, position_ids=cp.unsqueeze(0), use_cache=True)
+                self.mask_buf = torch.cat(
+                    [self.mask_buf, torch.ones(1, 1, device="cuda", dtype=torch.long)], dim=1)
             cur = o.logits[:, -1:].argmax(-1)
-            self.mask_buf = torch.cat(
-                [self.mask_buf, torch.ones(1, 1, device="cuda", dtype=torch.long)], dim=1)
         torch.cuda.synchronize()
 
 
