@@ -1008,16 +1008,16 @@ increasing lengths with one fixed configuration (Llama-3.2-1B, `budget=4096`,
 | 8,192 | 4,608 | 144.0 MiB | 256.0 MiB | 1.8x | 3.5 s |
 | 32,768 | 4,608 | 144.0 MiB | 1,024.0 MiB | 7.1x | 7.3 s |
 | 65,536 | 4,608 | 144.0 MiB | 2,048.0 MiB | 14.2x | 18.2 s |
-| 131,072 | 4,608 | 144.0 MiB | 4,096.0 MiB | 28.4x | 67.6 s |
-| 262,144 | - | - | - | - | OOM: a co-tenant held the card (1.4 GiB free) |
-| 524,288 | - | - | - | - | OOM: same |
+| 131,072 | 4,608 | 144.0 MiB | 4,096.0 MiB | 28.4x | 51.6 s |
+| 262,144 | 4,608 | 144.0 MiB | 8,192.0 MiB | **56.9x** | 214.6 s |
+| 524,288 | - | - | - | - | OOM: a 512K exact prefill needs ~19 GiB of KV plus activations on a 24 GiB card |
 
-**State growth from 8K to 128K is exactly 1.00x** - sixteen times the context,
-the same 4,608 slots and the same 144 MiB - while the Full-KV cache grows 16x.
-The two longest rows failed on *external* memory pressure, not on the method;
-they are recorded as OOM rather than omitted, and the 1M target remains a
-closed-form statement plus a measurement up to the largest length this card can
-hold.
+**State growth from 8K to 256K is exactly 1.00x** - thirty-two times the
+context, the same 4,608 slots and the same 144 MiB - while the Full-KV cache
+grows 32x, to 8 GiB. The 512K row is a genuine hardware wall rather than a
+co-tenant artefact this time: an exact prefill at that length needs about 19 GiB
+of KV plus activations on a 24 GiB card, which is the same wall that stops 1M
+(32 GiB of KV) - and it is the *prefill*, not the decode state, that hits it.
 
 The same sweep also shows what the compile costs: reading 128K instead of 8K
 takes 68 s instead of 3.5 s of one-off prefill, and after that every decoded
@@ -1034,6 +1034,21 @@ a matched 4,096-slot budget on the RULER split:
 | last-query ranking (`obs_last`) | 4,096 | 128 MiB | 0.744 | 0.000 |
 | anchors + sinks + recent (`lex_only`) | 1,105 | 34.5 MiB | 0.930 | 0.000 |
 | shipped (`lex_obs`, 4,096 + 512) | 4,608 | 144 MiB | 1.000 | 1.000 |
+
+**The quality/state curve.** Running the shipped selection at three budgets over
+the same 80 records traces the frontier (all at 144 MiB or less; the Full-KV
+cache these replace is 4,096 MiB at 128K):
+
+| retained slots | decode state | aggregate retention | worst task |
+|---:|---:|---:|---:|
+| 1,536 | 48.0 MiB | 0.987 | 0.948 |
+| 2,560 | 80.0 MiB | 0.975 | 0.947 |
+| 4,608 (shipped) | 144.0 MiB | **1.007** | **1.000** |
+
+The curve is flat between 1.5K and 2.5K slots and only reaches parity at 4,608,
+which is consistent with 3.12's "a cleaner context helps a multi-item answer":
+adding attention-selected filler is not monotonically good, and the anchors plus
+a recent window carry most of the quality on their own.
 
 A 34.5 MiB cache - 4.2x smaller than the shipped one, 3,700x smaller than the
 128K Full-KV cache it replaces - already carries 93% of the matched quality on
