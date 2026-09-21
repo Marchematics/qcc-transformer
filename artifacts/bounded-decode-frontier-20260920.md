@@ -1076,6 +1076,7 @@ Retention is the bounded/full ratio over records Full-KV answers.
 | model | family / shape | prompt limit | records matched | single_1 | multikey_2 | multikey_3 | vt | aggregate | worst task | slots | decode state |
 |---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | Llama-3.2-1B-Instruct | GQA 32:8, 16L | 128K native | 68/80 | 1.000 | 1.000 | 1.000 | 1.028 | **1.007** | **1.000** | 4,608 | 144 MiB |
+| Llama-3.1-8B-Instruct (4-bit) | GQA 32:8, 32L, head 128 | 128K native | 79/80 | 1.000 | 1.000 | 1.000 | 1.054 | **1.014** | **1.000** | 4,608 | 576 MiB |
 | Qwen2.5-3B-Instruct | GQA 16:2, 36L | 32K native | 57/60 | 1.000 | 1.000 | 0.917 | 0.983 | **0.975** | 0.917 | 4,608 | 162 MiB |
 | Phi-3.5-mini-instruct | MHA 32:32, 32L, LongRoPE | 128K native | 39/40 | 1.000 | 1.000 | 0.889 | 1.000 | **0.972** | 0.889 | 4,608 | 1,728 MiB |
 
@@ -1084,12 +1085,14 @@ Retention is the bounded/full ratio over records Full-KV answers.
   architectures, not different sizes of the same one: Qwen uses a 2-head GQA
   projection with a 128-wide head, Phi a 32-head MHA with a 96-wide head and
   LongRoPE position scaling, which the package has to handle explicitly (3.5).
-* The **worst task is `niah_multikey_3` on every model**, which is also the task
-  where the models themselves are weakest (Llama-1B's Full-KV arm answers only
-  45% of it): the retention ratio there is measuring a handful of records where
-  the model is near chance. The 1B checkpoint reaches 1.000 on it; the two
-  larger checkpoints reach 0.92 and 0.89, so "worst task >= 97%" is currently a
-  Llama-3.2-1B result, not a universal one.
+* **Two of the four models are at parity or better on every task**: Llama-3.2-1B
+  (1.007 / 1.000) and Llama-3.1-8B with 4-bit weights (1.014 / 1.000) - the
+  latter against the strongest Full-KV arm in the set, which answers 0.95 of
+  `niah_multikey_3` where the 1B answers 0.45. The two that are not - Qwen2.5-3B
+  (0.975 / 0.917) and Phi-3.5-mini (0.972 / 0.889) - lose on that same task, the
+  three-key disambiguation record where every model sits closest to its own
+  floor. So "worst task >= 97%" holds for the Llama family, and the cross-family
+  gap is one identified task rather than a diffuse shortfall.
 * The decode-state column is why cross-family matters for serving: at the *same*
   retained slot count Phi's MHA cache is 12x larger than Qwen's GQA cache
   (1,728 MiB against 162 MiB). A slot budget is a quality knob; the bytes it
