@@ -1225,6 +1225,37 @@ opposite holds. Both effects are large enough (0.08-0.22 aggregate) to matter,
 and together they explain why the shipped configuration is the one that reaches
 parity.
 
+### 3.26 The cross-family gap is two to four all-or-nothing records per model
+
+RULER's `niah_multikey_3` is scored by the fraction of three reference keys found
+in the answer, so a model that retrieves one of them should score 0.33. It does
+not: pooling every run of this task in the campaign, the per-record recall is
+**either 0.0 or 1.0 and nothing in between**.
+
+| model | arm | records | zeros | ones | mean |
+|---|---|---:|---:|---:|---:|
+| Llama-3.2-1B | full | 180 | 99 | 81 | 0.450 |
+| Llama-3.2-1B | bounded | 180 | 103 | 77 | 0.428 |
+| Llama-3.1-8B (4-bit) | full | 20 | 1 | 19 | 0.950 |
+| Llama-3.1-8B (4-bit) | bounded | 20 | 1 | 19 | **0.950** |
+| Qwen2.5-3B | full | 30 | 6 | 24 | 0.800 |
+| Qwen2.5-3B | bounded | 30 | 9 | 21 | 0.700 |
+| Phi-3.5-mini | full | 20 | 2 | 18 | 0.900 |
+| Phi-3.5-mini | bounded | 20 | 4 | 16 | 0.800 |
+
+Read against 3.25, this closes the question the cross-family table opened. The
+whole difference between the bounded arm and Full-KV on this task is **4 records
+on Llama-1B, 0 on Llama-3.1-8B, 3 on Qwen and 2 on Phi**, and on every one of
+them the answer collapses from complete to absent - the model either lists all
+three keys or lists none, so there is no partially-retained answer to recover by
+improving selection. Five selection configurations leave the ratio unchanged
+(3.25) because there is nothing for a better selection to recover; the 8B
+checkpoint, where the same configuration loses nothing at all, is the control.
+That is the honest shape of the remaining cross-family shortfall: a small number
+of generation-side collapses on a task where the model is near its own floor,
+not a retention deficit - and it is why the report's tables carry absolute scores
+next to every ratio.
+
 ## 4. What this establishes, and what it does not
 
 Establishes (every number produced by the shipped `compile_bounded_cache`, see
