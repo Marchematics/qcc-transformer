@@ -1129,6 +1129,24 @@ Retention is the bounded/full ratio over records Full-KV answers.
   costs are an architectural property, and both are reported here rather than
   assumed.
 
+**Can the cross-family gap be closed by tuning the anchors?** `niah_multikey_3`
+on Qwen2.5-3B was re-run three ways (20 records, 12-15 of them matched by the
+Full-KV arm):
+
+| anchor configuration | retained slots | state | bounded | Full-KV | retention |
+|---|---:|---:|---:|---:|---:|
+| shipped (pattern + chains) | 4,608 | 162 MiB | 0.667 | 0.800 | 0.833 |
+| union (`anchor_mode="both"`) | 4,608 | 162 MiB | 0.733 | 0.800 | 0.833 |
+| larger anchor budget (`lex_cap=1024`) | 5,120 | 180 MiB | 0.667 | 0.800 | 0.833 |
+
+The ratio is identical to three digits and the absolute score moves by one
+record's worth, so **the gap on this task is not an anchor-budget problem**. Two
+caveats belong with that statement: the same configuration measured 0.917 on the
+full 60-record Qwen run, so the ratio on a task where the model sits near its
+floor is unstable (12-15 matched records, bf16 runs flip individual records);
+and at 0.80 absolute the model itself is failing one record in five with full
+attention. This is why the tables above carry absolute scores next to the ratios.
+
 ## 4. What this establishes, and what it does not
 
 Establishes (every number produced by the shipped `compile_bounded_cache`, see
