@@ -520,11 +520,17 @@ tables:
   55.2/11.0), which is stronger than anything reported in 3.11 because both arms
   now pay the same framework overhead. This is the number a reviewer should
   compare against the 5x target.
-* **At 128K the baseline could not be run at all** in this window (its dynamic
-  cache plus a 128K forward OOMs on a 24 GiB card, with or without capture), so
-  no 128K matched-optimisation ratio is claimed: the historical 4.21x stands as
-  bounded+graph against Full-KV *dynamic*, which is the only pairing that could
-  be completed.
+* **At 128K the baseline could not be run at all**, and the failure is now known
+  to be the baseline's own footprint rather than a co-tenant: `benchmark_fullkv_tpot_graph.py`
+  at 131,072 tokens OOMs inside `DynamicCache.update` with **23.4 GiB held by its
+  own process** on a free card (4 GiB of KV + 2.5 GiB of weights + 128K-position
+  activations). So no 128K matched-optimisation ratio is claimed, and the
+  historical 4.21x - bounded+graph against Full-KV *dynamic* - is superseded on
+  both sides: the bounded number it used (6.87 ms) is not reproducible, and the
+  baseline number it used (28.95 ms) came from a harness configuration that no
+  longer completes. The defensible 128K statement is the bounded arm alone:
+  **11.0 ms per token, p95 11.0 ms, flat from 32K to 128K**, against a baseline
+  that cannot be measured there at all.
 * The bounded+graph floor itself is stable at **11.0 ms** across lengths and
   repeats. With four to eight parity-gated repeats per length (raw files
   `experiments/retention_frontier/latency/{clean,p95}-*.json`, summary
@@ -1327,10 +1333,10 @@ Does not establish:
   24 GiB of HBM, so the baseline cannot be run at 1M either, and no 1M-native
   checkpoint is available here. The state-growth claim is closed-form plus
   measured to 128K; the 256K/512K rows are recorded as OOM from a co-tenant.
-* **128K TPOT >= 5x.** The matched comparison is 1.73x; the strongest
-  defensible system number is 4.21x (bounded + CUDA graph against Full-KV
-  dynamic), and the bandwidth bound for a 1B model is 2.70x before weights are
-  counted.
+* **128K TPOT >= 5x.** The matched, repeated, parity-gated comparison reaches
+  **5.0x at 32K** (3.11b). At 128K there is no matched baseline to divide by: the
+  Full-KV arm cannot be measured on this card at that length, on its own
+  footprint, with any of the execution paths tried.
 * **Latency percentiles or a clean systems table.** The card is shared: the same
   configuration measured between 6.87 and 18.4 ms depending on co-tenants, so
   every latency number here names its measurement window, and percentiles need
