@@ -536,8 +536,16 @@ tables:
   decoded at **38.1 ms/token - but over only 5 tokens, because the model hit EOS
   there, while the bounded arm's 11.0 ms is a 32-token mean**. The two decode
   windows are not matched, so no 128K ratio is quoted from this pair; it does
-  establish that the baseline is measurable at 128K with a smaller prefill chunk,
-  and a step-matched rerun is the one measurement still worth doing.
+  establish that the baseline is measurable at 128K with a smaller prefill chunk.
+  The step-matched rerun was then attempted inside the same harness that gives
+  both arms the same execution path (`benchmark_bounded_decode_tpot_floor.py`,
+  131,174 tokens, prefill chunk 2048, 32 steps, parity check passing): the bounded
+  arm measured **16.55 ms** (dynamic cache) while the Full-KV arm OOMs in that
+  harness as well, because it holds the original and the pruned cache plus static
+  buffers simultaneously. So the position is: the bounded arm is measured at 128K
+  under every path; the baseline is measurable there only in a harness whose
+  decode window the model truncates at 5 tokens, and no step-matched 128K ratio
+  exists on this card.
 * The bounded+graph floor itself is stable at **11.0 ms** across lengths and
   repeats. With four to eight parity-gated repeats per length (raw files
   `experiments/retention_frontier/latency/{clean,p95}-*.json`, summary
