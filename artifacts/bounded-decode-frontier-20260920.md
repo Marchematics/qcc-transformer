@@ -1185,6 +1185,46 @@ floor is unstable (12-15 matched records, bf16 runs flip individual records);
 and at 0.80 absolute the model itself is failing one record in five with full
 attention. This is why the tables above carry absolute scores next to the ratios.
 
+### 3.25 The worst task is not a configuration problem
+
+Qwen2.5-3B's `niah_multikey_3` retention has now been measured under five
+selection configurations (20 records, 12-15 matched by the Full-KV arm, all at
+4,608-5,120 retained slots):
+
+| configuration | bounded | Full-KV | retention |
+|---|---:|---:|---:|
+| shipped: last-query scoring + pattern anchors | 0.667 | 0.800 | 0.833 |
+| union anchors (`anchor_mode="both"`) | 0.733 | 0.800 | 0.833 |
+| larger anchor budget (`lex_cap=1024`) | 0.667 | 0.800 | 0.833 |
+| window-mean scoring + anchors | 0.667 | 0.800 | **0.833** |
+| (full 60-record run, shipped configuration) | 0.733 | 0.800 | 0.917 |
+
+The ratio is identical across every variant, and the absolute score moves by one
+record at most; Phi-3.5-mini's `niah_multikey_3` under the window-mean variant is
+likewise unchanged at 0.889. **The cross-family gap on this task is therefore not
+an anchor budget, an anchor alphabet or a scoring-window problem.** Two honest
+caveats remain attached: on a task where the models themselves sit near their
+floor (Full-KV answers 0.80 for Qwen, 0.90 for Phi) the ratio is computed over
+12-15 records and a bf16 run can flip one, which is exactly why the tables here
+carry absolute scores beside the ratios.
+
+**Window-mean scoring is better without anchors and worse with them**, which is
+worth recording because it inverts the intuition:
+
+| Llama-3.2-1B, 4,608 slots, 80 records | multikey_2 | multikey_3 | vt | aggregate | worst task |
+|---|---:|---:|---:|---:|---:|
+| last-query scoring, no anchors | 0.895 | 0.333 | 1.039 | 0.817 | 0.333 |
+| window-mean scoring, no anchors | 0.870 | 0.667 | 1.022 | 0.870 | 0.667 |
+| **last-query scoring + anchors (shipped)** | 1.000 | 1.000 | 1.028 | **1.007** | **1.000** |
+| window-mean scoring + anchors | 0.895 | 0.778 | 1.018 | 0.923 | 0.778 |
+
+With the retrieval already supplied by the anchors, the *final* query - the token
+closest to what is about to be generated - selects better filler than a window
+average that mixes in the question's own tokens; without the anchors, the
+opposite holds. Both effects are large enough (0.08-0.22 aggregate) to matter,
+and together they explain why the shipped configuration is the one that reaches
+parity.
+
 ## 4. What this establishes, and what it does not
 
 Establishes (every number produced by the shipped `compile_bounded_cache`, see
