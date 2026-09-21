@@ -65,6 +65,43 @@ python benchmarks/benchmark_retention_multimodel.py --model <checkpoint> \
     --budget 4608 --lex-cap 0 --scoring mean --out artifacts/<name>.json
 ```
 
+## Where the capacity of the policy comes from
+
+The selection sees only the last `observation_window` tokens of the prompt, and
+its anchor set is capped by `lex_cap`. Both limits are measured without a model
+first (tokenizer only, CPU), then on the model:
+
+```bash
+# how many of the k item names the query window can see, and how many sites the
+# anchor set reaches, per (k, obs, lex_cap)
+python benchmarks/anchor_window_coverage.py --model <checkpoint> \
+    --items 8 16 32 64 --obs 64 128 256 512 --lex-cap 512 2048 --length 32768
+
+# the required-set probe itself: k needles asked for at once, Full-KV against
+# bounded, with the anchor window and the anchor budget as the two knobs
+python benchmarks/benchmark_required_set.py --model <checkpoint> --family needles \
+    --items 8 16 32 --lex-cap 512 2048 --obs 128 --budgets 2048 4096 8192 \
+    --seeds 3 --lengths 32768 --hops 6 --out artifacts/prediction-needles-<name>.json
+
+# the oracle-placement control: the same statements immediately before the
+# question, i.e. inside the recency channel of any budget that can hold them
+python benchmarks/benchmark_required_set.py --model <checkpoint> --family needles \
+    --items 8 16 --lex-cap 512 --placement recency --budgets 2048 4096 8192 \
+    --seeds 3 --lengths 32768 --hops 6 --out artifacts/prediction-recency-<name>.json
+
+# strict accuracy, per-item recall, truncated decode share and reached sites
+python benchmarks/analyze_required_set.py artifacts/prediction-*.json
+```
+
+`analyze_required_set.py` prints the views side by side on purpose: the
+all-or-nothing metric and the per-item recall answer different questions, and a
+gap that is a readout limit looks like a retention limit in the first one alone.
+Two of the columns are retention measurements rather than budget statements:
+`required_coverage` is the share of the item statements' own tokens that survived
+selection (counted over every `(layer, head)` index set the arm kept), and
+`required_mass` is the share of the final query's attention that lands on those
+statements.
+
 ## State size, quantization and latency
 
 ```bash

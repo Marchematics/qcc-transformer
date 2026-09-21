@@ -1310,6 +1310,122 @@ policy can recover it. That is the shape of the remaining cross-family
 shortfall - and it is why the report's tables carry absolute scores next to every
 ratio.
 
+### 3.27 What the fixed state has to hold: the query's items, not the context
+
+Sections 3.22 and A7 measure that decode state is set by configuration and does not
+grow with prompt length. The required-set probe then produced the opposite-looking
+result (3.25, 3.26): asked for all `k` needles at once, a bounded arm stayed at
+0.333 exact-set accuracy on an 8B checkpoint whose Full-KV arm scored 1.000 — at
+every budget from 1,024 to 8,192 slots, while the needle statements occupy about
+132 tokens, so the retained *width* covers the required set by a wide margin. This
+section resolves that, and the resolution is a property of the query rather than of
+the context.
+
+**Both query-driven channels read the last `observation_window` tokens.** The
+observation-window scores attend from those tokens to the context, and the lexical
+anchors take their candidate surfaces from the same slice. A policy can therefore
+only serve an item whose name appears in that window. That is measurable without a
+model (`benchmarks/anchor_window_coverage.py`, Qwen2.5-3B tokenizer, 32K prompts,
+three seeds, mean item names inside the window):
+
+| items asked for | `obs=64` | `obs=128` | `obs=256` | `obs=512` | `obs=1024` |
+|---|---:|---:|---:|---:|---:|
+| 8 | 6.0 | 8.0 | 8.0 | 8.0 | 8.0 |
+| 16 | 6.0 | 14.3 | 16.0 | 16.0 | 16.0 |
+| 32 | 6.0 | 14.3 | 30.7 | 32.0 | 32.0 |
+| 64 | 6.3 | 14.3 | 30.7 | 62.3 | 64.0 |
+| 128 | 6.0 | 14.0 | 30.0 | 61.7 | 126.0 |
+
+The visible count is linear in the window — about `(obs - 20) / 8.2`, eight tokens
+per named item after a twenty-token question prefix — so the shipped default
+(`observation_window=64`) puts roughly six named items in front of the anchor
+channel. The two channels are complementary rather than redundant, and the model
+shows it: Qwen2.5-3B, 32K, `lex_cap=2048`, `budget 4096`, three seeds, against the
+Full-KV arm of the same records (0.958 at `k=16`, 0.781 at `k=32`):
+
+| `k` | | `obs=64` | `obs=128` | `obs=256` | `obs=512` |
+|---|---:|---:|---:|---:|---:|
+| 16 | coverage | 0.789 | 0.956 | 1.000 | 1.000 |
+| 16 | recall | 0.875 | 0.938 | 0.917 | 0.896 |
+| 32 | coverage | 0.599 | – | 0.973 | 1.000 |
+| 32 | recall | 0.396 | – | **0.833** | 0.698 |
+
+Coverage rises monotonically with the window and stops where the tokenizer-level
+table says it will; recall follows coverage while coverage is the binding constraint
+(at `k=32`, 0.396 to 0.833 as coverage goes 0.599 to 0.973 — above the Full-KV arm's
+0.781, the same cleaner-context effect reported on narrativeqa in 3.21), and stops
+improving once coverage saturates at 1.0, where a wider window only changes which
+filler the score channel keeps and how the anchors compete. The second limit is the
+anchor budget: at `obs=128` and `lex_cap=512` the expanded spans reach 9.7 of 16
+named items, and `lex_cap=2048` reaches 14.3 — the window's own ceiling, not the
+cap's. (Those two numbers are also why `--lex-cap 4096` adds nothing at `k=16`: the
+window is already the binding constraint.)
+
+**The anchor budget has a knee where the arithmetic says it should.** The law
+expands each anchor hit by `lex_context_left + lex_context_right + 1 = 49` tokens,
+so 16 named items predict about 784 anchor tokens. Qwen2.5-3B, 32K, `k=16`, three
+seeds, against the Full-KV arm of the same records (0.958 per-item recall, 0.667
+exact-set):
+
+| arm | kept slots | measured coverage | items covered | recall | exact-set |
+|---|---:|---:|---:|---:|---:|
+| `budget 2048`, `lex_cap 512` (shipped) | 2,560 | – | – | 0.729 | 0.000 |
+| `budget 4096`, `lex_cap 512` | 4,608 | 0.847 | 9.3 / 16 | 0.812 | 0.000 |
+| `budget 8192`, `lex_cap 512` | 8,704 | – | – | 0.896 | 0.333 |
+| `budget 4096`, `lex_cap 768` | 4,864 | 0.949 | 14.0 / 16 | 0.917 | 0.333 |
+| `budget 4096`, `lex_cap 1024` | 5,120 | 0.956 | 14.3 / 16 | 0.938 | 0.333 |
+| `budget 4096`, `lex_cap 3072` | 7,168 | 0.964 | 14.3 / 16 | 0.938 | 0.333 |
+| `budget 2048`, `lex_cap 2048` | 4,096 | – | – | **0.958** | 0.333 |
+| `budget 4096`, `lex_cap 4096` | 8,192 | – | – | **0.958** | **0.667** |
+
+`required_coverage` is measured, not inferred: it is the share of the item
+statements' own tokens that survived selection, counted over every `(layer, head)`
+index set the arm kept. The table's two readings are that the knee sits between
+`lex_cap=512` (9.3 items covered, 0.812 recall) and `lex_cap=768` (14.0, 0.917),
+i.e. at the predicted 784 rather than at any budget boundary, and that **accuracy
+is a saturating function of measured coverage** — the exact-set column looks like a
+cliff only because it requires every item at once. More budget with the anchors left
+alone does not substitute: 8,704 slots at `lex_cap=512` score 0.896 while 4,096
+slots at `lex_cap=2048` score 0.958, which is the Full-KV arm exactly.
+
+**The oracle-placement control closes the argument.** If the whole required set is
+placed immediately before the question — inside the recency channel of any budget
+that can hold the statement block, so retention is guaranteed by construction — the
+bounded arm and the Full-KV arm *of that same prompt* agree exactly, at every tested
+budget, on both checkpoints:
+
+| model | `k` | placement | Full-KV recall / exact-set | bounded, 2,048 slots + 512 anchors |
+|---|---:|---|---|---|
+| Qwen2.5-3B | 16 | scattered | 0.958 / 0.667 | 0.729 / 0.000 |
+| Qwen2.5-3B | 16 | recency | 0.875 / 0.333 | **0.875 / 0.333** |
+| Qwen2.5-3B | 32 | scattered | 0.781 / 0.000 | 0.188 / 0.000 |
+| Qwen2.5-3B | 32 | recency | 0.792 / 0.333 | 0.760-0.844 / 0.000-0.333 |
+| Llama-3.1-8B-4bit | 8 | scattered | 1.000 / 1.000 | 0.625 / 0.333 |
+| Llama-3.1-8B-4bit | 8 | recency | 1.000 / 1.000 | **1.000 / 1.000** |
+| Llama-3.1-8B-4bit | 16 | scattered | 0.708 / 0.000 | 0.375 / 0.000 |
+| Llama-3.1-8B-4bit | 16 | recency | 0.792 / 0.667 | **0.792 / 0.667** |
+
+2,560 retained slots equal a 32,769-slot cache on every recency row, and the 8B-4bit
+checkpoint is the one that produced the original collapse: its gap disappears
+entirely, including at `k=8`, where raising `lex_cap` from 512 to 2,048 changed
+nothing (0.625 recall in both arms). So on these records the bounded-vs-Full-KV
+difference is **support selection** — not slot width, not anchor capacity at that
+`k`, and not the checkpoint's ability to read an answer out once it is retained.
+
+**What this does not establish.** The item-capacity rule is measured on one prompt
+shape (synthetic needles at 32K with distinct hyphenated keys), two checkpoints and
+three seeds per cell; a task family with a different notion of "required set" is not
+covered by it. Retention is also not the only condition: on the 8B-4bit `k=8` records
+every item statement survives selection in *both* placements (coverage 1.000, anchor
+census 8 of 8), and the two arms still differ — 0.625 recall scattered against 1.000
+recency — while the share of the final query's attention on those statements more
+than doubles, 0.029 (0.028-0.032 over seeds) against 0.063 (0.063-0.065). So a
+statement can be retained and still be out-competed for attention; the measurement
+here is arm-level (a single final-query softmax, averaged over layer and kv-head),
+not a per-record predictor. And the model's own multi-item ceiling takes over beyond
+the measured range: at `k=32` the Full-KV arm itself is at 0.781 recall and 0.000
+exact-set, with every seed either self-terminating or cut off at `max_new`.
+
 ## 4. What this establishes, and what it does not
 
 Establishes (every number produced by the shipped `compile_bounded_cache`, see
@@ -1332,6 +1448,14 @@ Establishes (every number produced by the shipped `compile_bounded_cache`, see
   sinks and a recent window alone reach 0.930 aggregate retention in **1,105
   slots / 34.5 MiB**, and the attention-selected filler buys the last 7%
   (3.22).
+* **What the state has to hold is set by the query, not by the context.** The
+  policy's item capacity is `min(items the observation window can see, item spans
+  the anchor budget holds)` — both constants of the configuration, both measured
+  (`benchmarks/anchor_window_coverage.py`); the anchor knee sits at the predicted
+  49 tokens per named item, and per-item recall is a saturating function of the
+  measured share of the item statements that survived selection. With the required
+  set retained by construction, 2,560 slots equal the 32,769-slot Full-KV cache
+  exactly on both checkpoints (3.27).
 * **At matched decode-state bytes, eviction beats quantization, and they
   compose**: 144 MiB bounded bf16 scores 0.825 against 107 MiB Full-KV int4 at
   0.413; bounded + int8 reaches Full-KV quality at **72.3 MiB**, 5.9x smaller
@@ -1428,8 +1552,13 @@ holds the full KV transiently. Two candidate directions:
   hardware used here.
 * **128K TPOT ratio.** No step-matched baseline exists at 128K on this hardware
   class; the matched, parity-gated ratio is measured at 32K (3.11b).
-* **Mechanism predictions.** The failure cliff and the dependency-density axis in
-  `MECHANISM.md` are predictions, not measurements.
+* **Mechanism beyond the measured axes.** Both mechanism axes in `MECHANISM.md`
+  are measured rather than predicted now — the dependency-density axis
+  (`artifacts/prediction-density.json`) and the query/item-capacity axis
+  (`artifacts/prediction-*.json`, §3.27) — but neither is a theory of arbitrary
+  long-context tasks: the density axis uses a proxy that is not monotone between
+  natural order and a block shuffle, and the item-capacity axis is measured on one
+  prompt shape.
 
 ## 7. Scope
 

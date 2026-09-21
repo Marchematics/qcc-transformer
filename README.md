@@ -45,6 +45,7 @@ Full-KV quality on the records the Full-KV arm answers.
 | quality vs state | 48 / 80 / 144 MiB | 0.987 / 0.975 / 1.007 aggregate |
 | matched-budget baselines | sliding window / sinks+recent / last-query / window-mean / **QCC** | 0.167 / 0.332 / 0.842 / 0.880 / **1.008** |
 | KV quantization at matched bytes | Full-KV int8, bounded+int8 | int8 lossless at 2x; **bounded+int8 = Full-KV quality at 72.3 MiB** |
+| where the fixed state stops being enough | `k` items asked for at once (32K, Qwen2.5-3B) | measured: the limit is the **query**, not the context — see `docs/MECHANISM.md` |
 | decode throughput / SLA concurrency | 32K, batch sweep | **15.6x** throughput (speed config), **8-16x** concurrency at a 50 ms SLA |
 | single-stream TPOT, both arms CUDA-graphed | 32K, parity-gated repeats | **5.0x** (p95 55.2 ms vs 11.03 ms) |
 | trainable parameters added | — | **0** |
@@ -83,6 +84,14 @@ established.
    cache is the same computation. `cache.qcc_attention_mask` and
    `cache.qcc_prompt_lengths` are returned for decode.
 
+Both query-driven channels read the **last `observation_window` tokens**, so the
+state a request needs is set by its *query*, not by its context: the policy
+serves about `observation_window / 8` named items at the shipped width (6 items
+at the default `observation_window=64`, 16 at 128 with `lex_cap=2048`). That
+number is measured, not assumed — `benchmarks/anchor_window_coverage.py` prints
+it for any checkpoint and configuration, and `docs/MECHANISM.md` reports what
+happens to quality when the query outgrows it.
+
 Compilation costs one exact prefill per request (linear in the batch, 3.5 s at
 8K and 68 s at 128K on an NVIDIA A10G); every decoded token afterwards attends
 to at most 4,608 keys instead of the whole context.
@@ -111,7 +120,11 @@ benchmarks/               one script per measurement; every one writes a JSON
   benchmark_state_growth.py             retained slots and bytes vs prompt length
   kv_quant.py, benchmark_kv_quant_ruler.py   KIVI-axis KV quantization and its Pareto
   benchmark_bounded_decode_tpot_floor.py     TPOT with parity-gated execution paths
-  analyze_campaign.py, analyze_latency_percentiles.py, compare_package_to_harness.py
+  benchmark_required_set.py                  where bounded retention collapses: required set vs capacity
+  benchmark_dependency_density.py            the long-range-structure axis behind the NLL gap
+  anchor_window_coverage.py                  how much of the query the policy can see, per config
+  analyze_campaign.py, analyze_required_set.py, analyze_latency_percentiles.py,
+  compare_package_to_harness.py
 artifacts/                one JSON per run: per-record predictions, scores, slots, timings, memory
 docs/                     report, claim ledger, reproduction guide, novelty boundary
 examples/                 runnable CPU quickstart
@@ -124,7 +137,7 @@ tests/                    CPU test suite (policy invariants, quantization, LongB
 |---|---|
 | [`docs/REPORT.md`](docs/REPORT.md) | the full measurement record, including sections on ragged batches, shipped-API/harness parity, LongBench and baselines, state growth, quantization, cross-family results, and what is not established |
 | [`docs/CLAIMS.md`](docs/CLAIMS.md) | claim → code path → artifact → command, with the open questions and the experiment that would resolve each |
-| [`docs/MECHANISM.md`](docs/MECHANISM.md) | why a fixed slot count can be enough, the NLL-vs-budget evidence, and three falsifiable predictions |
+| [`docs/MECHANISM.md`](docs/MECHANISM.md) | why a fixed slot count can be enough, the NLL-vs-budget evidence, and the measured query/item-capacity limit that says when it must fail |
 | [`docs/REPRODUCING.md`](docs/REPRODUCING.md) | setup and the exact command behind every artifact |
 | [`docs/NOVELTY.md`](docs/NOVELTY.md) | the boundary against prior bounded-memory attention work |
 | [`docs/RELEASE.md`](docs/RELEASE.md) | the release bundle and how to verify it |

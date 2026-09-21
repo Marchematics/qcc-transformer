@@ -400,7 +400,8 @@ def _render(intro, statements, question, filler_count, fractions, extra_words,
 
 
 def assemble_prompt(intro, statements, question, target_tokens, tokenizer,
-                    rng, filler_pool=FILLER_SENTENCES, max_filler=8000):
+                    rng, filler_pool=FILLER_SENTENCES, max_filler=8000,
+                    placement="scatter"):
     """Scatter ``statements`` through filler and land on ~``target_tokens``.
 
     The item statements are placed at random positions through the filler body
@@ -412,7 +413,18 @@ def assemble_prompt(intro, statements, question, target_tokens, tokenizer,
 
     Returns ``(text, n_tokens, statement_tokens)``.
     """
-    fractions = sorted(rng.random() for _ in statements)
+    if placement == "recency":
+        # Oracle-placement control: every item statement lands immediately
+        # before the question, so the whole required set sits inside the recency
+        # channel of any budget that can hold the statement block
+        # (``recent_fraction x budget >= statement_tokens``).  Bounded accuracy
+        # that still trails Full-KV under this placement cannot be explained by
+        # the required tokens falling outside the retained support.
+        fractions = [1.0] * len(statements)
+    elif placement == "scatter":
+        fractions = sorted(rng.random() for _ in statements)
+    else:
+        raise ValueError(f"unknown placement {placement!r}")
     base = len(encode_ids(tokenizer, intro)) + len(encode_ids(tokenizer, question))
     statement_tokens = len(encode_ids(tokenizer, " ".join(statements)))
     room = target_tokens - base - statement_tokens
@@ -450,7 +462,8 @@ def assemble_prompt(intro, statements, question, target_tokens, tokenizer,
     return text, len(encode_ids(tokenizer, text)), statement_tokens
 
 
-def multikey_record(items, seed, target_tokens, tokenizer, distractors=None):
+def multikey_record(items, seed, target_tokens, tokenizer, distractors=None,
+                    placement="scatter"):
     """Keys of one surface form, one asked value, the other keys competing.
 
     Two shapes, both seeded and reproducible:
@@ -486,11 +499,13 @@ def multikey_record(items, seed, target_tokens, tokenizer, distractors=None):
     question = (f"What is the magic number for {keys[target_index]} mentioned "
                 "above? Answer with a single number.")
     prompt, n_tokens, statement_tokens = assemble_prompt(
-        intro, statements, question, target_tokens, tokenizer, rng)
+        intro, statements, question, target_tokens, tokenizer, rng,
+        placement=placement)
     return {
         "family": "multikey", "items": items, "seed": seed,
         "aggregate": None, "prompt": prompt, "prompt_tokens": n_tokens,
-        "statement_tokens": statement_tokens,
+        "statement_tokens": statement_tokens, "placement": placement,
+        "statements": statements,
         "expected": str(values[target_index]),
         "distractors": [str(v) for i, v in enumerate(values) if i != target_index],
         "distractor_count": distractor_count, "key_count": key_count,
@@ -500,7 +515,7 @@ def multikey_record(items, seed, target_tokens, tokenizer, distractors=None):
     }
 
 
-def needles_record(items, seed, target_tokens, tokenizer):
+def needles_record(items, seed, target_tokens, tokenizer, placement="scatter"):
     """``k`` needles, each a distinct key with a distinct value; ask for all.
 
     This is the capacity probe: the answer needs every one of the ``k``
@@ -524,20 +539,23 @@ def needles_record(items, seed, target_tokens, tokenizer):
                 f"above: {asked}? Answer with all {items} numbers separated by "
                 "commas.")
     prompt, n_tokens, statement_tokens = assemble_prompt(
-        intro, statements, question, target_tokens, tokenizer, rng)
+        intro, statements, question, target_tokens, tokenizer, rng,
+        placement=placement)
     references = [str(value) for value in values]
     return {
         "family": "needles", "items": items, "seed": seed,
         "aggregate": None, "distractors": None, "distractor_count": None,
         "key_count": items, "prompt": prompt, "prompt_tokens": n_tokens,
-        "statement_tokens": statement_tokens,
+        "statement_tokens": statement_tokens, "placement": placement,
+        "statements": statements,
         "expected": ", ".join(references), "references": references,
         "keys": keys, "values": references,
         "ask_order": [keys[index] for index in order], "ask_order_indices": order,
     }
 
 
-def aggregate_record(items, seed, target_tokens, tokenizer, aggregate="sum"):
+def aggregate_record(items, seed, target_tokens, tokenizer, aggregate="sum",
+                     placement="scatter"):
     """``m`` scattered items; ask for their sum or for a status count."""
     rng = record_rng("aggregate", items, seed, aggregate)
     names = item_names(rng, items)
@@ -572,11 +590,13 @@ def aggregate_record(items, seed, target_tokens, tokenizer, aggregate="sum"):
     else:
         raise ValueError(f"unknown aggregate mode {aggregate!r}")
     prompt, n_tokens, statement_tokens = assemble_prompt(
-        intro, statements, question, target_tokens, tokenizer, rng)
+        intro, statements, question, target_tokens, tokenizer, rng,
+        placement=placement)
     return {
         "family": "aggregate", "items": items, "seed": seed,
         "aggregate": aggregate, "prompt": prompt, "prompt_tokens": n_tokens,
-        "statement_tokens": statement_tokens, "expected": expected,
+        "statement_tokens": statement_tokens, "placement": placement,
+        "statements": statements, "expected": expected,
         "distractors": distractors, "names": names,
         "distractor_count": None, "key_count": None,
         "values": [str(v) for v in values], "statuses": list(statuses),
@@ -585,14 +605,17 @@ def aggregate_record(items, seed, target_tokens, tokenizer, aggregate="sum"):
 
 
 def build_record(family, items, seed, target_tokens, tokenizer, aggregate="sum",
-                 distractors=None):
+                 distractors=None, placement="scatter"):
     """One task record of the requested family (deterministic in the seed)."""
     if family == "multikey":
-        return multikey_record(items, seed, target_tokens, tokenizer, distractors)
+        return multikey_record(items, seed, target_tokens, tokenizer, distractors,
+                               placement=placement)
     if family == "needles":
-        return needles_record(items, seed, target_tokens, tokenizer)
+        return needles_record(items, seed, target_tokens, tokenizer,
+                              placement=placement)
     if family == "aggregate":
-        return aggregate_record(items, seed, target_tokens, tokenizer, aggregate)
+        return aggregate_record(items, seed, target_tokens, tokenizer, aggregate,
+                                placement=placement)
     raise ValueError(f"unknown family {family!r}")
 
 
@@ -721,13 +744,14 @@ def required_budget_from_matrix(accuracy_by_budget, full_accuracy, tolerance=0.0
     return qualifying[0] if qualifying else None
 
 
-def _nested_matrix(rows, budgets, field="items"):
+def _nested_matrix(rows, budgets, field="items", metric="correct"):
     """Accuracy nested by family -> ``field`` -> budget (plus a ``full`` key).
 
     ``field`` is ``"items"`` for the main matrix (``k`` keys, ``m`` items, ``k``
     needles) and ``"distractors"`` for the competition axis (the number of other
     keys sharing the asked key's surface form).  Rows with no value on that axis
-    are skipped.
+    are skipped.  ``metric`` is ``"correct"`` (the strict all-or-nothing flag) or
+    any numeric per-row field such as ``"partial_recall"``.
     """
     matrix = {}
     for row in rows:
@@ -736,7 +760,11 @@ def _nested_matrix(rows, budgets, field="items"):
             continue
         cell = matrix.setdefault(row["family"], {}).setdefault(str(key), {})
         arm = "full" if row["arm"] == "full" else str(row["budget"])
-        cell.setdefault(arm, []).append(float(bool(row["correct"])))
+        value = row.get(metric)
+        if value is None:
+            continue
+        cell.setdefault(arm, []).append(
+            float(bool(value)) if metric == "correct" else float(value))
     out = {}
     for family, by_items in matrix.items():
         out[family] = {}
@@ -788,6 +816,143 @@ def _mean_bool(rows, field):
 def _mean_float(rows, field, digits=4):
     values = [float(row[field]) for row in rows if row.get(field) is not None]
     return round(sum(values) / len(values), digits) if values else None
+
+
+def _truncation_rate(rows):
+    """Share of rows whose decode stopped only because it hit ``max_new``.
+
+    A row that generated its whole budget without emitting EOS was cut off, so a
+    low score there measures the decode loop, not the cache.  The field is the
+    readout-side control for any collapse that is not a retention failure.
+    """
+    values = [float(row["generated_tokens"] >= row["max_new"]) for row in rows
+              if row.get("generated_tokens") is not None
+              and row.get("max_new") is not None]
+    return round(sum(values) / len(values), 4) if values else None
+
+
+def required_coverage_of(indices, spans):
+    """How much of every item statement survived selection, per (layer, head).
+
+    ``indices`` is what :func:`qcc_transformer.retention.select_indices` returns:
+    one ``[heads, slots]`` tensor per layer, and the sets differ per head.  A
+    token is *available* to a fraction of those sets; a statement is *covered*
+    when every one of its tokens is available everywhere (which is what the
+    shared anchor list buys and what the per-head top-k alone does not).
+
+    Returns ``(availability, covered_items)`` where ``availability`` is the mean
+    per-token availability over the required spans, or ``(None, None)`` when
+    there is nothing to measure.
+    """
+    pairs = [set(row) for tensor in indices for row in tensor.tolist()]
+    if not pairs or not spans:
+        return None, None
+    total = sum(len(span) for span in spans)
+    available = sum(sum(1 for pair in pairs if token in pair) for span in spans
+                    for token in span)
+    covered = sum(1 for span in spans
+                  if all(all(token in pair for pair in pairs) for token in span))
+    return (round(available / (total * len(pairs)), 4) if total else None), covered
+
+
+def required_mass_last_query(scores, spans, device_softmax=True):
+    """Share of the final query's attention that lands on the required spans.
+
+    ``observation_scores`` returns, per layer, the raw final-query logits per
+    key/value head (the singleton query axis makes the softmax denominator
+    constant across keys, which is why the selection can rank by the raw score).
+    Normalising those logits therefore gives the *actual* attention the last
+    prompt token pays to each position, and summing over the item statements says
+    how much of it reaches the answer.  This is the second half of the mechanism:
+    a statement can be retained and still lose the competition for mass.
+
+    Returns the mean over ``(layer, head)`` of that share, or ``None``.
+    """
+    if not spans or scores is None:
+        return None
+    required = torch.zeros(int(scores[0].shape[-1]), dtype=torch.bool)
+    for span in spans:
+        for token in span:
+            if 0 <= token < required.numel():
+                required[token] = True
+    if not bool(required.any()):
+        return None
+    shares = []
+    for layer_scores in scores:
+        weights = torch.softmax(layer_scores.float(), dim=-1)
+        shares.append(weights[:, required].sum(dim=-1))
+    stacked = torch.cat(shares)
+    return round(float(stacked.mean()), 6)
+
+
+def row_fully_covers_required_set(row):
+    """Whether the *selected* slots of a bounded row contain every item statement.
+
+    ``None`` when the row has no measured coverage (the Full-KV arm, or a run
+    through ``compile_bounded_cache``, which does not return its index set).  This
+    is the measured counterpart of :func:`row_covers_required_set`: the width
+    comparison says the statements would fit, this says they survived selection.
+    """
+    coverage = row.get("required_coverage")
+    return None if row["arm"] == "full" or coverage is None else bool(coverage >= 1.0)
+
+
+def required_span_coverage_block(rows):
+    """Accuracy conditional on the item statements surviving selection.
+
+    Prediction 2 proper: the row-level ``required_coverage`` is measured against
+    the kept slots, and the two conditional means (statements fully retained /
+    partly or wholly dropped) are reported with their counts.
+    """
+    bounded = [row for row in rows if row_fully_covers_required_set(row) is not None]
+    covered = [row for row in bounded if row_fully_covers_required_set(row)]
+    missing = [row for row in bounded if not row_fully_covers_required_set(row)]
+    block = {
+        "rule": ("`required_coverage` is the share of the item statements' own "
+                 "tokens that survived selection, measured against the kept index "
+                 "set of the bounded arm; a row is fully covered when every "
+                 "statement kept every token"),
+        "prediction": ("prediction 2 of docs/MECHANISM.md in its measured form: "
+                       "accuracy is high when the item statements are in the "
+                       "retained support, and the two means below are the cliff"),
+        "covered": _coverage_side(covered),
+        "not_covered": _coverage_side(missing),
+        "separation": _separation(_coverage_side(covered), _coverage_side(missing)),
+        "mean_coverage": _mean_float(bounded, "required_coverage"),
+        "by_cell": {},
+        "by_budget": {},
+    }
+    for family in sorted({row["family"] for row in bounded}):
+        for items in sorted({row["items"] for row in bounded
+                             if row["family"] == family}):
+            cell = [row for row in bounded
+                    if row["family"] == family and row["items"] == items]
+            side_a = [row for row in cell if row_fully_covers_required_set(row)]
+            side_b = [row for row in cell if not row_fully_covers_required_set(row)]
+            block["by_cell"].setdefault(family, {})[str(items)] = {
+                "mean_coverage": _mean_float(cell, "required_coverage"),
+                "mean_items_covered": _mean_field(cell, "items_covered"),
+                "items_required": _mean_field(cell, "items_required"),
+                "covered": _coverage_side(side_a),
+                "not_covered": _coverage_side(side_b),
+                "separation": _separation(_coverage_side(side_a),
+                                          _coverage_side(side_b)),
+            }
+    for budget in sorted({int(row["budget"]) for row in bounded
+                          if row.get("budget") is not None}):
+        per_budget = [row for row in bounded if int(row["budget"]) == budget]
+        side_a = [row for row in per_budget if row_fully_covers_required_set(row)]
+        side_b = [row for row in per_budget
+                  if not row_fully_covers_required_set(row)]
+        block["by_budget"][str(budget)] = {
+            "mean_coverage": _mean_float(per_budget, "required_coverage"),
+            "mean_items_covered": _mean_field(per_budget, "items_covered"),
+            "covered": _coverage_side(side_a),
+            "not_covered": _coverage_side(side_b),
+            "separation": _separation(_coverage_side(side_a),
+                                      _coverage_side(side_b)),
+        }
+    return block
 
 
 def row_covers_required_set(row):
@@ -982,6 +1147,7 @@ def summarize(rows, budgets, tolerance=0.0):
             "`full_kv_unsolved`) or no tested budget reaches it"),
         "required_tol": tolerance,
         "accuracy": _nested_matrix(rows, budgets),
+        "partial_recall": _nested_matrix(rows, budgets, metric="partial_recall"),
         "required_budget": _required_budgets(rows, budgets, tolerance),
         "accuracy_by_distractors": _nested_matrix(distractor_rows, budgets,
                                                   "distractors"),
@@ -1036,6 +1202,13 @@ def summarize(rows, budgets, tolerance=0.0):
                     "covered": _coverage_side(covered),
                     "not_covered": _coverage_side(missing),
                     "mean_kept_slots": _mean_field(budget_rows, "kept_slots"),
+                    "mean_partial_recall": _mean_float(budget_rows, "partial_recall"),
+                    "truncation_rate": _truncation_rate(budget_rows),
+                    "mean_required_coverage": _mean_float(budget_rows,
+                                                          "required_coverage"),
+                    "mean_required_mass": _mean_float(budget_rows, "required_mass",
+                                                      digits=6),
+                    "mean_items_covered": _mean_field(budget_rows, "items_covered"),
                 }
             summary["cells"].setdefault(family, {})[str(items)] = {
                 "seeds": len({row["seed"] for row in cell_rows}),
@@ -1051,12 +1224,22 @@ def summarize(rows, budgets, tolerance=0.0):
                 "mean_kept_slots_bounded": _mean_field(bounded, "kept_slots"),
                 "mean_kept_slots_full": _mean_field(full_rows, "kept_slots"),
                 "full_kv_accuracy": full_accuracy,
+                "mean_partial_recall_bounded": _mean_float(bounded, "partial_recall"),
+                "mean_partial_recall_full": _mean_float(full_rows, "partial_recall"),
+                "truncation_rate_bounded": _truncation_rate(bounded),
+                "truncation_rate_full": _truncation_rate(full_rows),
+                "mean_anchor_sites": _mean_field(bounded, "anchor_sites"),
+                "lex_cap": sorted({row["lex_cap"] for row in cell_rows
+                                   if row.get("lex_cap") is not None}),
+                "placement": sorted({row.get("placement", "scatter")
+                                     for row in cell_rows}),
                 "full_kv_unsolved": bool(full_accuracy is not None
                                          and full_accuracy <= 0.0),
                 "budgets": budgets_cell,
             }
 
     summary["budget_covers_required_set"] = budget_coverage_block(rows)
+    summary["required_span_coverage"] = required_span_coverage_block(rows)
     summary["prediction_checks"] = _prediction_checks(rows, summary, budgets, lengths)
     return summary
 
@@ -1157,6 +1340,15 @@ def parse_args(argv=None):
                         default=[512, 1024, 2048, 4096, 8192])
     parser.add_argument("--aggregate", default="sum", choices=["sum", "count"],
                         help="aggregate family: ask for the sum or for a count")
+    parser.add_argument("--placement", default="scatter",
+                        choices=["scatter", "recency"],
+                        help="where the item statements sit.  `scatter` spreads "
+                             "them through the filler (the shipped shape); "
+                             "`recency` puts all of them immediately before the "
+                             "question, which is the oracle-placement control: "
+                             "the required set then sits inside the recency "
+                             "channel of any budget whose recent window covers "
+                             "the statement block")
     parser.add_argument("--obs", type=int, default=64)
     parser.add_argument("--nsink", type=int, default=4)
     parser.add_argument("--pool", type=int, default=7)
@@ -1190,6 +1382,59 @@ def parse_args(argv=None):
     parser.add_argument("--label", default=None)
     parser.add_argument("--out", required=True)
     return parser.parse_args(argv)
+
+
+def required_spans(tokenizer, prompt, statements):
+    """Token index set of every item statement, located verbatim in the prompt.
+
+    The required set of a record is the item statements themselves, so this is
+    the *measured* form of prediction 2: a bounded row can be scored against the
+    slots it actually kept (``required_coverage``) instead of against the width
+    comparison ``required_set_tokens <= kept_slots``, which only says that the
+    statements would fit.  A statement counts as covered when every one of its
+    tokens survives.
+    """
+    if not statements:
+        return []
+    offsets = tokenizer(prompt, add_special_tokens=False,
+                        return_offsets_mapping=True).offset_mapping
+    spans, cursor = [], 0
+    for statement in statements:
+        position = prompt.find(statement, cursor)
+        if position < 0:
+            position = prompt.find(statement)
+        if position < 0:
+            continue
+        cursor = position + len(statement)
+        spans.append({token for token, (a, b) in enumerate(offsets)
+                      if b > position and a < position + len(statement)})
+    return spans
+
+
+def anchor_site_coverage(tokenizer, prompt, anchors, keys):
+    """How many item sites the lexical-anchor set actually reaches.
+
+    A site counts as reached when at least one of the key's own tokens is in
+    ``anchors``.  ``lexical_anchors`` expands every hit by
+    ``lex_context_left + lex_context_right + 1`` tokens and stops at
+    ``lex_cap``, so the number of sites the anchor channel can hold is a
+    *measured* quantity: roughly ``lex_cap / (left + right + 1)``.  Returns
+    ``(covered, total)``.
+    """
+    encoded = tokenizer(prompt, add_special_tokens=False,
+                        return_offsets_mapping=True)
+    offsets = encoded.offset_mapping
+    anchor_set = {int(token) for token in (anchors or [])}
+    covered = 0
+    for key in keys:
+        position = prompt.find(key)
+        if position < 0:
+            continue
+        span = {token for token, (a, b) in enumerate(offsets)
+                if b > position and a < position + len(key)}
+        if span & anchor_set:
+            covered += 1
+    return covered, len(keys)
 
 
 def build_plan(args, lengths):
@@ -1262,7 +1507,8 @@ def main(argv=None):
         family, items = entry["family"], entry["items"]
         seed, length = entry["seed"], entry["length"]
         record = build_record(family, items, seed, length, tokenizer, args.aggregate,
-                              distractors=entry["distractors"])
+                              distractors=entry["distractors"],
+                              placement=args.placement)
         max_new = decode_budget(family, items, args.max_new)
         # ``record["statement_tokens"]`` is the whole item-statement block; the
         # required set of every family is that block (every item for needles and
@@ -1275,8 +1521,13 @@ def main(argv=None):
         prompt_tokens = int(ids.shape[1])
         mean_spacing = round(
             max(0.0, prompt_tokens - record["statement_tokens"]) / max(1, items), 1)
+        required_token_set = required_spans(tokenizer, record["prompt"],
+                                            record.get("statements") or [])
+        required_tokens = sum(len(span) for span in required_token_set)
         anchors = None
         scores = None
+        anchor_sites = None
+        required_mass = None
         with fixed_rope_length(model, prompt_tokens):
             reset_peak_memory(device)
             start = time.time()
@@ -1292,9 +1543,14 @@ def main(argv=None):
                 if args.lex_cap > 0:
                     anchors = lexical_anchors(tokenizer, record["prompt"],
                                               configs[budgets[0]])
+                if record.get("keys"):
+                    anchor_sites = anchor_site_coverage(
+                        tokenizer, record["prompt"], anchors, record["keys"])
+                required_mass = required_mass_last_query(scores, required_token_set)
             arm_rows = []
             for arm, budget in [("full", None)] + [(f"b{b}", b) for b in budgets]:
                 arm_prefill_s = prefill_s
+                indices = None
                 if arm == "full":
                     working, kept = cache, cache.get_seq_length()
                 elif args.shared_prefill:
@@ -1317,6 +1573,12 @@ def main(argv=None):
                 decode_s = time.time() - decode_start
                 text = decode_ids(tokenizer, generated).strip()
                 scored = score_record(record, text)
+                kept_required = coverage = covered_items = None
+                if indices is not None and required_token_set:
+                    coverage, covered_items = required_coverage_of(
+                        indices, required_token_set)
+                    kept_required = (None if coverage is None
+                                     else round(coverage * required_tokens))
                 row = {
                     "family": family, "items": items, "seed": seed,
                     "length": length, "aggregate": record["aggregate"],
@@ -1336,6 +1598,18 @@ def main(argv=None):
                     "generated_tokens": len(generated),
                     "max_new": max_new,
                     "statement_tokens": record["statement_tokens"],
+                    "placement": record.get("placement", "scatter"),
+                    "anchor_sites": None if arm == "full" or anchor_sites is None
+                    else anchor_sites[0],
+                    "anchor_sites_total": None if arm == "full" or anchor_sites is None
+                    else anchor_sites[1],
+                    "lex_cap": int(args.lex_cap),
+                    "required_span_tokens": required_tokens or None,
+                    "required_kept_tokens": kept_required,
+                    "required_coverage": coverage,
+                    "items_covered": covered_items,
+                    "items_required": len(required_token_set) or None,
+                    "required_mass": None if arm == "full" else required_mass,
                     "tokens_per_item": tokens_per_item,
                     "mean_item_spacing": mean_spacing,
                     "required_set_tokens": required_set_tokens,

@@ -23,6 +23,12 @@ experiments in `qcc_transformer/` and are kept for the audit trail.
 | `bounded-decode-frontier-tpot-p95.json`, `-tpot-floor-32k-r1-contended.json` | parity-gated TPOT percentiles |
 | `bounded-decode-frontier-batch-validation.json` | ragged-batch exactness |
 | `bounded-decode-frontier-ruler-v6.json` | the stored benchmark-harness run the package is compared against |
+| `prediction-density.json` | NLL against long-range structure destroyed in three stages (MECHANISM, prediction 3) |
+| `prediction-needles*.json`, `prediction-distractors*.json`, `prediction-required-set-*.json` | the required-set probe: `k` items asked for at once, and one key against `N` competitors |
+| `prediction-lexcap*.json`, `prediction-knee-*.json` | the anchor-budget sweep and its knee (`lex_cap` 512-4096 at `k=16`) |
+| `prediction-obs*.json` | the query-window sweep (`obs` 64-512 at fixed budget and cap) |
+| `prediction-recency*.json` | the oracle-placement control: the required set immediately before the question |
+| `prediction-sites-*.json`, `prediction-mass-*.json` | item sites reached by the anchors, the retained share of the statements, and the query's attention share on them |
 
 Regenerate any of them with the command in [`../docs/REPRODUCING.md`](../docs/REPRODUCING.md);
 [`../docs/CLAIMS.md`](../docs/CLAIMS.md) states which claim each one supports.

@@ -23,6 +23,7 @@ from transformers import LlamaConfig, LlamaForCausalLM
 
 from benchmarks.benchmark_required_set import (
     aggregate_record,
+    anchor_site_coverage,
     build_plan,
     build_record,
     char_f1,
@@ -36,6 +37,11 @@ from benchmarks.benchmark_required_set import (
     parse_numbers,
     reference_recall,
     required_budget_from_matrix,
+    required_coverage_of,
+    required_mass_last_query,
+    required_span_coverage_block,
+    required_spans,
+    row_fully_covers_required_set,
     score_needles,
     score_prediction,
     score_record,
@@ -295,6 +301,127 @@ def test_needles_prompt_places_k_needles_and_asks_for_all_of_them():
     assert abs(record["prompt_tokens"] - 600) <= 2
     assert record["distractor_count"] is None
     assert record["key_count"] == 4
+
+
+def test_recency_placement_is_the_oracle_control_and_scatter_is_untouched():
+    tokenizer = WordTokenizer()
+    scattered = needles_record(items=4, seed=1, target_tokens=600, tokenizer=tokenizer)
+    assert scattered["placement"] == "scatter"
+
+    near = needles_record(items=4, seed=1, target_tokens=600, tokenizer=tokenizer,
+                          placement="recency")
+    assert near["placement"] == "recency"
+    # same record (keys, values, question) -- only the placement differs
+    assert near["keys"] == scattered["keys"]
+    assert near["references"] == scattered["references"]
+    assert near["ask_order"] == scattered["ask_order"]
+    assert abs(near["prompt_tokens"] - scattered["prompt_tokens"]) <= 2
+
+    # all k statements are one contiguous block immediately before the question
+    pairs = _statement_pairs(near["prompt"])
+    block = " ".join(f"One of the magic numbers for {key} is {value}."
+                     for key, value in pairs)
+    assert block in near["prompt"]
+    tail = near["prompt"].split(block, 1)[1]
+    assert tail.strip().startswith("What are the magic numbers for all of these keys")
+    # scatter does not produce that block, so the control is a real difference
+    assert block not in scattered["prompt"]
+
+    # the recency block has to fit the shipped recency channel to be a control
+    from qcc_transformer.retention import RetentionConfig
+    for budget in (1024, 2048, 4096):
+        assert near["statement_tokens"] <= RetentionConfig(budget=budget).recent_window
+
+    for family in ("multikey", "aggregate"):
+        record = build_record(family, 4, 0, 600, tokenizer, placement="recency")
+        assert record["placement"] == "recency"
+    with pytest.raises(ValueError):
+        needles_record(items=2, seed=0, target_tokens=400, tokenizer=tokenizer,
+                       placement="middle")
+
+
+def test_anchor_site_coverage_counts_the_sites_the_anchor_channel_reaches():
+    from qcc_transformer.retention import RetentionConfig, lexical_anchors
+
+    tokenizer = WordTokenizer()
+    record = needles_record(items=4, seed=0, target_tokens=600, tokenizer=tokenizer)
+    prompt, keys = record["prompt"], record["keys"]
+
+    generous = lexical_anchors(tokenizer, prompt, RetentionConfig(lex_cap=512))
+    assert anchor_site_coverage(tokenizer, prompt, generous, keys) == (4, 4)
+
+    # lex_cap buys lex_context_left + lex_context_right + 1 tokens per anchor
+    # *hit*, and only the first hits in document order are expanded, so a small
+    # cap spends itself before it ever reaches the item statements.  The point of
+    # the diagnostic is that this is measured, not assumed.
+    narrow = lexical_anchors(tokenizer, prompt, RetentionConfig(lex_cap=49))
+    assert anchor_site_coverage(tokenizer, prompt, narrow, keys) == (0, 4)
+    assert len(narrow) < len(generous)
+    assert anchor_site_coverage(tokenizer, prompt, [], keys) == (0, 4)
+
+
+def test_required_spans_locate_the_statements_and_measure_coverage():
+    tokenizer = WordTokenizer()
+    record = needles_record(items=4, seed=0, target_tokens=600, tokenizer=tokenizer)
+    spans = required_spans(tokenizer, record["prompt"], record["statements"])
+    assert len(spans) == 4
+    assert all(span for span in spans)
+    assert not (spans[0] & spans[1])                     # statements are disjoint
+    assert sum(len(span) for span in spans) <= record["statement_tokens"] + 4
+
+    row = {"arm": "b2048", "budget": 2048, "required_coverage": 1.0}
+    assert row_fully_covers_required_set(row) is True
+    row["required_coverage"] = 0.75
+    assert row_fully_covers_required_set(row) is False
+    assert row_fully_covers_required_set({"arm": "full",
+                                          "required_coverage": None}) is None
+
+
+def test_required_span_coverage_block_is_the_measured_prediction_2():
+    tokenizer = WordTokenizer()
+    record = needles_record(items=4, seed=0, target_tokens=600, tokenizer=tokenizer)
+    spans = required_spans(tokenizer, record["prompt"], record["statements"])
+    covered = {
+        "family": "needles", "items": 4, "seed": 0, "length": 600, "arm": "b4096",
+        "budget": 4096, "kept_slots": 4608, "correct": True, "partial_recall": 1.0,
+        "required_set_tokens": 60.0, "required_coverage": 1.0, "items_covered": 4,
+        "items_required": 4, "required_span_tokens": sum(len(s) for s in spans),
+    }
+    dropped = dict(covered, arm="b1024", budget=1024, kept_slots=1024,
+                   correct=False, partial_recall=0.25, required_coverage=0.25,
+                   items_covered=1)
+    block = required_span_coverage_block([covered, dropped])
+    assert block["covered"]["rows"] == 1 and block["not_covered"]["rows"] == 1
+    assert block["separation"]["accuracy"] == 1.0
+    assert block["mean_coverage"] == 0.625
+    assert block["by_budget"]["1024"]["mean_items_covered"] == 1
+
+
+def test_required_mass_last_query_is_the_attention_share_on_the_statements():
+    # one layer, two heads over four positions; the final query puts most mass on
+    # position 2 in head 0 and on position 3 in head 1
+    scores = [torch.tensor([[0.0, 0.0, 8.0, 0.0], [0.0, 0.0, 0.0, 8.0]])]
+    mass = required_mass_last_query(scores, [{2}])
+    assert mass is not None
+    heavier = required_mass_last_query(scores, [{2, 3}])
+    assert 0.45 < mass < 0.55          # one head of the two pays attention there
+    assert heavier > 0.95
+    assert required_mass_last_query(scores, []) is None
+    assert required_mass_last_query(None, [{0}]) is None
+
+
+def test_required_coverage_of_measures_availability_across_layer_head_pairs():
+    spans = [{1, 2}, {5}]
+    # two layers, two heads each: every required token is in every set
+    everywhere = [torch.tensor([[1, 2, 5], [1, 2, 5]]),
+                  torch.tensor([[1, 2, 5], [1, 2, 5]])]
+    assert required_coverage_of(everywhere, spans) == (1.0, 2)
+    # one head missing token 2 leaves its statement uncovered but partly available
+    partial = [torch.tensor([[1, 2, 5], [1, 5, 9]])]
+    availability, covered = required_coverage_of(partial, spans)
+    assert covered == 1 and 0.5 < availability < 1.0
+    assert required_coverage_of([], spans) == (None, None)
+    assert required_coverage_of(everywhere, []) == (None, None)
 
 
 def test_needles_partial_recall_is_rulers_string_match_all():
