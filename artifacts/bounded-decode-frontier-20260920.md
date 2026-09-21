@@ -1251,10 +1251,28 @@ three keys or lists none, so there is no partially-retained answer to recover by
 improving selection. Five selection configurations leave the ratio unchanged
 (3.25) because there is nothing for a better selection to recover; the 8B
 checkpoint, where the same configuration loses nothing at all, is the control.
-That is the honest shape of the remaining cross-family shortfall: a small number
-of generation-side collapses on a task where the model is near its own floor,
-not a retention deficit - and it is why the report's tables carry absolute scores
-next to every ratio.
+**And the collapse is not a token-budget truncation.** For every record whose
+recall is zero, the number of tokens the model actually generated tells us
+whether it ran out of budget (128) or stopped itself:
+
+| model | arm | zero-recall records | generated at those records |
+|---|---|---:|---|
+| Qwen2.5-3B | full | 3 | 35, 35, 38 - all self-terminated |
+| Qwen2.5-3B | bounded | 4 | 35, 35, 38, 128 - one truncation |
+| Phi-3.5-mini | full / bounded | 1 / 2 | 82 / 79, 83 - all self-terminated |
+| Llama-3.1-8B | full / bounded | 1 / 1 | 128 / 128 - truncated, and identical in both arms |
+| Llama-3.2-1B | full | 11 | 8 of them 128, 3 self-terminated |
+
+For the two models that carry the cross-family gap the failing records end at
+35-38 (Qwen) and 79-83 (Phi) tokens, i.e. the model *chooses to stop* long before
+the budget, having emitted no key at all; only one Qwen bounded record and the
+single 8B record reach the 128-token limit, and the 8B one is identical in both
+arms. So the shortfall is neither missing information in the cache (3.25), nor
+partially-retained answers (this section), nor a truncated generation: it is the
+checkpoint ending its own answer on a task where it is near chance, and no cache
+policy can recover it. That is the honest shape of the remaining cross-family
+shortfall - and it is why the report's tables carry absolute scores next to every
+ratio.
 
 ## 4. What this establishes, and what it does not
 
