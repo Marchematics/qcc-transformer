@@ -47,6 +47,11 @@ python benchmarks/benchmark_retention_longbench.py --model <checkpoint> \
 # tables from the JSONs
 python benchmarks/analyze_campaign.py multimodel artifacts/bounded-decode-frontier-multimodel-*.json
 python benchmarks/analyze_campaign.py baselines  artifacts/bounded-decode-frontier-baselines-b4096.json
+
+# attribute a LongBench task's gap to the records that cause it (per-record loss
+# concentration, ROUGE-L precision/recall split, repetition against score change)
+python benchmarks/analyze_longbench.py artifacts/longbench-retention-<name>.json \
+    --task gov_report --cache-dir "$QCC_LONGBENCH_DIR"
 ```
 
 ## Selection ablations and baselines

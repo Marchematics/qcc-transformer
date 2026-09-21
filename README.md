@@ -39,7 +39,7 @@ Full-KV quality on the records the Full-KV arm answers.
 |---|---|---|
 | RULER, 80 records, 4 tasks | budget 4,096 + 512 anchors, Llama-3.2-1B | **1.007 aggregate retention, 1.000 worst task** |
 | shipped API vs the benchmark harness | same 80 records | 80/80 metric agreement, 75/80 byte-identical predictions, bitwise-equal scores |
-| LongBench, 9 tasks, 122 matched records | same budget | **1.0049 aggregate, 0.897 worst task** (narrativeqa +10.7%) |
+| LongBench, 9 tasks, 122 matched records | same budget | **1.0049 aggregate**, 8 of 9 tasks at parity; the worst, `gov_report` (0.897), is the one task whose documents are longer than the budget and reaches **1.020 at 8,192 slots** |
 | cross-family, one configuration, no tuning | Llama-3.2-1B / Llama-3.1-8B-4bit / Qwen2.5-3B / Phi-3.5-mini | 1.007 / 1.014 / 0.975 / 0.972 aggregate |
 | decode state vs prompt length | 8K → 256K | **1.00x growth** (4,608 slots, 144 MiB); Full-KV 57x larger at 256K |
 | quality vs state | 48 / 80 / 144 MiB | 0.987 / 0.975 / 1.007 aggregate |
@@ -73,8 +73,10 @@ established.
    task-agnostic rarity mode as well as the hyphenated-word/number/UUID patterns
    — are matched back into the context, expanded asymmetrically (the answer
    usually follows the key), and forced into the retained set. This is the step
-   that closes multi-key disambiguation; on LongBench, where no synthetic needles
-   exist, it is not needed for parity.
+   that closes multi-key disambiguation (0.842 to 1.008 aggregate on RULER); on
+   real-document summarisation it is measured to change nothing (0.2626 without
+   anchors against 0.2615 with them on `gov_report`), so the two budgets have
+   separate jobs: anchors buy retrieval, the attention budget buys coverage.
 4. **Uniform width.** Every `(layer, kv-head, request)` keeps exactly
    `budget + lex_cap` slots, which is what lets one 2-D mask describe a whole
    batch; attention sinks and a recent window are always forced in.
@@ -123,8 +125,8 @@ benchmarks/               one script per measurement; every one writes a JSON
   benchmark_required_set.py                  where bounded retention collapses: required set vs capacity
   benchmark_dependency_density.py            the long-range-structure axis behind the NLL gap
   anchor_window_coverage.py                  how much of the query the policy can see, per config
-  analyze_campaign.py, analyze_required_set.py, analyze_latency_percentiles.py,
-  compare_package_to_harness.py
+  analyze_campaign.py, analyze_required_set.py, analyze_longbench.py,
+  analyze_latency_percentiles.py, compare_package_to_harness.py
 artifacts/                one JSON per run: per-record predictions, scores, slots, timings, memory
 docs/                     report, claim ledger, reproduction guide, novelty boundary
 examples/                 runnable CPU quickstart

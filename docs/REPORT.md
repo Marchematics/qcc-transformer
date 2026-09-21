@@ -1000,10 +1000,9 @@ does, and every row records whether it was truncated.
   not merely close to Full-KV, it is level with it, and it *gains* 10.7% on
   narrativeqa - where Full-KV's 128K window is diluted by a long novel and the
   retained set is a cleaner context for the question.
-* The worst task is gov_report at 0.897. It is a summarisation task scored by
-  ROUGE-L, the metric most sensitive to surface realisation; the two
-  summarisation tasks that are dialogue- and news-shaped (samsum 1.005,
-  multi_news 0.993) are at parity.
+* The worst task is gov_report at 0.897. Section 3.28 attributes it: it is the one
+  task whose documents are long enough for the 4,608-slot budget to bind, and at
+  8,192 slots the same task reaches parity (1.020).
 * No task here contains synthetic needles, and none of them is a multi-key
   disambiguation puzzle, which is the situation the lexical anchors exist for.
   The baseline sweep isolates that: attention ranking alone, at the same
@@ -1425,6 +1424,82 @@ here is arm-level (a single final-query softmax, averaged over layer and kv-head
 not a per-record predictor. And the model's own multi-item ceiling takes over beyond
 the measured range: at `k=32` the Full-KV arm itself is at 0.781 recall and 0.000
 exact-set, with every seed either self-terminating or cut off at `max_new`.
+
+### 3.28 The worst LongBench task is a budget allocation, not lost content
+
+Section 3.21 reports `gov_report` at 0.897 retention, the only one of nine tasks
+below 0.99, and left it at "ROUGE-L is the metric most sensitive to surface
+realisation". Two measurements close it: where the loss sits, and what moves it.
+
+**Where the loss sits.** `benchmarks/analyze_longbench.py` re-reads the stored
+predictions of both arms on the same 20 prompts. Thirteen records lose, and three of
+them carry half the pooled loss — rows 87, 89 and 97 at -0.174, -0.105 and -0.076 of
+a pooled 0.7131. Three records produce *byte-identical* predictions in both arms,
+because their prompt fits inside the retained width, and they score exactly equal:
+that is the control showing the comparison itself is exact. The ROUGE-L split says
+the bounded summaries are not merely shorter: precision falls 0.4782 to 0.447 and
+recall 0.2161 to 0.1943, so they are both less complete and less on-target.
+
+**The losing records are the ones whose summary degenerates.** On record 87 the
+bounded summary's distinct-word ratio is 0.091 against 0.409 for the Full-KV arm on
+the same document, and one repeated 8-gram accounts for 22% of its words: the
+decoder loops instead of summarising. Across the 20 records the change in repetition
+correlates with the change in score at `r = -0.49`, and the records whose bounded
+summary is more repetitive average -0.063 against -0.032 overall. That is the
+signature 3.26 found on the RULER cross-family tail: a handful of records whose
+failure is what the model does with an alternative context rather than which
+positions the cache dropped.
+
+**But the budget moves it.** `gov_report` has the second-longest median prompt of
+the suite (9,980 tokens), so the shipped 4,608 slots compress it about 2.2x while
+the tasks at parity are shorter. Raising the budget and changing nothing else:
+
+| budget (+512 anchors) | bounded ROUGE-L | Full-KV | retention | losing records | pooled loss |
+|---|---:|---:|---:|---:|---:|
+| 4,096 (shipped, 4,608 slots) | 0.2615 | 0.2932 | **0.897** | 13 / 20 | 0.7131 |
+| 8,192 (8,704 slots) | 0.2942 | 0.2932 | **1.020** | 6 / 20 | 0.1929 |
+| 16,384 (16,896 slots) | **0.3026** | 0.2932 | **1.032** | 0 / 20 | 0.0000 |
+
+At 8,704 slots the same task is at parity, and not by trading precision for recall:
+both ROUGE-L components exceed the Full-KV arm's (precision 0.489 against 0.4782,
+recall 0.2173 against 0.2161). The pooled loss falls 3.7x, the worst *record*
+retention rises from 0.420 (3.21) to 0.8135, and the worst record's absolute score
+recovers from 0.126 to 0.301. `samsum` — the control with the same metric and almost
+the same median prompt length (9,822 tokens), but short official summaries — does not
+move at all (1.005 to 1.002).
+
+The 16,384 row is the ladder's own control: at that width **18 of the 20 documents
+fit entirely**, so the bounded arm is *byte-identical* to the Full-KV arm and scores
+exactly the same on all 18; the two 18.6K-token documents still drop about 9% of
+their tokens and score *above* Full-KV (0.212 to 0.375, and 0.264 to 0.289), the
+cleaner-context effect reported on narrativeqa in 3.21. So the sweep runs from a
+13-record shortfall to an exact identity, which is what makes the 4,096 row a budget
+statement rather than a quality statement.
+
+So the worst-task row was measuring the one task in the suite whose documents are
+long enough for the quality budget to bind: **4,608 slots is a retrieval-sized
+configuration, and summarisation over ~10K-token documents needs ~8K slots.** The
+other eight tasks are at parity at 4,608, which is why the nine-task aggregate
+(1.0049) never showed it.
+
+**The anchor channel is not what this task needs.** Removing the anchors entirely at
+the same budget (`--lex-cap 0 --hops 0`, same 20 records) leaves both summarisation
+tasks where they were: `gov_report` 0.2626 without anchors against 0.2615 with them,
+`samsum` 0.3955 against 0.3824, with the record-level differences split 8/11 and 2/3.
+So the shortfall is not a disambiguation failure the anchors could repair — on these
+tasks the anchors have nothing rare to match — and the two knobs have clearly
+different jobs: the anchor budget buys multi-key retrieval (0.842 to 1.008 aggregate
+on RULER, 3.21), while the attention budget buys the diffuse coverage summarisation
+runs on.
+
+**What this does not establish.** Whether the extra slots help because the summary
+needs more of the document or because a richer decode-time context keeps the decoder
+out of the repetition loop is not separated by this measurement — both the
+degeneration and the score gap disappear together. The sweep is one checkpoint
+(Llama-3.2-1B), 20 records, one greedy generation per record; `multi_news`, the other
+long-document summarisation task in the suite, has prompts short enough (median
+1,702 tokens) to be at parity at 4,608 slots and therefore cannot act as a second
+control.
 
 ## 4. What this establishes, and what it does not
 
