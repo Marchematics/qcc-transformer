@@ -964,12 +964,23 @@ factor, and it is the only one that matches Full-KV on the two hardest tasks.
 | attention ranking, window mean (`lex_cap=0`, packaged) | 1.000 | 0.870 | 0.667 | 1.022 | **0.870** | 0.667 |
 | best ranking variant as a harness baseline (`obs_mean`, 4,096 slots) | 1.000 | 0.800 | 0.200 | 0.640 | **0.880** | 0.000 |
 | + task-agnostic rarity anchors (`anchor_mode="rare"`) | 1.000 | 0.895 | **0.889** | 0.968 | **0.938** | 0.889 |
+| + pattern anchors, **no chain following** (`hops=0`) | 1.000 | 1.000 | 1.000 | 1.026 | **1.0065** | **1.000** |
+| + rarity anchors, no chain following (`hops=0`) | 1.000 | 0.895 | 0.889 | 1.018 | 0.950 | 0.889 |
 | shipped: pattern anchors + chain following | 1.000 | 1.000 | 1.000 | 1.028 | **1.007** | 1.000 |
 
 Averaging the observation window instead of reading its last query is worth
 +0.05 aggregate and +0.33 worst task on its own, which is the SnapKV intuition
-holding up; the anchors are worth a further +0.14 and +0.33 on top of that. The
-anchored row matters most for generality. `anchor_mode="rare"` removes every
+holding up; the anchors are worth a further +0.14 and +0.33 on top of that.
+
+Two attribution results worth stating because one of them is negative. **Chain
+following contributes nothing measurable on this split**: pattern anchors with
+`hops=0` score 1.0065 against the shipped 1.0071, so the assignment-chain walk
+that the selection code carries is harmless rather than load-bearing, and the
+default could drop it. The **pattern classes themselves do matter**: replacing
+them with the general rarity cue costs 0.056 aggregate and takes the worst task
+from 1.000 to 0.889 - which is the honest position, since the rarity mode is the
+one that generalises off RULER and the pattern mode is the one that closes the
+multiple-choice-style tasks. The anchored row matters most for generality. `anchor_mode="rare"` removes every
 task-shaped element: no UUID, hyphenated-identifier or long-number patterns, no
 assignment-chain following - a question token is a cue if the context contains it
 at most `max_occurrences` times. That alone lifts the hardest task from 0.333 to
