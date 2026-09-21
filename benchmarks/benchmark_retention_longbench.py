@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """LongBench retention: bounded decode cache vs matched Full-KV, real documents.
 
-The RULER evidence in ``artifacts/bounded-decode-frontier-20260920.md`` is
+The RULER evidence in ``docs/REPORT.md`` is
 synthetic (needle-in-a-haystack and variable tracking) and can be dismissed as
 benchmark engineering.  This harness runs the same packaged law on **LongBench**
 (THUDM, 2023): real long-document QA, summarisation and retrieval, scored with

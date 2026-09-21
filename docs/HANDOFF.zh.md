@@ -393,7 +393,7 @@ CUDA-graph/StaticCache 的 TPOT 数字仍然无效（parity 检查不过），�
 
 ## 当前审计（2026-09-20 晚）：官方 RULER 与 serving 的真实差距
 
-全部新证据在 `artifacts/bounded-decode-frontier-20260920.md` 及其 JSON。
+全部新证据在 `docs/REPORT.md` 及其 JSON。
 本轮做了三件事，结论都比上一节更严格：
 
 1. **官方 RULER（80 条，4 任务）**：matched Full-KV 只答对 51/80——1B
@@ -423,7 +423,7 @@ CUDA-graph/StaticCache 的 TPOT 数字仍然无效（parity 检查不过），�
 
 ## 当前审计（2026-09-20）：有界 decode 缓存的选择律已找到
 
-新证据在 `artifacts/bounded-decode-frontier-20260920.md`，原始结果在
+新证据在 `docs/REPORT.md`，原始结果在
 `artifacts/bounded-decode-frontier-aggregate-v2.json` 与
 `...-sweep-v1.json`，复现脚本为 `benchmarks/benchmark_selection_frontier.py`、
 `benchmarks/benchmark_bounded_decode_frontier.py` 和
@@ -785,7 +785,7 @@ python benchmarks/benchmark_hf_retrofit.py \
 
 ## 9. 交接原则
 
-- 先读本文件、`README.md`、`WORKSPACE.md` 和 `refine-logs/EXPERIMENT_PLAN.md`，再启动长任务；
+- 先读本文件、`README.md`、`docs/legacy/WORKSPACE.md` 和 `docs/legacy/refine-logs/EXPERIMENT_PLAN.md`，再启动长任务；
 - 所有新实验必须记录 `run_id`、模型路径/hash、数据来源、卡号、CUDA/PyTorch/Transformers 版本、命令行、原始日志和输出 JSON；
 - 不覆盖已有 artifacts；新实验使用新目录或新文件名；
 - 任何性能/质量数字先跑 `gate_99.py` 和相应审计，再写入 README 或论文；
