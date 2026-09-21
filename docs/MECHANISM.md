@@ -81,10 +81,25 @@ slowly varying with budget rather than exploding.
    this is the experiment that would turn the mechanism into a law with a stated
    domain of validity.
 3. **The NLL gap tracks long-range dependency density, not context length.**
-   Two corpora with the same `L` but different dependency density should show
-   different gaps at the same budget. *Test:* measure NLL at fixed budget and `L`
-   across corpora of increasing dependency density. *Evidence so far:* the two
-   corpora above differ as predicted, but the density axis has not been swept.
+   Supported. One token pool (32K, Llama-3.2-1B) is reordered into four levels -
+   natural, paragraph-shuffled, sentence-shuffled, fully shuffled - so unigram
+   statistics are identical and only the dependency structure changes. The density
+   proxy is the fraction of tokens whose nearest earlier 5-gram repeat lies more
+   than 512 tokens back, i.e. exactly the tokens a bounded cache cannot see.
+   Ratios to Full-KV (`artifacts/prediction-density.json`):
+
+   | budget | mean NLL ratio | Pearson r (density vs ratio) | Spearman rho |
+   |---|---:|---:|---:|
+   | 4,096 slots | 1.226 | **0.94** | 0.80 |
+   | 8,192 slots | 1.170 | **0.91** | 0.80 |
+
+   Fully shuffled text sits at a ratio of about 1 - no long-range structure, so
+   nothing for the cache to miss - although it is far harder in absolute terms
+   (Full-KV NLL 7.95 against 1.5-2.6 for the structured levels). The measured
+   density order is `sentence (0.123) > paragraph (0.096) > natural (0.085) >
+   token (0.000)`: block shuffling *relocates* repeated n-grams beyond the near
+   window instead of deleting them, so "natural" is not the densest level, and the
+   axis is reported as measured rather than as assumed.
 
 ## What the mechanism establishes
 
