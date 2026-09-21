@@ -4,13 +4,29 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "qcc-transformer"
-version = "0.1.0"
-description = "Query-Compiled Cache Transformer: a research prototype for constant-size long-context memory"
+version = "0.2.0"
+description = "Bounded exact-KV decoding: long-context inference without history proportional to context length"
 readme = "README.md"
 requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Marchematics" }]
+keywords = ["long-context", "kv-cache", "inference", "retrieval", "transformers"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = ["torch>=2.1"]
-authors = [{name = "Marchematics"}]
-license = {text = "MIT"}
+
+[project.urls]
+Homepage = "https://github.com/Marchematics/qcc-transformer"
+Documentation = "https://github.com/Marchematics/qcc-transformer/blob/main/docs/REPORT.md"
+Issues = "https://github.com/Marchematics/qcc-transformer/issues"
 
 [project.optional-dependencies]
 dev = ["pytest>=7.4"]

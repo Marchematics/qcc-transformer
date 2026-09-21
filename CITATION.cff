@@ -1,0 +1,21 @@
+cff-version: 1.2.0
+title: "QCC-Transformer: bounded exact-KV decoding for long-context inference"
+message: "If you use this work, please cite it as below."
+type: software
+authors:
+  - alias: Marchematics
+repository-code: "https://github.com/Marchematics/qcc-transformer"
+license: MIT
+abstract: >-
+  A cache policy that runs an exact Full-KV prefill through a stock pretrained
+  language model and compiles the decode cache down to a fixed number of slots
+  per (layer, kv-head). Decode is exact softmax attention over the survivors, so
+  decode state is set by configuration rather than by context length, with no
+  training and no new parameters. Measured on RULER, LongBench and matched
+  Full-KV baselines across four models and three model families.
+keywords:
+  - long-context
+  - kv-cache
+  - inference
+  - retrieval
+  - transformers

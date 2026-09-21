@@ -548,7 +548,7 @@ tables:
   exists on this card.
 * The bounded+graph floor itself is stable at **11.0 ms** across lengths and
   repeats. With four to eight parity-gated repeats per length (raw files
-  `experiments/retention_frontier/latency/{clean,p95}-*.json`, summary
+  `experiments (not bundled; see benchmarks/benchmark_bounded_decode_tpot_floor.py) {clean,p95}-*.json`, summary
   `artifacts/bounded-decode-frontier-tpot-p95.json`): bounded+graph **p50 11.01 ms,
   p95 11.03 ms, min 11.009, max 11.028** at 32K and **11.01 ms** at 128K, against
   Full-KV+graph **p50 55.0 ms, p95 55.2 ms** at 32K - a p95-to-p95 ratio of
@@ -557,7 +557,7 @@ tables:
   that is not reproduced under repeated, parity-gated measurement and is
   superseded.
 
-Raw files: `experiments/retention_frontier/latency/clean-tpot-*.json`,
+Raw files: `experiments (not bundled; see benchmarks/benchmark_bounded_decode_tpot_floor.py) clean-tpot-*.json`,
 summarised in `artifacts/bounded-decode-frontier-tpot-percentiles.json`.
 
 ### 3.12 The quality/budget frontier: retention is task-family dependent
@@ -930,7 +930,7 @@ of five tracked variables that the harness recovered. Across the 80 records the
 packaged run came out at 0.9253 aggregate retention against the harness's 1.000
 - a "reproduction" that reproduced nothing exactly.
 
-**The check that settles it.** `experiments/retention_frontier/diff_selection.py`
+**The check that settles it.** `benchmarks/diff_selection.py`
 loads one record, computes the anchor positions, the scores and the selections
 through *both* code paths **in the same process on the same cache**, and reports
 each stage separately:
