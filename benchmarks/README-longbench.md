@@ -1,10 +1,9 @@
 # LongBench retention: bounded decode cache vs Full-KV
 
 The RULER evidence behind the retention law
-(`docs/REPORT.md`) is synthetic: needle-in-a-
-haystack and variable tracking.  This harness adds the piece a reviewer asks
-for next — **LongBench** (Bai et al., 2023), real long-document QA,
-summarisation, classification and retrieval — and runs the packaged law
+(`docs/REPORT.md`) is synthetic: needle-in-a-haystack and variable tracking.
+This harness adds **LongBench** (Bai et al., 2023) — real long-document QA,
+summarisation, classification and retrieval — and runs the shipped law
 (`qcc_transformer.retention.compile_bounded_cache`) against a matched exact
 Full-KV arm on the same records, prompts and decode loop.
 
@@ -21,22 +20,22 @@ Full-KV arm on the same records, prompts and decode loop.
 
 ```bash
 # 0) unit tests (no network, no GPU, a few seconds)
-/root/qcc/venv/bin/python -m pytest -q tests/test_longbench_metrics.py
+python -m pytest -q tests/test_longbench_metrics.py
 
-# 1) dataset check: downloads into /root/qcc/data/longbench and prints counts
-/root/qcc/venv/bin/python benchmarks/longbench_data.py --tasks narrativeqa qasper
+# 1) dataset check: downloads into $QCC_LONGBENCH_DIR and prints counts
+python benchmarks/longbench_data.py --tasks narrativeqa qasper
 
 # 2) the real run (GPU; 1B model, ~20 records/task)
-/root/qcc/venv/bin/python benchmarks/benchmark_retention_longbench.py \
-    --model /root/qcc/models/Llama-3.2-1B-Instruct \
+python benchmarks/benchmark_retention_longbench.py \
+    --model meta-llama/Llama-3.2-1B-Instruct \
     --tasks narrativeqa qasper hotpotqa 2wikimqa gov_report multi_news \
             triviaqa samsum vcsum passage_retrieval_en \
     --limit 20 --budget 4096 --lex-cap 512 --hops 6 \
     --out artifacts/longbench-retention-llama32-1b.json
 
 # 3) optional: same harness, no checkpoint, CPU (random 2-layer model; smoke test only)
-/root/qcc/venv/bin/python benchmarks/benchmark_retention_longbench.py \
-    --model /root/qcc/models/Llama-3.2-1B-Instruct --tiny-random-model \
+python benchmarks/benchmark_retention_longbench.py \
+    --model meta-llama/Llama-3.2-1B-Instruct --tiny-random-model \
     --device cpu --dtype float32 --tasks samsum passage_retrieval_en \
     --limit 2 --max-input-tokens 1024 --max-new 6 \
     --budget 256 --lex-cap 64 --out /tmp/longbench-smoke.json
@@ -59,7 +58,8 @@ result.
   `longbench_data.py` writes that table to `dataset2metric.json` in the cache so
   the cache is self-describing.  `longbench_metrics.load_dataset2metric()`
   prefers the JSON file and falls back to the built-in official table.
-* Cache: `/root/qcc/data/longbench` (`--cache-dir` or `$QCC_LONGBENCH_DIR`).
+* Cache: `$QCC_LONGBENCH_DIR`, default `~/.cache/qcc/longbench`
+  (`--cache-dir` overrides both).
   Files: `data/<task>.jsonl`, `dataset2prompt.json`, `dataset2maxlen.json`,
   `dataset2metric.json`, `manifest.json` (counts/paths/sources), and
   `_download/data.zip` (the 109 MiB archive; delete it after extraction with
@@ -69,11 +69,10 @@ result.
   `repobench-p` (500).  `manifest.json` records the per-task counts, and
   `ensure_dataset(tasks=None)` extracts/validates the whole suite, not just the
   tasks of one run.
-* Network note: this machine's `no_proxy` contains `[::1]`, which makes
+* Network note: a `no_proxy` value containing `[::1]` makes
   `httpx`/`huggingface_hub` raise `InvalidURL: Invalid port: ':1]'`.  Both
-  `longbench_data.py` and the runner call `sanitize_proxy_env()` (import time
-  included) which rewrites only `NO_PROXY`/`no_proxy` to
-  `localhost,127.0.0.1`.
+  `longbench_data.py` and the runner call `sanitize_proxy_env()` (at import
+  time) which rewrites only `NO_PROXY`/`no_proxy` to `localhost,127.0.0.1`.
 * The prompt is built exactly as in the official `pred.py`:
   `template.format(context=..., input=...)` with the task template from
   `dataset2prompt.json`.
@@ -154,8 +153,8 @@ arm/record, written as the run proceeds and usable by
 * **Truncation (explicit).**  A prompt longer than `--max-input-tokens`
   (default 32 768) is truncated the way the official LongBench harness does it:
   keep the **first half and the last half** of the token ids, because the head
-  carries the task framing and the tail carries the question/instruction.  We
-  keep token ids instead of the official detokenise/re-encode round trip.  Each
+  carries the task framing and the tail carries the question/instruction.  Token
+  ids are kept instead of the official detokenise/re-encode round trip.  Each
   affected row is flagged `truncated: true` with both token counts, and the
   policy is repeated in the JSON header.  `--truncation skip` drops such records
   into `skipped_records` instead.  Measured with the Llama-3.2 tokenizer over 20
@@ -163,10 +162,10 @@ arm/record, written as the run proceeds and usable by
   pass `--max-input-tokens 65536` to keep those records intact.
 * **Chinese tasks are skipped, not approximated.**  `vcsum` (in the default
   list), `dureader` and `multifieldqa_zh` need `jieba`-based metrics; `lcc` and
-  `repobench-p` need `fuzzywuzzy`.  None of those packages is installed, so
-  those tasks appear in `skipped_tasks` with the missing package named and never
-  contribute a silently-zero score.  `pip install jieba` (or `fuzzywuzzy`) makes
-  them runnable without touching this code.
+  `repobench-p` need `fuzzywuzzy`.  Without those packages the tasks appear in
+  `skipped_tasks` with the missing package named and never contribute a
+  silently-zero score.  `pip install jieba` (or `fuzzywuzzy`) makes them
+  runnable without touching this code.
 * **Decode is the retention harness's loop, not the official generator.**  Both
   arms decode greedily with `--max-new` tokens (default: the per-task official
   `dataset2maxlen.json` value: 128/512/32/64), stop at EOS, use absolute
@@ -184,12 +183,12 @@ arm/record, written as the run proceeds and usable by
   `narrativeqa`, `triviaqa`, `gov_report`, `vcsum`, `samsum` and
   `passage_retrieval_en` (10 k–47 k tokens) are genuinely compressed.  Lower
   `--budget` if you want the short tasks to be informative too.
-* **`mean_score` is a retention-internal number**, not a leaderboard claim: it
+* **`mean_score` is an internal retention number**, not a leaderboard claim: it
   is the official metric (×1, not ×100) on this harness's greedy decode.  The
   headline result is `retention`, which is arm-matched by construction.
-* **Untested on GPU.**  The runner was smoke-tested end to end on CPU with
+* **CPU smoke path.**  The runner is smoke-tested end to end on CPU with
   `--tiny-random-model` (both arms, truncation, skip paths, progress file,
-  partial-report-on-interrupt) and its summarisation logic was unit-checked with
-  synthetic rows; the real Llama-3.2-1B-Instruct end-to-end run has **not** been
-  executed here, and neither has the `--load-4bit` path or a model whose
-  forward takes no `cache_position`.
+  partial-report-on-interrupt) and its summarisation logic is unit-checked with
+  synthetic rows.  A real run needs a CUDA device; the `--load-4bit` path and
+  checkpoints whose forward takes no `cache_position` are not covered by the
+  CPU smoke test.

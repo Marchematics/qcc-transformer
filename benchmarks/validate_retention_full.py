@@ -1,4 +1,4 @@
-"""Does the *packaged* API reproduce the benchmark's RULER numbers?
+"""Does the *shipped* API reproduce the benchmark's RULER numbers?
 
 Runs N records per task through ``qcc_transformer.retention`` at the quality
 budget and scores them with RULER's official metric, so the headline claim is
@@ -8,15 +8,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, "/root/qcc/repo/qcc-transformer")
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from qcc_transformer.retention import RetentionConfig, compile_bounded_cache
+
+DEFAULT_MODEL = os.environ.get("QCC_MODEL", "meta-llama/Llama-3.2-1B-Instruct")
 
 
 def official(pred: str, refs: list[str]) -> float:
@@ -44,8 +47,9 @@ def greedy(model, cache, next_id, offset, kept, max_new, eos_ids):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--model", default="/root/qcc/models/Llama-3.2-1B-Instruct")
-    ap.add_argument("--ruler-jsonl", default="/home/waas/ruler_a10_v1/ruler_subset.jsonl")
+    ap.add_argument("--model", default=DEFAULT_MODEL)
+    ap.add_argument("--ruler-jsonl", default=os.environ.get("QCC_RULER_JSONL", ""),
+                    help="RULER split JSONL (env: QCC_RULER_JSONL)")
     ap.add_argument("--per-task", type=int, default=5)
     ap.add_argument("--budget", type=int, default=4096)
     ap.add_argument("--lex-cap", type=int, default=512)
@@ -53,6 +57,8 @@ def main():
     ap.add_argument("--max-new", type=int, default=128)
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
+    if not args.ruler_jsonl:
+        ap.error("--ruler-jsonl is required (or set QCC_RULER_JSONL)")
 
     tok = AutoTokenizer.from_pretrained(args.model)
     model = AutoModelForCausalLM.from_pretrained(args.model, dtype=torch.bfloat16).to("cuda").eval()

@@ -12,7 +12,7 @@ The exact tier is deliberately fail-safe:
   preserved rather than randomly caching historical tokens;
 * at most ``max_inserts_per_chunk`` events are admitted from a prefill block;
 * exact reads are confidence gated and remain constant-size with context length;
-* the helper refuses sparse/lazy base archives for now, avoiding double updates in a
+* the helper refuses sparse/lazy base archives, avoiding double updates in a
   fallback path that calls virtual ``update``/``read`` methods internally.
 """
 from __future__ import annotations
@@ -215,7 +215,7 @@ class HybridQCCArchive(QCCArchive):
             # The exact tier is a shadow for quality recovery, not a license to
             # replace the recurrent response on every moderately similar key.
             # Soft reads average unrelated values in a dense fixed table and the
-            # old forced-positive mix bias made that contamination pervasive.
+            # forced-positive mix bias makes that contamination pervasive.
             # Keep nearest-neighbour reads and honor the caller's mix bias so the
             # confidence gate remains a conservative, tunable fallback.
             exact_mix_bias_init = float(exact_mix_bias_init)

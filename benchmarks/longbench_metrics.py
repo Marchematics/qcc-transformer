@@ -268,7 +268,7 @@ def classification_score(prediction: str, ground_truth: str, **kwargs) -> float:
 
     Faithful in one ugly detail: the official loop removes from
     ``em_match_list`` while iterating over it, so a prediction containing
-    several classes can skip a removal.  Reproducing it keeps our numbers
+    several classes can skip a removal.  Reproducing it keeps the scores
     comparable with published LongBench tables.
     """
     all_classes = kwargs.get("all_classes") or []

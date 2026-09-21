@@ -1,5 +1,8 @@
-"""Summarize longctx.py result JSON: retention by (length, policy, budget),
-cache bytes, and speed.  Usage: python summarize.py <results.json> [...]"""
+"""Summarize frontier-harness result JSON: retention by (length, policy, budget),
+cache bytes, and speed.
+
+Usage: python benchmarks/summarize_bounded_decode.py <results.json> [...]
+"""
 
 from __future__ import annotations
 

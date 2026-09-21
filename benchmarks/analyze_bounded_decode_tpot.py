@@ -67,7 +67,7 @@ def main(paths, policies=("obs_last", "obs_mean")):
                         "full_kv_tpot_ms": round(full_ms, 3), "bounded_tpot_ms": round(bnd_ms, 3),
                         "tpot_speedup": round(sp, 3), "decode_state_reduction": round(st, 1),
                         "mean_recall": round(rec, 4), "records": len(v["recall"])})
-    print("\nNote: batch-1 greedy decode inside a Python loop on one A10G.  Bounded-cache")
+    print("\nNote: batch-1 greedy decode inside a Python loop on a single GPU.  Bounded-cache")
     print("latency is flat in context length; the residual floor is weight reads plus")
     print("per-step framework overhead, not KV traffic.")
     print(json.dumps(summary, indent=1)[:200], "...")

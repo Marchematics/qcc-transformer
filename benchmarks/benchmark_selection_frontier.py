@@ -3,14 +3,15 @@
 Question
 --------
 For a real pretrained long-context LM, prefill is run with exact Full-KV
-attention.  Only the *decode* cache is bounded: after prefill we keep a fixed
-budget of KV slots per (layer, kv-head) and run greedy decode against that
-pruned cache.  Selection uses only information available at the end of the
-prompt (never future decode tokens), so the procedure is causal and deployable.
+attention.  Only the *decode* cache is bounded: after prefill a fixed budget of
+KV slots per (layer, kv-head) is kept and greedy decode runs against that pruned
+cache.  Selection uses only information available at the end of the prompt
+(never future decode tokens), so the procedure is causal and deployable.
 
-We sweep selection policies and budgets on RULER-style multi-key NIAH records
-and compare against unpruned Full-KV decode.  The goal is to separate "the
-selection law is bad" from "bounded exact decode is fundamentally insufficient".
+The script sweeps selection policies and budgets on RULER-style multi-key NIAH
+records and compares against unpruned Full-KV decode.  The goal is to separate
+"the selection law is bad" from "bounded exact decode is fundamentally
+insufficient".
 
 Diagnostic harness; it does not modify the QCC package.
 """
@@ -19,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import random
 import time
 from dataclasses import dataclass, field
@@ -27,6 +29,8 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 from transformers import AutoModelForCausalLM, AutoTokenizer
+
+DEFAULT_MODEL = os.environ.get("QCC_MODEL", "meta-llama/Llama-3.2-1B-Instruct")
 
 FILLER = [
     "The grass is green and the sky is blue in the quiet valley.",
@@ -383,7 +387,7 @@ def run_record(model, tokenizer, length, args, eos_ids):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--model", default="/root/qcc/models/Llama-3.2-1B-Instruct")
+    ap.add_argument("--model", default=DEFAULT_MODEL)
     ap.add_argument("--lengths", type=int, nargs="+", default=[16384, 32768])
     ap.add_argument("--policies", nargs="+",
                     default=["full", "recent", "sink_recent", "random", "keynorm",

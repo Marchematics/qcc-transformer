@@ -14,7 +14,9 @@ Protocol
 
 Retention for language modelling is question-free: the observation window is
 simply the last `obs` tokens of the prefix, i.e. the SnapKV setting.  No lexical
-anchors are used because there is no question to anchor on.
+anchors are used because there is no question to anchor on.  The default
+``--sources`` corpus is the repository's own Markdown and Python sources plus
+the running interpreter's standard library.
 
 Reported: mean negative log-likelihood, perplexity, and the ratio to Full-KV.
 """
@@ -25,12 +27,17 @@ import argparse
 import glob
 import json
 import math
+import os
 import time
 from pathlib import Path
 
 import torch
 import torch.nn as nn
 from transformers import AutoModelForCausalLM, AutoTokenizer, DynamicCache, DynamicLayer
+
+DEFAULT_MODEL = os.environ.get("QCC_MODEL", "meta-llama/Llama-3.2-1B-Instruct")
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 try:
     import benchmark_bounded_decode_frontier as L
@@ -81,7 +88,7 @@ def score_suffix(model, cache, prefix_len, target_ids, mask_len, n):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--model", default="/root/qcc/models/Llama-3.2-1B-Instruct")
+    ap.add_argument("--model", default=DEFAULT_MODEL)
     ap.add_argument("--length", type=int, default=32768)
     ap.add_argument("--suffix", type=int, default=256)
     ap.add_argument("--budget", type=int, default=1024)
@@ -92,11 +99,13 @@ def main():
     ap.add_argument("--policies", nargs="+", default=["obs_last", "obs_mean", "recent", "random"])
     ap.add_argument("--prefill-chunk", type=int, default=8192)
     ap.add_argument("--sources", nargs="+",
-                    default=["/root/qcc/repo/qcc-transformer/*.md",
-                             "/root/qcc/repo/qcc-transformer/artifacts/*.md",
-                             "/root/qcc/repo/qcc-transformer/benchmarks/*.py",
-                             "/root/qcc/repo/qcc-transformer/qcc_transformer/*.py",
-                             "/usr/lib/python3.12/*.py"])
+                    default=[str(REPO_ROOT / "*.md"),
+                             str(REPO_ROOT / "artifacts" / "*.md"),
+                             str(REPO_ROOT / "benchmarks" / "*.py"),
+                             str(REPO_ROOT / "qcc_transformer" / "*.py"),
+                             str(Path(os.__file__).resolve().parent / "*.py")],
+                    help="glob patterns concatenated into the document; the last "
+                         "default entry is the interpreter's own standard library")
     ap.add_argument("--document", default=None, help="pinned token-id JSON to reuse")
     ap.add_argument("--save-document", default=None, help="write the built document here")
     ap.add_argument("--out", required=True)

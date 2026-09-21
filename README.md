@@ -16,7 +16,7 @@ every retained key keeps its original rotary phase and its original value.
   bit-identical parameter set before and after compilation.
 * **Decode state is set by configuration, not by context length**: 4,608 slots
   is 144 MiB at 8K *and* at 256K, where the Full-KV cache is 8 GiB.
-* **Quality parity with Full-KV** on retrieval-style tasks, through the packaged
+* **Quality parity with Full-KV** on retrieval-style tasks, through the shipped
   API, on four models across three families.
 
 ```python
@@ -38,7 +38,7 @@ Full-KV quality on the records the Full-KV arm answers.
 | measurement | configuration | result |
 |---|---|---|
 | RULER, 80 records, 4 tasks | budget 4,096 + 512 anchors, Llama-3.2-1B | **1.007 aggregate retention, 1.000 worst task** |
-| package vs benchmark harness | same 80 records | 80/80 metric agreement, 75/80 byte-identical predictions, bitwise-equal scores |
+| shipped API vs the benchmark harness | same 80 records | 80/80 metric agreement, 75/80 byte-identical predictions, bitwise-equal scores |
 | LongBench, 9 tasks, 122 matched records | same budget | **1.0049 aggregate, 0.897 worst task** (narrativeqa +10.7%) |
 | cross-family, one configuration, no tuning | Llama-3.2-1B / Llama-3.1-8B-4bit / Qwen2.5-3B / Phi-3.5-mini | 1.007 / 1.014 / 0.975 / 0.972 aggregate |
 | decode state vs prompt length | 8K → 256K | **1.00x growth** (4,608 slots, 144 MiB); Full-KV 57x larger at 256K |
@@ -49,12 +49,12 @@ Full-KV quality on the records the Full-KV arm answers.
 | single-stream TPOT, both arms CUDA-graphed | 32K, parity-gated repeats | **5.0x** (p95 55.2 ms vs 11.03 ms) |
 | trainable parameters added | — | **0** |
 
-Two honest limits, stated here rather than buried: the **1M rows cannot be
-measured on a 24 GiB card** (a 1M bf16 Full-KV cache is 32 GiB, and the law
-requires an exact Full-KV prefill, so a quantized prefill would measure a
-different method), and the **128K TPOT ratio has no matched baseline on this
-hardware** (the same-path baseline OOMs at 131K tokens; the bounded arm's own
-floor, 11.0 ms/token with p50 = p95, is reproducible). See
+The measurement record has two hard limits: the **1M rows cannot be measured on
+a 24 GiB card** (a 1M bf16 Full-KV cache is 32 GiB, and the law requires an
+exact Full-KV prefill, so a quantized prefill would measure a different method),
+and the **128K TPOT ratio has no matched baseline on that hardware class** (the
+same-path baseline OOMs at 131K tokens; the bounded arm's own floor, 11.0
+ms/token with p50 = p95, is reproducible). See
 [`docs/REPORT.md`](docs/REPORT.md) §4 for the full list of what is and is not
 established.
 
@@ -84,8 +84,8 @@ established.
    `cache.qcc_prompt_lengths` are returned for decode.
 
 Compilation costs one exact prefill per request (linear in the batch, 3.5 s at
-8K and 68 s at 128K on the A10G used here); every decoded token afterwards
-attends to at most 4,608 keys instead of the whole context.
+8K and 68 s at 128K on an NVIDIA A10G); every decoded token afterwards attends
+to at most 4,608 keys instead of the whole context.
 
 ## Install
 
@@ -122,21 +122,21 @@ tests/                    CPU test suite (policy invariants, quantization, LongB
 
 | page | what it covers |
 |---|---|
-| [`docs/REPORT.md`](docs/REPORT.md) | the full measurement record, including sections on ragged batches, package/harness parity, LongBench and baselines, state growth, quantization, cross-family results, and what is not established |
-| [`docs/CLAIMS.md`](docs/CLAIMS.md) | claim → code path → artifact → command, with the open questions and the experiment that closes each |
+| [`docs/REPORT.md`](docs/REPORT.md) | the full measurement record, including sections on ragged batches, shipped-API/harness parity, LongBench and baselines, state growth, quantization, cross-family results, and what is not established |
+| [`docs/CLAIMS.md`](docs/CLAIMS.md) | claim → code path → artifact → command, with the open questions and the experiment that would resolve each |
 | [`docs/MECHANISM.md`](docs/MECHANISM.md) | why a fixed slot count can be enough, the NLL-vs-budget evidence, and three falsifiable predictions |
 | [`docs/REPRODUCING.md`](docs/REPRODUCING.md) | setup and the exact command behind every artifact |
 | [`docs/NOVELTY.md`](docs/NOVELTY.md) | the boundary against prior bounded-memory attention work |
-| [`docs/RELEASE.md`](docs/RELEASE.md) | the snapshot bundle and how to verify it |
-| [`docs/HANDOFF.zh.md`](docs/HANDOFF.zh.md) | working log (Chinese) for whoever picks this up next |
+| [`docs/RELEASE.md`](docs/RELEASE.md) | the release bundle and how to verify it |
 
-## Status
+## Limitations
 
-The retention law is implemented, tested and measured; the evidence is frozen in
-`artifacts/` and reproducible on a single 24 GiB GPU. The project is not a
-drop-in serving system: the vLLM integration is experimental, the measurements
-come from a shared card (so latency numbers state their window), and the 1M-scale
-questions are open for lack of hardware rather than for lack of a method.
+The retention law is implemented, tested and measured, and the evidence is
+frozen in `artifacts/` and reproducible on a single 24 GiB GPU. The project is
+not a drop-in serving system: the vLLM integration is experimental, latency
+numbers depend on concurrent load on the measurement GPU (so each one states its
+window), and the 1M-scale questions are limited by available hardware rather
+than by the method.
 
 ## Citation
 

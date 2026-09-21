@@ -4,8 +4,8 @@
 
 set -e
 
-PROJECT_DIR="${PROJECT_DIR:-/mnt/workspace/qcc-transformer}"
-MODEL_PATH="${MODEL_PATH:-$PROJECT_DIR/models/phi-4-mini-instruct-ms}"
+PROJECT_DIR="${PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+MODEL_PATH="${MODEL_PATH:-microsoft/Phi-4-mini-instruct}"
 OUTPUT_DIR="${OUTPUT_DIR:-$PROJECT_DIR/artifacts/hf_99/layerwise_sweep}"
 RUN_ID="${RUN_ID:-layerwise_$(date +%Y%m%d_%H%M%S)}"
 HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
@@ -14,9 +14,9 @@ NUM_HELD_OUT_CHUNKS="${NUM_HELD_OUT_CHUNKS:-4}"
 
 cd "$PROJECT_DIR"
 
-# Prepare data: use README as train, HANDOFF as held-out
-TRAIN_FILE="README.md"
-HELDOUT_FILE="HANDOFF.md"
+# Prepare data: repository prose as train, the technical report as held-out
+TRAIN_FILE="${TRAIN_FILE:-README.md}"
+HELDOUT_FILE="${HELDOUT_FILE:-docs/REPORT.md}"
 
 echo "=== Layer-wise calibration sweep ==="
 echo "Run ID: $RUN_ID"

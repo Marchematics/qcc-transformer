@@ -18,8 +18,8 @@ rows (see [Limits](#limits)). Models and datasets are not bundled:
 
 | what | where it comes from |
 |---|---|
-| model checkpoints | any Hugging Face causal LM; paths used are recorded in each JSON's `config.model` |
-| RULER split | `ruler_subset.jsonl` (80 records, 4 tasks; path in each JSON's `config.ruler_jsonl`) |
+| model checkpoints | any Hugging Face causal LM; pass one with `--model` or `$QCC_MODEL`; the checkpoint used is recorded in each JSON's `config.model` |
+| RULER split | an external `ruler_subset.jsonl` (80 records, 4 tasks); pass it with `--ruler-jsonl` or `$QCC_RULER_JSONL`; the path used is recorded in each JSON's `config.ruler_jsonl` |
 | LongBench | downloaded on demand by `benchmarks/longbench_data.py` from `THUDM/LongBench` |
 
 ## The shipped law
@@ -84,17 +84,17 @@ python benchmarks/analyze_latency_percentiles.py /tmp/tpot-*.json
 ```
 
 Serving throughput and SLA concurrency are produced by
-`benchmark_bounded_decode_serving.py` (swEEP over batch sizes) and summarised by
-`analyze_sla_concurrency.py`; the numbers in the README are the ones those two
-scripts print, with the measurement window stated next to them.
+`benchmark_bounded_decode_serving.py` (a sweep over batch sizes) and summarised
+by `analyze_sla_concurrency.py`; the numbers in the README are the ones those
+two scripts print, with the measurement window stated next to them.
 
 ## Limits
 
 * **1M rows are not reproducible on a 24 GiB card.** A 1M-token bf16 Full-KV
   cache is 32 GiB for the 1B model, and the law requires an *exact* Full-KV
   prefill, so a quantized or streaming prefill would measure a different method.
-* **The 128K TPOT ratio has no matched baseline here.** The same-path harness
-  OOMs on the Full-KV arm at 131K tokens; the bounded arm's own floor is
-  reproducible (11.0 ms/token, p50 = p95).
-* **Latency depends on co-tenants.** Every JSON records its own run; numbers
-  taken while the card was shared are marked as such in `REPORT.md` §3.14b.
+* **The 128K TPOT ratio has no matched baseline on this hardware class.** The
+  same-path harness OOMs on the Full-KV arm at 131K tokens; the bounded arm's own
+  floor is reproducible (11.0 ms/token, p50 = p95).
+* **Latency depends on concurrent load.** Every JSON records its own run; numbers
+  taken while the GPU was shared are marked as such in `REPORT.md` §3.14b.

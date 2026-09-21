@@ -19,12 +19,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 from pathlib import Path
 
 import torch
 import torch.nn as nn
 from transformers import AutoModelForCausalLM, AutoTokenizer, DynamicCache, DynamicLayer
+
+DEFAULT_MODEL = os.environ.get("QCC_MODEL", "meta-llama/Llama-3.2-1B-Instruct")
 
 try:
     import benchmark_bounded_decode_frontier as L
@@ -78,7 +81,7 @@ def decode_batched(model, batch_cache, next_ids, Lc_vec, max_new, keep_mask=None
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--model", default="/root/qcc/models/Llama-3.2-1B-Instruct")
+    ap.add_argument("--model", default=DEFAULT_MODEL)
     ap.add_argument("--length", type=int, default=32768)
     ap.add_argument("--batches", type=int, nargs="+", default=[1, 2, 4, 8, 16])
     ap.add_argument("--budget", type=int, default=1024)

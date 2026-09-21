@@ -321,7 +321,7 @@ def tiny_model():
 
 
 def compile_tiny_cpu_cache():
-    """A real compiled cache from the packaged retention law, on CPU."""
+    """A real compiled cache from the shipped retention law, on CPU."""
     model = tiny_model()
     ids = torch.randint(0, TINY_CONFIG["vocab_size"], (1, PROMPT_TOKENS))
     config = RetentionConfig(budget=BUDGET, lex_cap=0, observation_window=8,

@@ -1,6 +1,6 @@
 """Query-compiled retention: a bounded exact-KV decode cache.
 
-This module is the packaged form of the retention law measured in
+This module is the shipped form of the retention law measured in
 ``benchmarks/benchmark_bounded_decode_frontier.py`` and documented in
 ``docs/REPORT.md``.  It is a *cache policy*, not
 an attention approximation: prefill runs the model's own exact causal attention,

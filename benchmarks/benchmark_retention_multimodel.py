@@ -1,6 +1,6 @@
 """Cross-model, cross-task retention: bounded cache vs matched Full-KV.
 
-Runs the *packaged* law (``qcc_transformer.retention.compile_bounded_cache``)
+Runs the *shipped* law (``qcc_transformer.retention.compile_bounded_cache``)
 and an exact Full-KV arm over the same RULER records, on any Hugging Face causal
 LM, and reports per-task retention.  The point of this script is generality: the
 same code path, the same configuration and no per-model tuning, on several model
@@ -10,13 +10,14 @@ ablation that answers "is this only a rare-string trick?".
 Retention for a record is ``bounded_recall / full_recall`` and only records the
 Full-KV arm answers are counted, so the number is "how much of what Full-KV can
 do survives", not an absolute score.  Both arms decode greedily with the same
-loop the earlier harness used (max_new tokens, stop at EOS), so the Llama-3.2-1B
-run here is directly comparable with the stored benchmark harness run.
+loop as the benchmark harness (max_new tokens, stop at EOS), so the Llama-3.2-1B
+run here is directly comparable with the stored harness run.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from collections import defaultdict
@@ -35,7 +36,8 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", required=True)
     parser.add_argument("--label", default=None)
-    parser.add_argument("--ruler-jsonl", default="/home/waas/ruler_a10_v1/ruler_subset.jsonl")
+    parser.add_argument("--ruler-jsonl", default=os.environ.get("QCC_RULER_JSONL", ""),
+                        help="RULER split JSONL (env: QCC_RULER_JSONL)")
     parser.add_argument("--tasks", nargs="*",
                         default=["niah_single_1", "niah_multikey_2", "niah_multikey_3", "vt"])
     parser.add_argument("--limit", type=int, default=None, help="records per task")
@@ -134,6 +136,9 @@ def forward_kwargs_of(model):
 
 def main():
     args = parse_args()
+    if not args.ruler_jsonl:
+        raise SystemExit("--ruler-jsonl is required (or set QCC_RULER_JSONL): "
+                         "point it at the RULER split JSONL")
     if args.trust_remote_code:
         _ensure_remote_code_compat()
     from transformers import AutoTokenizer

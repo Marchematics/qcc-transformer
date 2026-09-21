@@ -6,8 +6,8 @@ real-document long-context suite used here as the non-synthetic complement to
 RULER.  This module owns everything about *data*:
 
 * it downloads the official records into a local cache on demand
-  (``/root/qcc/data/longbench`` by default, override with ``--cache-dir`` or the
-  ``QCC_LONGBENCH_DIR`` environment variable),
+  (``$QCC_LONGBENCH_DIR``, default ``~/.cache/qcc/longbench``; ``--cache-dir``
+  overrides both),
 * it downloads the official prompt templates (``dataset2prompt.json``), the
   official per-task generation lengths (``dataset2maxlen.json``) and the
   task -> metric table (``dataset2metric.json``),
@@ -54,7 +54,7 @@ if str(BENCH_DIR) not in sys.path:
     sys.path.insert(0, str(BENCH_DIR))
 
 ENV_CACHE_DIR = "QCC_LONGBENCH_DIR"
-DEFAULT_CACHE_DIR = "/root/qcc/data/longbench"
+DEFAULT_CACHE_DIR = str(Path.home() / ".cache" / "qcc" / "longbench")
 HF_REPO_ID = "THUDM/LongBench"
 CONFIG_RAW_BASE = "https://raw.githubusercontent.com/THUDM/LongBench/main/LongBench/config"
 
@@ -106,7 +106,7 @@ sanitize_proxy_env()  # import-time fix, as recommended by the harness notes
 
 
 def resolve_cache_dir(path: str | Path | None = None) -> Path:
-    """``argument > QCC_LONGBENCH_DIR > /root/qcc/data/longbench``."""
+    """``argument > QCC_LONGBENCH_DIR > ~/.cache/qcc/longbench``."""
     import os
 
     if path is not None:

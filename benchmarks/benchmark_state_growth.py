@@ -8,7 +8,7 @@ actually limits long-context serving.
 For each length this records the retained slots, the compiled state in bytes,
 the Full-KV state the same prompt would need, and the ratio of the two - plus
 the compile time, so the one-off cost of reading a long prompt is visible next
-to the recurring decode cost.  The largest length that fits on this card is
+to the recurring decode cost.  The largest length that fits on a 24 GiB card is
 limited by the Full-KV prefill (a 128K bf16 Full-KV cache for Llama-3.2-1B is
 4 GiB; 1M would be 32 GiB), which is itself part of the result.
 """
@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -27,10 +28,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from qcc_transformer.hf_loading import load_hf_causal_lm
 from qcc_transformer.retention import RetentionConfig, compile_bounded_cache
 
+DEFAULT_MODEL = os.environ.get("QCC_MODEL", "meta-llama/Llama-3.2-1B-Instruct")
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", default="/root/qcc/models/Llama-3.2-1B-Instruct")
+    parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--lengths", nargs="*", type=int,
                         default=[8192, 32768, 65536, 131072, 262144])
     parser.add_argument("--budget", type=int, default=4096)

@@ -3,8 +3,8 @@
 
 set -e
 
-PROJECT_DIR="${PROJECT_DIR:-/mnt/workspace/qcc-transformer}"
-MODEL_PATH="${MODEL_PATH:-$PROJECT_DIR/models/phi-4-mini-instruct-ms}"
+PROJECT_DIR="${PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+MODEL_PATH="${MODEL_PATH:-microsoft/Phi-4-mini-instruct}"
 OUTPUT_DIR="${OUTPUT_DIR:-$PROJECT_DIR/artifacts/hf_99/layerwise_test}"
 RUN_ID="${RUN_ID:-layertest_$(date +%Y%m%d_%H%M%S)}"
 HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
@@ -35,7 +35,7 @@ PYTHONPATH="$PROJECT_DIR:${PYTHONPATH:-}" \
 python3 benchmarks/calibrate_hf_layerwise.py \
     --model "$MODEL_PATH" \
     --train-file README.md \
-    --held-out-file HANDOFF.md \
+    --held-out-file docs/REPORT.md \
     --output "$output_file" \
     --calibrate-layers "$LAYERS" \
     --window-size "$WINDOW" \

@@ -1,9 +1,9 @@
-"""Colab-ready CUDA/Triton smoke and target audit.
+"""CUDA/Triton smoke and target audit.
 
-Run from a fresh checkout on a Colab GPU::
+Run from a fresh checkout on a CUDA GPU::
 
-    %pip install -U "torch>=2.1" triton
-    !python benchmarks/colab_gpu_smoke.py --lengths 8192,32768 --compare-full
+    pip install -U "torch>=2.1" triton
+    python benchmarks/colab_gpu_smoke.py --lengths 8192,32768 --compare-full
 
 The script never converts missing evidence into a pass.  Million-token runs
 require ``--run-long`` and are QCC-only unless a feasible Full-KV limit is
@@ -98,7 +98,7 @@ def main() -> None:
     )
     args = parser.parse_args()
     if not torch.cuda.is_available():
-        raise SystemExit("CUDA is unavailable. In Colab select Runtime > Change runtime type > T4 GPU.")
+        raise SystemExit("CUDA is unavailable: this audit requires a CUDA device.")
     try:
         import triton  # noqa: F401
     except ImportError as exc:

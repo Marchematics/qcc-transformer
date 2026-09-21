@@ -1,7 +1,7 @@
-"""Does the packaged API reproduce the benchmark harness on every record?
+"""Does the shipped API reproduce the benchmark harness on every record?
 
 Compares the stored harness run (``ruler_v6.json``, policy ``lex_obs`` at
-budget 4096) with a packaged-API run over the same RULER split, record by
+budget 4096) with a shipped-API run over the same RULER split, record by
 record.  Records are matched on their reference answers, which are unique
 needles/UUIDs, so no ordering assumption is needed.
 

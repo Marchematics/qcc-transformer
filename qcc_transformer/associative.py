@@ -285,8 +285,8 @@ class SetAssociativeLandmarkBank(nn.Module):
 
     def _set_logits(self, x: Tensor) -> Tensor:
         # Routing must be invariant to the norm difference between a query and
-        # its matching key.  The old raw dot product made the learned set
-        # assignment depend on activation scale, which is especially unstable
+        # its matching key.  A raw dot product makes the set assignment
+        # depend on activation scale, which is especially unstable
         # after RoPE and across model families.
         normalized_x = F.normalize(x.to(self._keys.dtype), dim=-1)
         normalized_codes = F.normalize(

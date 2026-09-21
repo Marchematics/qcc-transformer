@@ -924,11 +924,10 @@ class QCCArchive(nn.Module):
                 return output
             return result
 
-        # Dense CUDA chunks use a two-launch fused update/read path.  The
-        # previous implementation issued one update and one read launch per
-        # event, which made chunked serving launch-bound even when the archive
-        # state itself was tiny.  Sparse/lazy archives retain their dedicated
-        # top-k path for now; CPU and unsupported devices use the block scan.
+        # Dense CUDA chunks use a two-launch fused update/read path: one
+        # update and one read launch per event is launch-bound even when the
+        # archive state itself is tiny.  Sparse/lazy archives retain their
+        # dedicated top-k path; CPU and unsupported devices use the block scan.
         if (
             self.use_triton
             and key.is_cuda

@@ -20,12 +20,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 from pathlib import Path
 
 import torch
 import torch.nn as nn
 from transformers import AutoModelForCausalLM, AutoTokenizer, DynamicCache, DynamicLayer, StaticCache
+
+DEFAULT_MODEL = os.environ.get("QCC_MODEL", "meta-llama/Llama-3.2-1B-Instruct")
 
 try:
     import benchmark_bounded_decode_frontier as L
@@ -38,9 +41,9 @@ BYTES_PER_TOKEN = 16 * 8 * 64 * 2 * 2  # Llama-3.2-1B geometry
 def timeit(fn, n, warmup=1, reps=5):
     """Return (min, mean) per-step seconds.
 
-    This box is shared with other tenants and a single sample can be inflated by
-    50% or more, so the *minimum* across reps is the least-contaminated estimate
-    of the true per-step cost; the mean is reported alongside it.
+    A shared GPU can inflate a single sample by 50% or more, so the *minimum*
+    across reps is the least-contaminated estimate of the true per-step cost;
+    the mean is reported alongside it.
     """
     for _ in range(warmup):
         fn(n)
@@ -218,7 +221,7 @@ class Runner:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--model", default="/root/qcc/models/Llama-3.2-1B-Instruct")
+    ap.add_argument("--model", default=DEFAULT_MODEL)
     ap.add_argument("--length", type=int, default=32768)
     ap.add_argument("--budget", type=int, default=1024)
     ap.add_argument("--obs", type=int, default=64)

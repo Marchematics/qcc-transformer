@@ -1,6 +1,6 @@
 """Combined, Full-KV-conditioned retention across several frontier runs.
 
-Merges any number of benchmark_bounded_decode_frontier.py result JSONs, bands
+Merges any number of ``benchmark_bounded_decode_frontier.py`` result JSONs, bands
 records by context length, and reports retention twice:
 
   raw        - mean answer recall over all records of the band
@@ -8,7 +8,11 @@ records by context length, and reports retention twice:
                answered, which is the quantity the "quality vs Full-KV" target
                actually refers to
 
-Usage: python analyze_combined.py aggregate_v2.json expand_v1.json
+Usage::
+
+    python benchmarks/analyze_bounded_decode_combined.py \
+        artifacts/bounded-decode-frontier-aggregate-v2.json \
+        artifacts/bounded-decode-frontier-expand-v1.json
 """
 
 from __future__ import annotations

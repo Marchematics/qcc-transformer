@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Prepare a DSW GPU workspace without downloading model weights implicitly.
+# Prepare a GPU workspace without downloading model weights implicitly.
 ROOT="${1:-$(pwd)}"
 cd "$ROOT"
 
@@ -22,9 +22,10 @@ PY
 echo '== Install editable package =='
 python -m pip install -e '.[hf]' --no-input
 
-mkdir -p artifacts/remote_gpu/dsw_runs
+mkdir -p artifacts/remote_gpu/runs
 echo '== Candidate checkpoints =='
-find /mnt/workspace /mnt/data /root/.cache/huggingface -maxdepth 5 \
+SEARCH_ROOTS="${SEARCH_ROOTS:-/mnt/workspace /mnt/data $HOME/.cache/huggingface}"
+find $SEARCH_ROOTS -maxdepth 5 \
   -type f \( -name config.json -o -name '*.safetensors' -o -name '*.bin' \) \
   2>/dev/null | sed -n '1,80p' || true
 

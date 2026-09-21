@@ -7,12 +7,12 @@ recomputable from them without a GPU: each file carries its own configuration
 prediction, the score, the retained slot count, timings and peak memory.
 
 Naming: `bounded-decode-frontier-<measurement>[-<variant>].json`. Files named
-`exact-prefill-*`, `cross-read-*` and `teacher-*` belong to earlier exploratory
-phases and are kept for the audit trail in the report's first sections.
+`exact-prefill-*`, `cross-read-*` and `teacher-*` come from the earlier archive
+experiments in `qcc_transformer/` and are kept for the audit trail.
 
 | file | backs |
 |---|---|
-| `bounded-decode-frontier-multimodel-llama1b.json` | RULER retention through the packaged API (README results table) |
+| `bounded-decode-frontier-multimodel-llama1b.json` | RULER retention through the shipped API (README results table) |
 | `bounded-decode-frontier-parity-80.json` | package vs benchmark harness on all 80 records |
 | `bounded-decode-frontier-multimodel-{llama3.1-8b,qwen2.5-3b,phi35}.json` | cross-family results |
 | `longbench-retention-llama32-1b.json` | LongBench, nine tasks, official metrics |

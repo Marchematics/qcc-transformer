@@ -5,8 +5,8 @@ RULER's `scripts/eval/synthetic/constants.py` defines
     string_match_all(preds, refs) = mean over records of
         (number of reference strings found in the prediction) / (number of references)
 
-i.e. partial recall per record, not all-or-nothing.  An earlier version of the
-harness required every reference string to be present, which understates any
+i.e. partial recall per record, not all-or-nothing.  The strict convention
+requires every reference string to be present, which understates any
 multi-reference task (only `vt` here).  This script recomputes both numbers from
 the saved predictions so the difference is visible.
 """

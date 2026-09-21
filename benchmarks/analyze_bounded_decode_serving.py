@@ -1,6 +1,10 @@
 """Compare batched-prefill and sequential-prefill serving results.
 
-Usage: python analyze_serving.py serving_32k_v2.json serving_seq_32k.json
+Usage::
+
+    python benchmarks/analyze_bounded_decode_serving.py \
+        artifacts/bounded-decode-frontier-serving-v2.json \
+        artifacts/bounded-decode-frontier-serving-seq-32k.json
 """
 import json, sys
 

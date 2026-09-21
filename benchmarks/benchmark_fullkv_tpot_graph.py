@@ -18,12 +18,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 from pathlib import Path
 
 import torch
 import torch.nn as nn
 from transformers import AutoModelForCausalLM, AutoTokenizer, DynamicCache, DynamicLayer, StaticCache
+
+DEFAULT_MODEL = os.environ.get("QCC_MODEL", "meta-llama/Llama-3.2-1B-Instruct")
 
 try:
     import benchmark_bounded_decode_frontier as L
@@ -44,7 +47,7 @@ def timeit(fn, n, warmup=1, reps=2):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--model", default="/root/qcc/models/Llama-3.2-1B-Instruct")
+    ap.add_argument("--model", default=DEFAULT_MODEL)
     ap.add_argument("--length", type=int, default=131072)
     ap.add_argument("--max-new", type=int, default=32)
     ap.add_argument("--prefill-chunk", type=int, default=8192)
@@ -122,7 +125,7 @@ def main():
         k = cache.layers[i].keys
         v = cache.layers[i].values
         sc.layers[i].update(k, v, i)          # no clone: the layer is filled in place
-        cache.layers[i].keys = None           # release the dynamic copy as we go
+        cache.layers[i].keys = None           # release the dynamic copy
         cache.layers[i].values = None
     del cache
     torch.cuda.empty_cache()

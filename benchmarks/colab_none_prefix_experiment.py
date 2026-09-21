@@ -1,21 +1,24 @@
-"""Colab CLI experiment for position-invariant prefix landmark retrieval.
+"""Position-invariant prefix landmark retrieval probe.
 
-The experiment intentionally uses the existing synthetic marker/value task only
-as a mechanism diagnostic.  It trains with no positional embedding, then tests
-the same checkpoint at 128K and million-token distances over every value ID.
-Run with ``colab run --gpu T4 --timeout 1800``; the script clones the commit
-under test so the remote result is reproducible.
+The probe uses the synthetic marker/value task only as a mechanism diagnostic.
+It trains with no positional embedding, then tests the same checkpoint at 128K
+and million-token distances over every value ID.  The script clones the
+repository into ``QCC_WORKDIR`` (default: ``qcc-none-prefix`` under the system
+temporary directory) and runs the training and evaluation entry points there,
+so the revision under test is the one that is measured.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
-ROOT = Path("/content/qcc-transformer")
+ROOT = Path(os.environ.get("QCC_WORKDIR", Path(tempfile.gettempdir()) / "qcc-none-prefix"))
 
 
 def run(cmd: list[str]) -> None:

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 from pathlib import Path
 
@@ -23,9 +24,11 @@ import torch
 import torch.nn as nn
 from transformers import AutoModelForCausalLM, AutoTokenizer, DynamicCache
 
+DEFAULT_MODEL = os.environ.get("QCC_MODEL", "meta-llama/Llama-3.2-1B-Instruct")
+
 try:  # repo layout
     import benchmark_bounded_decode_frontier as L
-except ImportError:  # authoring workspace layout
+except ImportError:  # flat fallback when benchmarks/ is not on sys.path
     import longctx as L
 
 TOK = None
@@ -156,7 +159,7 @@ def decode_batch(model, cache, next_id, Lc, max_new, eos_ids):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--model", default="/root/qcc/models/Llama-3.2-1B-Instruct")
+    ap.add_argument("--model", default=DEFAULT_MODEL)
     ap.add_argument("--length", type=int, default=32768)
     ap.add_argument("--batches", type=int, nargs="+", default=[1, 2, 4, 8])
     ap.add_argument("--policies", nargs="+", default=["full", "obs_last"])

@@ -6,17 +6,20 @@ drives them from real RULER records instead of the synthetic generator, and
 scores official answer recall (every expected output string must appear,
 case-insensitively) instead of a single magic number.
 
-Usage:
-    python ruler_frontier.py --ruler-jsonl /path/ruler_subset.jsonl \
+Usage::
+
+    python benchmarks/benchmark_bounded_decode_ruler.py \
+        --ruler-jsonl <split.jsonl> \
         --tasks niah_single_1 niah_multikey_2 niah_multikey_3 vt \
         --policies full obs_last obs_mean --budgets 128 256 512 1024 \
-        --out ruler_v1.json
+        --out artifacts/bounded-decode-frontier-ruler-v1.json
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -25,9 +28,11 @@ import torch
 import torch.nn as nn
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+DEFAULT_MODEL = os.environ.get("QCC_MODEL", "meta-llama/Llama-3.2-1B-Instruct")
+
 try:  # repo layout
     import benchmark_bounded_decode_frontier as L
-except ImportError:  # authoring workspace layout
+except ImportError:  # flat fallback when benchmarks/ is not on sys.path
     import longctx as L
 
 
@@ -155,7 +160,7 @@ def run_record(model, rec, args, eos_ids, row_id):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--model", default="/root/qcc/models/Llama-3.2-1B-Instruct")
+    ap.add_argument("--model", default=DEFAULT_MODEL)
     ap.add_argument("--ruler-jsonl", required=True)
     ap.add_argument("--tasks", nargs="+", default=None)
     ap.add_argument("--lengths", type=int, nargs="+", default=None)

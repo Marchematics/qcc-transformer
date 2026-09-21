@@ -4,7 +4,7 @@ The frontier harness prints one ``[record]`` line per prompt and one result line
 per (policy, budget).  Parsing the log yields the same fields the JSON would,
 so a killed sweep still contributes evidence.
 
-Usage: python parse_log.py expand_v1.log out.json
+Usage: python benchmarks/recover_bounded_decode_log.py <run.log> <out.json>
 """
 
 from __future__ import annotations

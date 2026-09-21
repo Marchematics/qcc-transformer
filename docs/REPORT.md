@@ -1,22 +1,21 @@
 # Bounded exact-KV decode with query-window selection
 
-Date: 2026-09-20. Workspace: `/root/qcc/experiments/retention_frontier`.
-Hardware: one NVIDIA A10G, 24 GiB. Model: `Llama-3.2-1B-Instruct`
-(16 layers, 8 KV heads, head dim 64, native `max_position_embeddings` 131072),
-bf16, frozen, no training.
+Date: 2026-09-20. Hardware: one NVIDIA A10G, 24 GiB. Model:
+`Llama-3.2-1B-Instruct` (16 layers, 8 KV heads, head dim 64, native
+`max_position_embeddings` 131072), bf16, frozen, no training.
 
 ## 1. Question
 
-The QCC repository has, across many sessions, failed to preserve long-range
-retrieval with a bounded historical state. Non-causal "quality-first" selection
-recovered answer recall; every causal bounded variant failed. That left one
-question open:
+Earlier bounded-history designs in this repository did not preserve long-range
+retrieval: non-causal "quality-first" selection recovered answer recall, while
+every causal bounded variant failed. That leaves one question:
 
 > Is a bounded exact-KV decode cache fundamentally unable to preserve NIAH
 > retrieval, or was the *selection law* wrong?
 
-This experiment answers it by measuring the quality frontier directly, with the
-selection law isolated from any archive/recurrence/mixing implementation.
+The measurement below answers it by measuring the quality frontier directly,
+with the selection law isolated from any archive/recurrence/mixing
+implementation.
 
 ## 2. Protocol
 
@@ -61,7 +60,8 @@ normalisation pass is needed.
 
 ### 3.1 Mechanism check (single record per length, 4 key/value pairs)
 
-`benchmark_selection_frontier.py`, `sweep_v1.json`:
+`benchmarks/benchmark_selection_frontier.py`,
+`artifacts/bounded-decode-frontier-sweep-v1.json`:
 
 | Length | Full-KV | obs_last | obs_mean | obs_max | h2o | keynorm | recent | random | oracle_needle |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -78,16 +78,17 @@ the surrounding context, not just the fact itself.
 
 ### 3.2 Aggregate (60 records, 2 key/value pairs, chunked exact prefill)
 
-Two runs of `benchmark_bounded_decode_frontier.py` with disjoint seeds:
-`aggregate_v2.json` (seeds 101-106, budgets 128/256/512/1024) and
-`expand_v1.json` (seeds 110-123, budgets 128/256/512), 20 records per length
-band. Full-KV is correct on **58/60** records (32K 20/20, 64K 20/20,
-128K 18/20), so 128K is at the edge of this 1B checkpoint's ability and the two
-records it misses are excluded from the retention denominators.
+Two runs of `benchmarks/benchmark_bounded_decode_frontier.py` with disjoint
+seeds: `artifacts/bounded-decode-frontier-aggregate-v2.json` (seeds 101-106,
+budgets 128/256/512/1024) and `artifacts/bounded-decode-frontier-expand-v1.json`
+(seeds 110-123, budgets 128/256/512), 20 records per length band. Full-KV is
+correct on **58/60** records (32K 20/20, 64K 20/20, 128K 18/20), so 128K is at
+the edge of this 1B checkpoint's ability and the two records it misses are
+excluded from the retention denominators.
 
 Retention = mean answer recall over the records the matched Full-KV run
-answered (`analyze_combined.py`). Budgets are slots per (layer, kv-head);
-B=128 is a 4 MiB decode cache at every context length.
+answered (`benchmarks/analyze_bounded_decode_combined.py`). Budgets are slots
+per (layer, kv-head); B=128 is a 4 MiB decode cache at every context length.
 
 | policy | B | raw recall | retention | records |
 |---|---:|---:|---:|---:|
@@ -115,8 +116,8 @@ Per band, `obs_last`:
 
 The first six-record sample gave 18/18 for `obs_last` at B=1024 and 16/18 at
 B=128; the 60-record replication puts B=128 and B=256 at 89.7% and B=512 at
-93.1%. The larger sample is the honest number, and **89.7-93.1% is below the
-99% aggregate target**: four to six of sixty records lose the answer with a
+93.1%. The larger sample is the number reported here, and **89.7-93.1% is below
+the 99% aggregate target**: four to six of sixty records lose the answer with a
 small bounded cache even though Full-KV keeps it.
 
 The diagnostic in each row (`selection.answer_token_keep_fraction`) shows why:
@@ -140,7 +141,8 @@ path, so the only difference is the retention law.
 * `oracle_needle` (keep the needle tokens, sinks and a recent window, but not the
   attention-selected context): correct at 32K, **wrong at 64K**. Keeping the fact
   is not sufficient; the question-relevant slice of surrounding context matters.
-* Borda rank fusion of `obs_last` and `obs_mean` (`obs_union`, `union_v1.json`):
+* Borda rank fusion of `obs_last` and `obs_mean` (`obs_union`,
+  `artifacts/bounded-decode-frontier-union-v1.json`):
   14/18 at B=128 and B=256, 16/18 at B=512 — *worse* than `obs_last` alone. Fusing
   a strong ranking with a weaker one dilutes it; the plain final-query ranking is
   the better estimator here.
@@ -165,7 +167,7 @@ growth of the retained decode cache is exactly `1.00x`.
 
 Derived from the same `aggregate_v2.json` records: `decode_s / generated` for the
 matched Full-KV run and for bounded runs on identical prompts
-(`analyze_decode_tpot.py`).
+(`benchmarks/analyze_bounded_decode_tpot.py`).
 
 | Length | Full-KV TPOT | bounded TPOT (B=128) | TPOT speedup | decode-state reduction |
 |---:|---:|---:|---:|---:|
@@ -191,7 +193,7 @@ SLA, and the harness synchronises once per decode loop rather than per step.
 ### 3.6 Official RULER JSONL (80 records, 4 tasks, 8K-64K nominal)
 
 The same prefill/selection/decode path, driven from real RULER records
-(`benchmark_bounded_decode_ruler.py`).
+(`benchmarks/benchmark_bounded_decode_ruler.py`).
 
 > **Note on scoring.** The numbers in this section were produced with an
 > all-or-nothing rule that is *stricter than RULER's own metric*. RULER uses
@@ -216,7 +218,7 @@ Matched Full-KV (greedy, 32 new tokens) answers:
 The 1B checkpoint itself cannot do most UUID multi-key and variable-tracking
 records, so retention is reported on the 51 records Full-KV answers.
 
-`obs_last` with sliding-window dilation (`ruler_v2.json`):
+`obs_last` with sliding-window dilation (`artifacts/bounded-decode-frontier-ruler-v2.json`):
 
 | budget | retention | niah_single_1 | niah_multikey_2 | niah_multikey_3 | vt |
 |---|---:|---:|---:|---:|---:|
@@ -225,8 +227,9 @@ records, so retention is reported on the 51 records Full-KV answers.
 | 2048 | 0.667 | **1.000** | 0.737 | 0.000 | 0.000 |
 
 Without dilation the same policy reached only 0.111-0.444 on the first ten
-records (`ruler_v1_partial10.json`), because the answer number's tokens were
-split across a non-overlapping pooling block boundary and only part of the
+records (`artifacts/bounded-decode-frontier-ruler-v1-partial.json`), because
+the answer number's tokens were split across a non-overlapping pooling block
+boundary and only part of the
 value survived (`recall=0`, prediction `'109.'`). Dilation fixed that failure
 mode but did not close the gap on UUID multi-key or variable tracking.
 
@@ -244,8 +247,8 @@ then by score up to `budget + 128` slots — takes official-RULER retention from
 | `lex_obs` | 2048 | **0.941** | **1.000** | **1.000** | **1.000** | 0.000 |
 
 **Variable tracking, precisely.** The residual gap is *not* the selection law,
-and four separate experiments now show that (`vt_probe.json`, `vt_probe2.json`,
-`vt_probe3.json`):
+and four separate experiments show that
+(`artifacts/bounded-decode-frontier-vt-probe{,2,3}.json`):
 
 1. **Selection is solved.** With assignment-chain following the lexical
    selection contains the complete answer set for **20/20 vt records**
@@ -280,9 +283,9 @@ on matched lines) was tested and **rejected**: it grows the anchor set to the ca
 and drops multikey_2 to 1/4 and multikey_3 to 0/4, because filler words on the
 matched lines match everywhere else.
 
-Three selection bugs were found and fixed while cross-checking batched recall,
-each of which had been silently degrading results: `lex_obs` originally
-broadcast head 0's ranking to every head; the frontier harness scored `lex_obs`
+Three selection defects were found while cross-checking batched recall, each
+of which had silently degraded results: `lex_obs` broadcast head 0's ranking to
+every head; the frontier harness scored `lex_obs`
 as `obs_max` through a fall-through in the mode dispatch; and a single 2-D
 attention mask cannot describe per-layer-varying retained widths, so batched
 decode attended a mixture of valid and padded slots.
@@ -301,15 +304,15 @@ parity check: it has to generate exactly the ids the dynamic path generates.
 | **bounded B=1024, StaticCache + CUDA graph** | **6.86 ms** | **6.87 ms** |
 | parity (graph/static vs dynamic tokens) | **OK** | **OK** |
 
-**Correction.** An earlier revision of this document withdrew the static-cache
-and CUDA-graph numbers because they failed the parity check. That was wrong: the
-*failure was in the check's own reference*. The dynamic reference cache was
+**Note on the parity check.** The static-cache and CUDA-graph numbers were
+initially withdrawn because they failed the parity check, but the *failure was
+in the check's own reference*. The dynamic reference cache was
 built with `DynamicLayer()` objects whose `is_initialized` flag was left False,
 so `get_seq_length()` returned 0 and HF overwrote the retained keys on the first
 update; the reference generated degenerate text (`'Tags\n }\n return'`) and any
 correct implementation "mismatched" against it. With the flag set, both the
 static and the graph paths reproduce the dynamic tokens exactly, and the
-timings stand. The corrected record is kept here rather than silently dropped.
+timings stand. The corrected record is kept here rather than dropped.
 
 What the corrected numbers mean:
 
@@ -334,9 +337,10 @@ What the corrected numbers mean:
 Two harnesses, same prompt set and same decode, differing only in *when* the
 full prefill KV exists.
 
-**(a) All requests prefilled together** (`benchmark_bounded_decode_serving.py`,
-`serving_32k_v2.json`). Peak memory is `batch x full KV` during prefill, so the
-retained cache only helps decode:
+**(a) All requests prefilled together**
+(`benchmarks/benchmark_bounded_decode_serving.py`,
+`artifacts/bounded-decode-frontier-serving-v2.json`). Peak memory is
+`batch x full KV` during prefill, so the retained cache only helps decode:
 
 | policy | batch 1 | batch 2 | batch 4 | batch >= 8 |
 |---|---:|---:|---:|---:|
@@ -347,7 +351,8 @@ Concurrency is **1.0x**: both OOM at batch 8. This is a statement about prefill
 state, not about the retention law.
 
 **(b) One request prefilled at a time, bounded caches resident, decode batched**
-(`benchmark_bounded_decode_serving_sequential.py`, `serving_seq_32k.json`) — the
+(`benchmarks/benchmark_bounded_decode_serving_sequential.py`,
+`artifacts/bounded-decode-frontier-serving-seq-32k.json`) — the
 continuous-batching pattern the bounded state actually enables. Peak is
 `one prefill transient + batch x bounded cache`:
 
@@ -381,8 +386,10 @@ continuous-batching pattern the bounded state actually enables. Peak is
 
 ### 3.9 Serving at 128K
 
-`benchmark_bounded_decode_serving_sequential.py` (`serving_seq_128k.json`) and
-the matched batched-prefill control (`serving_128k_matched.json`).
+`benchmarks/benchmark_bounded_decode_serving_sequential.py`
+(`artifacts/bounded-decode-frontier-serving-seq-128k.json`) and the matched
+batched-prefill control
+(`artifacts/bounded-decode-frontier-serving-128k-matched.json`).
 
 | configuration | batch 1 | batch 2 | batch 4 | batch 8 |
 |---|---:|---:|---:|---:|
@@ -407,8 +414,8 @@ concurrency.
 
 ### 3.10 Language modelling under bounded retention
 
-Retrieval asks whether one fact survives. `benchmark_bounded_decode_lm_nll.py`
-asks the broader question: with an exact prefill and a bounded decode cache, how
+Retrieval asks whether one fact survives.
+`benchmarks/benchmark_bounded_decode_lm_nll.py` asks the broader question: with an exact prefill and a bounded decode cache, how
 much does the next-token distribution degrade on ordinary long text? A 32,768
 token document is assembled from local sources, prefilled exactly, and its last
 256 tokens are scored by teacher forcing under each cache. There is no question
@@ -416,7 +423,7 @@ to anchor on, so the observation window is simply the last 64 prefix tokens (the
 SnapKV setting) and no lexical anchors are used.
 
 Budget curve on one **pinned** document (Full-KV NLL 1.34745, ppl 3.848 —
-`lm_nll_pinned_b*.json`):
+`artifacts/lm_nll_pinned_b*.json`):
 
 | cache | kept slots | share | perplexity | ratio |
 |---|---:|---:|---:|---:|
@@ -427,8 +434,9 @@ Budget curve on one **pinned** document (Full-KV NLL 1.34745, ppl 3.848 —
 | `obs_last` | 8,192 | 25.2% | 4.295 | 1.12x |
 | `obs_last` | 16,384 | 50.4% | 4.175 | 1.09x |
 
-Policy comparison at B=1024 on an earlier, more heterogeneous document
-(`lm_nll_32k.json`, which also includes `/usr/lib/python3.12/*.py`):
+Policy comparison at B=1024 on a more heterogeneous document
+(`artifacts/bounded-decode-frontier-lm-nll-32k.json`, whose default corpus also
+includes the interpreter's own standard library):
 
 | policy | perplexity | ratio |
 |---|---:|---:|
@@ -440,12 +448,12 @@ Policy comparison at B=1024 on an earlier, more heterogeneous document
 
 Conclusions:
 
-* Language modelling degrades **much less than the first measurement
-  suggested**: on a homogeneous 32K corpus, 3% of the context costs 22%
-  perplexity and 6% costs 9%, with no further gain above that. The 1.75x figure
-  came from a heterogeneous corpus whose long-range statistics a 3% cache really
-  does destroy. The degradation is document-dependent and both numbers are
-  reported rather than the flattering one alone.
+* Language modelling degrades **less than the 1.75x figure alone suggests**:
+  on a homogeneous 32K corpus, 3% of the context costs 22% perplexity and 6%
+  costs 9%, with no further gain above that. The 1.75x figure came from a
+  heterogeneous corpus whose long-range statistics a 3% cache really does
+  destroy. The degradation is document-dependent, and both numbers are
+  reported.
 * The curve is **not monotone** (1.12x at both 4096 and 8192, 1.09x at 2048 and
   16384): past the tokens the recent window already covers, top-k selection adds
   low-ranked context whose value is close to noise. More budget is not
@@ -457,8 +465,9 @@ Conclusions:
 
 ### 3.11 128K TPOT across configurations, and where 5x stands
 
-`lean_decode_128k_4bit.json`, `serving_128k_full_4bit.json`, plus the bf16 runs
-above. All rows are 128K context, batch 1, 32 greedy tokens, same prompt.
+`artifacts/bounded-decode-frontier-tpot-128k-4bit.json`,
+`artifacts/bounded-decode-frontier-serving-128k-full-4bit.json`, plus the bf16
+runs above. All rows are 128K context, batch 1, 32 greedy tokens, same prompt.
 
 | configuration | Full-KV TPOT | bounded TPOT | ratio |
 |---|---:|---:|---:|
@@ -467,7 +476,7 @@ above. All rows are 128K context, batch 1, 32 greedy tokens, same prompt.
 | NF4 4-bit weights, both plain dynamic decode | 105.35 ms | 23.09 ms | **4.56x** |
 | NF4 4-bit, Full-KV dynamic vs bounded + graph | 105.35 ms | **4.98 ms** | 21.1x |
 
-Reading this honestly:
+Reading these rows:
 
 * The only pairing that is like-for-like in *both* cache policy and execution
   path is the first row: **1.73x**. The cache-attributable speedup at 128K is
@@ -513,32 +522,31 @@ an artefact of optimising only one side. Three repeats per length, one card,
 | 128K | bounded, dynamic cache | 3/3 | 16.7-16.8 ms |
 | 128K | Full-KV, either path | 0/3 (OOM) | - |
 
-Two readings, and they point in opposite directions from the earlier single-shot
-tables:
+Two readings, which differ from the single-shot tables:
 
 * **At 32K the matched-optimisation ratio is 4.9-5.0x** (53.7/11.0 and
   55.2/11.0), which is stronger than anything reported in 3.11 because both arms
   now pay the same framework overhead. This is the number a reviewer should
   compare against the 5x target.
-* **At 128K the baseline could not be run at all**, and the failure is now known
-  to be the baseline's own footprint rather than a co-tenant: `benchmark_fullkv_tpot_graph.py`
+* **At 128K the baseline could not be run at all**, and the failure is the
+  baseline's own footprint rather than concurrent load: `benchmark_fullkv_tpot_graph.py`
   at 131,072 tokens OOMs inside `DynamicCache.update` with **23.4 GiB held by its
   own process** on a free card (4 GiB of KV + 2.5 GiB of weights + 128K-position
   activations). So no 128K matched-optimisation ratio is claimed, and the
-  historical 4.21x - bounded+graph against Full-KV *dynamic* - is superseded on
+  earlier 4.21x - bounded+graph against Full-KV *dynamic* - is superseded on
   both sides: the bounded number it used (6.87 ms) is not reproducible, and the
-  baseline number it used (28.95 ms) came from a harness configuration that no
-  longer completes. The defensible 128K statement is the bounded arm alone:
-  **11.0 ms per token, p95 11.0 ms, flat from 32K to 128K**.
-* One qualification, added after a last attempt: the 128K baseline *can* be run
+  baseline number it used (28.95 ms) came from a harness configuration that does
+  not complete at this length. The defensible 128K statement is the bounded arm
+  alone: **11.0 ms per token, p95 11.0 ms, flat from 32K to 128K**.
+* One qualification: the 128K baseline *can* be run
   through the frontier harness with `--prefill-chunk 2048` (the smaller chunk is
   what makes it fit); it answered the record correctly at 127,501 tokens and
   decoded at **38.1 ms/token - but over only 5 tokens, because the model hit EOS
   there, while the bounded arm's 11.0 ms is a 32-token mean**. The two decode
   windows are not matched, so no 128K ratio is quoted from this pair; it does
   establish that the baseline is measurable at 128K with a smaller prefill chunk.
-  The step-matched rerun was then attempted inside the same harness that gives
-  both arms the same execution path (`benchmark_bounded_decode_tpot_floor.py`,
+  A step-matched rerun inside the same harness that gives both arms the same
+  execution path (`benchmark_bounded_decode_tpot_floor.py`,
   131,174 tokens, prefill chunk 2048, 32 steps, parity check passing): the bounded
   arm measured **16.55 ms** (dynamic cache) while the Full-KV arm OOMs in that
   harness as well, because it holds the original and the pruned cache plus static
@@ -547,18 +555,19 @@ tables:
   decode window the model truncates at 5 tokens, and no step-matched 128K ratio
   exists on this card.
 * The bounded+graph floor itself is stable at **11.0 ms** across lengths and
-  repeats. With four to eight parity-gated repeats per length (raw files
-  `experiments (not bundled; see benchmarks/benchmark_bounded_decode_tpot_floor.py) {clean,p95}-*.json`, summary
+  repeats. With four to eight parity-gated repeats per length (the per-repeat
+  files are not bundled; regenerate them with
+  `benchmarks/benchmark_bounded_decode_tpot_floor.py`; summary
   `artifacts/bounded-decode-frontier-tpot-p95.json`): bounded+graph **p50 11.01 ms,
   p95 11.03 ms, min 11.009, max 11.028** at 32K and **11.01 ms** at 128K, against
   Full-KV+graph **p50 55.0 ms, p95 55.2 ms** at 32K - a p95-to-p95 ratio of
   **5.0x**. The bounded arm's own spread is 0.02 ms; the baseline's is 1.5 ms.
-  Earlier single-shot runs reported 6.87 ms for the bounded+graph configuration;
-  that is not reproduced under repeated, parity-gated measurement and is
-  superseded.
+  Single-shot runs reported 6.87 ms for the bounded+graph configuration; that is
+  not reproduced under repeated, parity-gated measurement.
 
-Raw files: `experiments (not bundled; see benchmarks/benchmark_bounded_decode_tpot_floor.py) clean-tpot-*.json`,
-summarised in `artifacts/bounded-decode-frontier-tpot-percentiles.json`.
+The per-repeat files are not bundled; they are regenerated by
+`benchmarks/benchmark_bounded_decode_tpot_floor.py` and summarised in
+`artifacts/bounded-decode-frontier-tpot-percentiles.json`.
 
 ### 3.12 The quality/budget frontier: retention is task-family dependent
 
@@ -581,7 +590,7 @@ clearest statement of what this retention law is and is not:
   is 2/4, at 75% it is 3/4, and only at 100% (Full-KV) is it 4/4. For this class
   the bounded cache buys almost nothing.
 
-This is the honest form of the "aggregate quality >= 99%" claim: the aggregate
+This is the precise form of the "aggregate quality >= 99%" claim: the aggregate
 across the four RULER tasks is 0.941 at a 3% budget, and no single budget
 satisfies every task family at once. A deployment that needs both retrieval and
 list-answer quality should choose the budget per workload, or add a readout
@@ -605,8 +614,8 @@ three NIAH tasks have a single reference each, where the two definitions agree �
 but `vt` is exactly the task that was failing: a prediction listing 4 of the 5
 chained variables scores 0.8 officially and 0.0 strict.
 
-Re-scoring the *same* stored predictions (`analyze_ruler.py`,
-`rescore_ruler.py`; no new GPU work) gives:
+Re-scoring the *same* stored predictions (`benchmarks/analyze_bounded_decode_ruler.py`,
+`benchmarks/rescore_ruler_official.py`; no new GPU work) gives:
 
 | policy | budget | official retention | strict | worst task |
 |---|---:|---:|---:|---|
@@ -622,7 +631,8 @@ Full-KV scores, and on some UUID multi-key records the bounded cache scores
 higher than Full-KV.)
 
 The full 80-record suite re-run with the official metric and a 128-token
-generation budget applied to **both** arms (`ruler_v6.json`), retention budget
+generation budget applied to **both** arms
+(`artifacts/bounded-decode-frontier-ruler-v6.json`), retention budget
 4096 slots (+512 lexical anchors):
 
 | budget | aggregate | strict | single_1 | multikey_2 | multikey_3 | vt |
@@ -643,18 +653,19 @@ retrieval needs 3%:
 | 4096 | 13% | 0.985-1.000 |
 | 8192 | 25% | 1.000 |
 
-Scope: this is the 80-record RULER split with four tasks. LongBench and PG-19 are
-still unmeasured, so the target is met on the suite that was actually run, not on
-every suite the repository's handoff mentions. In state terms 4096 slots is
-151 MiB per request at this model's geometry — 27x smaller than the 4.00 GiB
+Scope: this is the 80-record RULER split with four tasks. The LongBench results
+are in 3.21 and PG-19 has not been run, so the target is met on the suites that
+were run. In state terms 4096 slots is 151 MiB per request at this model's
+geometry — 27x smaller than the 4.00 GiB
 Full-KV cache at 128K, but far from the 4 MiB that the 1024-slot retrieval
 configuration uses.
 
 ### 3.14 The configuration that meets quality, and what it costs
 
-The objective's metrics have to hold *simultaneously*, so the serving sweeps were
-re-run at the retention budget that meets the quality targets (4096 slots + 512
-lexical anchors, `serving_seq_*_q4096.json`).
+The quality and serving metrics have to hold *simultaneously*, so the serving
+sweeps were also run at the retention budget that meets the quality targets
+(4096 slots + 512 lexical anchors; committed rows:
+`artifacts/bounded-decode-frontier-serving-seq-32k-q4096.json`).
 
 | configuration | aggregate quality | worst task | decode state @128K | max batch | peak | throughput @32K |
 |---|---:|---:|---:|---:|---:|---:|
@@ -690,7 +701,8 @@ at 128K with per-request TPOT of 16 ms against 29 ms.
 * State grows from 4 MiB to 151 MiB per request at 128K - still 27x smaller than
   the 4.00 GiB Full-KV cache, but no longer a rounding error.
 
-Decode latency at the quality budget (`tpot_q4096_128k.json`, 128K, parity OK):
+Decode latency at the quality budget
+(`artifacts/bounded-decode-frontier-tpot-128k-q4096.json`, 128K, parity OK):
 15.84 ms/token with a CUDA graph against 28.95 ms for the matched Full-KV
 dynamic decode, i.e. **1.83x** rather than the 4.21x the 1024-slot cache
 achieves. The retained set is four times larger, so attention over it is no
@@ -698,9 +710,9 @@ longer negligible next to the weight read.
 
 ### 3.14b Measurement conditions for every latency number
 
-This box is shared with other tenants, and that matters more than any tuning
-detail. The same bounded-graph configuration measured **6.87 ms** per token when
-the card was otherwise idle and **11.0-18.4 ms** while a co-tenant was running;
+The measurement GPU is shared, and that matters more than any tuning detail.
+The same bounded-graph configuration measured **6.87 ms** per token when the GPU
+was otherwise idle and **11.0-18.4 ms** under concurrent load;
 the matched Full-KV arm went from 28.95 ms to 94.2 ms and often fails outright
 with OOM at 128K. Contention penalises the Full-KV arm harder because its decode
 copies a 4 GiB cache every step, so a contended window *inflates* the speedup
@@ -708,27 +720,27 @@ ratio.
 
 Consequences, applied throughout this document:
 
-* Every latency claim names the window it came from. The headline **4.21x** is
+* Every latency claim names the window it came from. The **4.21x** figure is
   bounded-graph 6.87 ms (measured 23:04) against Full-KV dynamic 28.95 ms
   (measured 22:20-22:26), both inside the same quiet period; the bounded number
   was reproduced at 6.86-6.87 ms in three separate runs.
 * The quality budget (4096 slots) measured 11.02 ms in a less contended window
   and 13.4-17.7 ms in busier ones, i.e. **2.6x-1.6x** against the same 28.95 ms
   baseline. The spread is measurement noise, not a cache effect.
-* The TPOT-floor harness now reports the minimum of five repetitions rather than
-  a single sample, and its parity check still gates every number.
+* The TPOT-floor harness reports the minimum of five repetitions rather than a
+  single sample, and its parity check gates every number.
 * Because full-KV at 128K needs ~23 GiB while prefilling, it can only be measured
-  on an otherwise empty card - which is itself part of why the concurrency
+  on an otherwise empty GPU - which is itself part of why the concurrency
   comparison is lopsided.
 
-### 3.15 Cross-model check: blocked by the second checkpoint's remote code
+### 3.15 Cross-model check: the Phi-3.5 remote-code and eager-attention obstacles
 
-The quality result rests on one checkpoint (Llama-3.2-1B). Testing it on
-Phi-3.5-mini (3.8B, 128K native, the model this repository's earlier sessions
-used) was attempted and is **blocked**, not skipped:
+The harness path that produced the numbers above rests on one checkpoint
+(Llama-3.2-1B). Running it on Phi-3.5-mini (3.8B, 128K native, the checkpoint
+the earlier archive experiments used) runs into three obstacles:
 
 * Phi-3.5 ships `modeling_phi3.py` with a legacy cache API. `cache_position` is
-  not in its `forward` signature (handled: the harness now drops unsupported
+  not in its `forward` signature (handled: the harness drops unsupported
   kwargs), and `get_usable_length`/`from_legacy_cache` are missing from
   Transformers 5.x (handled: the repository's own `_ensure_remote_code_compat`
   shim).
@@ -742,19 +754,19 @@ used) was attempted and is **blocked**, not skipped:
   output on an 8K record was still degenerate (`'.7.\n.\n...'`), and its
   first-chunk logits were flat at ~-29 across digit tokens.
 
-So the cross-model claim is **not made**: the retention law is verified on
-Llama-3.2-1B only, and making Phi-3.5 work needs a Transformers version matched
-to its remote code (or a converted checkpoint), which is a separate piece of
-work.
+That harness therefore makes no cross-model claim: it verifies the law on
+Llama-3.2-1B only, and Phi-3.5 needs a Transformers version matched to its
+remote code, or a converted checkpoint. The shipped API path does complete on
+Phi-3.5-mini and Qwen2.5-3B; those runs are reported in 3.24.
 
-So the honest summary of the trade-off is: a 1024-slot cache maximises speed and
+In summary, the trade-off is: a 1024-slot cache maximises speed and
 state reduction and reaches 0.862 on the worst task; a 4096-slot cache meets both
 quality targets and keeps 8x concurrency and 5x throughput.
 
-### 3.16 The retention law is now part of the package, not just a benchmark
+### 3.16 The retention law in the package
 
-Everything above was measured with a standalone harness. The law now ships as
-`qcc_transformer/retention.py` with an HF entry point:
+Everything above was measured with a standalone harness; the same law ships as
+`qcc_transformer/retention.py` with a Hugging Face entry point:
 
 ```python
 from qcc_transformer import RetentionConfig, compile_bounded_cache
@@ -782,23 +794,22 @@ property is unchanged. Verification:
   Llama, covering uniform width, "keep everything reproduces the uncompiled
   prefill's tokens", forced sinks/recent, anchor recall of a repeated key,
   assignment-chain following, and (3.19) a ragged batch matching the per-row
-  compile slot for slot under both padding sides. They caught a real bug during
-  development: the packaged `last`-query scoring had a wrong einsum operand rank.
-* `validate_packaged.py` - four real RULER records at ~12K through the packaged
-  API: score 1.0 on all four, 4608 slots retained, 2.3-3.9 s per record,
-  6.2-7.3 GiB peak.
-* `validate_retention_batch.py` - a ragged two-record batch against the same
-  records compiled alone, reported in 3.19.
-* The repository's full test suite passes (the one pre-existing failure was a
-  test bug: it called `delattr` on an *inherited* attribute and asserted an
-  empty-cache return value that Transformers 5.x no longer provides; both are
-  fixed).
+  compile slot for slot under both padding sides. They also cover the defect
+  described in 3.20: the shipped `last`-query scoring had a wrong einsum operand
+  rank.
+* `benchmarks/validate_retention_api.py` - four real RULER records at ~12K
+  through the shipped API: score 1.0 on all four, 4608 slots retained, 2.3-3.9 s
+  per record, 6.2-7.3 GiB peak.
+* `benchmarks/validate_retention_batch.py` - a ragged two-record batch against
+  the same records compiled alone, reported in 3.19.
+* The full test suite passes.
 
 ### 3.17 The shipped API matches the benchmark it came from
 
-`benchmarks/validate_retention_full.py` runs records through the packaged
+`benchmarks/validate_retention_full.py` runs records through the shipped
 `compile_bounded_cache` and compares, record by record, with the benchmark
-harness's stored run at the same budget (`ruler_v6.json`, lex_obs at 4096):
+harness's stored run at the same budget
+(`artifacts/bounded-decode-frontier-ruler-v6.json`, lex_obs at 4096):
 
 | task | records compared | identical scores | differences |
 |---|---:|---:|---|
@@ -845,7 +856,7 @@ claim is a number anyone can recompute rather than a chosen figure.
 
 ### 3.19 Ragged batches: padding is removed before selection, and the filler is exact
 
-Serving rarely hands over equal-length prompts, so the packaged API accepts a
+Serving rarely hands over equal-length prompts, so the shipped API accepts a
 padded batch:
 
 ```python
@@ -890,7 +901,7 @@ same records compiled and decoded alone:
   shipped one, and a row sliced out of the merged cache decodes to exactly the
   solo tokens in all four cases.  The merged cache is therefore a faithful
   single-row cache, and batching does not change what is retained.
-* The one divergence is honest and bounded: in the shipped configuration the
+* The one divergence is bounded and explained: in the shipped configuration the
   two-row batch differs from solo decode at step 23 of 24, at a step whose top-2
   margin is **0.0** - a perfect tie broken differently because a batched bf16
   GEMM is not bit-identical to a single-row one (max per-step logit delta
@@ -903,11 +914,11 @@ same records compiled and decoded alone:
 
 ### 3.20 The shipped API reproduces the harness on all eighty records
 
-Section 3.17 compared twenty records and reported 19 identical. Extending that to
-the whole split first exposed a real defect, and fixing it closed the gap
+Section 3.17 compares twenty records and reports 19 identical. Extending the
+comparison to the whole split exposed a real defect; fixing it closed the gap
 completely.
 
-**What was wrong.** The packaged scorer ranked keys by
+**The defect.** The shipped scorer ranked keys by
 
 ```python
 final_query = query[:, -1:, :].reshape(kv_heads, group, head_dim)   # (kv, group, 1, d)
@@ -925,9 +936,9 @@ The two are algebraically identical, so this looked like a cosmetic difference.
 It is not: the operands have different shapes, cuBLAS picks different kernels,
 the logits round differently, and the top-k that follows is decided by margins
 that are frequently smaller than that rounding. On a 31,389-token vt record the
-two formulations selected *different slot sets*, and the packaged run lost three
+two formulations selected *different slot sets*, and the shipped run lost three
 of five tracked variables that the harness recovered. Across the 80 records the
-packaged run came out at 0.9253 aggregate retention against the harness's 1.000
+shipped run came out at 0.9253 aggregate retention against the harness's 1.000
 - a "reproduction" that reproduced nothing exactly.
 
 **The check that settles it.** `benchmarks/diff_selection.py`
@@ -943,8 +954,7 @@ each stage separately:
 | selected slot sets | differ | **identical** (both anchor sets) |
 
 **Result after the fix.** The full 80-record run through
-`compile_bounded_cache` (the shipped entry point, not the harness) against the
-stored harness run at the same budget:
+`compile_bounded_cache` against the stored harness run at the same budget:
 
 | task | records | predictions byte-identical | partial recall: package / harness | retention (package, matched Full-KV) |
 |---|---:|---:|---|---:|
@@ -955,19 +965,18 @@ stored harness run at the same budget:
 | **all** | **80** | **75** | **0.765 / 0.765** | **1.0071 aggregate, 1.000 worst task** |
 
 The five non-identical predictions differ only in text generated *after* the
-answer (all 80 agree on the official partial and strict metric). The packaged
+answer (all 80 agree on the official partial and strict metric). The shipped
 run's own matched-Full-KV retention is 1.0071 aggregate with a 1.000 worst task,
 so the headline quality result is produced by the shipped code path and not only
-by the benchmark harness. The retrospective lesson is worth stating plainly: on
-this workload an "equivalent" rewrite of a scoring kernel is a behavioural
-change, and the only way to know is to compare the *selected sets*, not the
-scores.
+by the benchmark harness. The lesson is worth stating plainly: on this workload an
+"equivalent" rewrite of a scoring kernel is a behavioural change, and the only
+way to detect it is to compare the *selected sets*, not the scores.
 
 ### 3.21 Non-RULER evidence: LongBench, and what the lexical anchors are actually for
 
 RULER is synthetic, so its retention number cannot carry a generality claim on
 its own. `benchmarks/benchmark_retention_longbench.py` runs the same law - same
-configuration, same packaged entry point, same greedy decode loop - over nine
+configuration, same shipped entry point, same greedy decode loop - over nine
 official LongBench tasks with their own metrics (token F1, ROUGE-L, retrieval
 accuracy), 20 records each, against a matched Full-KV arm on the same prompts.
 These are real documents: novels, papers, government reports, news, dialogue.
@@ -997,7 +1006,7 @@ does, and every row records whether it was truncated.
   multi_news 0.993) are at parity.
 * No task here contains synthetic needles, and none of them is a multi-key
   disambiguation puzzle, which is the situation the lexical anchors exist for.
-  The next measurement isolates that: attention ranking alone, at the same
+  The baseline sweep isolates that: attention ranking alone, at the same
   retained width, over the RULER split.
 
 **Baselines at the same budget.** One prefill per record, then seven selection
@@ -1025,8 +1034,8 @@ factor, and it is the only one that matches Full-KV on the two hardest tasks.
 
 | configuration (Llama-3.2-1B, 80 records) | single_1 | multikey_2 | multikey_3 | vt | aggregate | worst task |
 |---|---:|---:|---:|---:|---:|---:|
-| attention ranking, last query (`lex_cap=0`, packaged) | 1.000 | 0.895 | 0.333 | 1.039 | **0.817** | 0.333 |
-| attention ranking, window mean (`lex_cap=0`, packaged) | 1.000 | 0.870 | 0.667 | 1.022 | **0.870** | 0.667 |
+| attention ranking, last query (`lex_cap=0`, shipped API) | 1.000 | 0.895 | 0.333 | 1.039 | **0.817** | 0.333 |
+| attention ranking, window mean (`lex_cap=0`, shipped API) | 1.000 | 0.870 | 0.667 | 1.022 | **0.870** | 0.667 |
 | best ranking variant as a harness baseline (`obs_mean`, 4,096 slots) | 1.000 | 0.800 | 0.200 | 0.640 | **0.880** | 0.000 |
 | + task-agnostic rarity anchors (`anchor_mode="rare"`) | 1.000 | 0.895 | **0.889** | 0.968 | **0.938** | 0.889 |
 | + pattern anchors, **no chain following** (`hops=0`) | 1.000 | 1.000 | 1.000 | 1.026 | **1.0065** | **1.000** |
@@ -1043,7 +1052,8 @@ following contributes nothing measurable on this split**: pattern anchors with
 that the selection code carries is harmless rather than load-bearing, and the
 default could drop it. The **pattern classes themselves do matter**: replacing
 them with the general rarity cue costs 0.056 aggregate and takes the worst task
-from 1.000 to 0.889 - which is the honest position, since the rarity mode is the
+from 1.000 to 0.889 - which is the defensible reading, since the rarity mode is
+the
 one that generalises off RULER and the pattern mode is the one that closes the
 multiple-choice-style tasks. The anchored row matters most for generality. `anchor_mode="rare"` removes every
 task-shaped element: no UUID, hyphenated-identifier or long-number patterns, no
@@ -1053,7 +1063,7 @@ at most `max_occurrences` times. That alone lifts the hardest task from 0.333 to
 question's rare strings already appear) is what generalises, while the pattern
 classes and chain following are a +0.07 refinement on top of it.
 
-So the honest decomposition is: the observation-window ranking is what makes the
+The decomposition is therefore: the observation-window ranking is what makes the
 law work at all - it is already exact on single-needle retrieval and on value
 tracking, and it is what transfers to LongBench - while the anchors are what
 close **multi-key disambiguation**, the task where dozens of near-identical
@@ -1079,8 +1089,8 @@ increasing lengths with one fixed configuration (Llama-3.2-1B, `budget=4096`,
 
 **State growth from 8K to 256K is exactly 1.00x** - thirty-two times the
 context, the same 4,608 slots and the same 144 MiB - while the Full-KV cache
-grows 32x, to 8 GiB. The 512K row is a genuine hardware wall rather than a
-co-tenant artefact this time: an exact prefill at that length needs about 19 GiB
+grows 32x, to 8 GiB. The 512K row is a hardware wall rather than a
+contention artefact: an exact prefill at that length needs about 19 GiB
 of KV plus activations on a 24 GiB card, which is the same wall that stops 1M
 (32 GiB of KV) - and it is the *prefill*, not the decode state, that hits it.
 
@@ -1147,7 +1157,7 @@ Three things follow, and one caveat.
 * **In this range int8 KV is free**: identical recall at half the bytes, on both
   the Full-KV and the bounded arm. Any comparison that gives the bounded cache
   bf16 bytes against a quantized baseline is therefore being generous to the
-  baseline's memory, not to us.
+  baseline's memory, not to the bounded arm.
 * **int4 KV is not free at this granularity**: recall falls from 0.81 to 0.41,
   far below what the bounded arm keeps at comparable bytes.
 * **Eviction wins at matched bytes here, and the two compose**: 144 MiB of
@@ -1164,7 +1174,7 @@ Three things follow, and one caveat.
 
 The law is not tuned per model. `benchmarks/benchmark_retention_multimodel.py`
 runs one configuration (`budget=4096`, `lex_cap=512`, `chain_hops=6`,
-`observation_window=64`, sinks 4, dilate 9, pool 7) through the packaged entry
+`observation_window=64`, sinks 4, dilate 9, pool 7) through the shipped entry
 point on the same RULER records, with a matched Full-KV arm in the same process.
 Retention is the bounded/full ratio over records Full-KV answers.
 
@@ -1175,7 +1185,7 @@ Retention is the bounded/full ratio over records Full-KV answers.
 | Qwen2.5-3B-Instruct | GQA 16:2, 36L | 32K native | 57/60 | 1.000 | 1.000 | 0.917 | 0.983 | **0.975** | 0.917 | 4,608 | 162 MiB |
 | Phi-3.5-mini-instruct | MHA 32:32, 32L, LongRoPE | 128K native | 39/40 | 1.000 | 1.000 | 0.889 | 1.000 | **0.972** | 0.889 | 4,608 | 1,728 MiB |
 
-* **Three families, one configuration, no per-model tuning**, and the packaged
+* **Three families, one configuration, no per-model tuning**, and the shipped
   API is the only code path involved. Two of the three are different
   architectures, not different sizes of the same one: Qwen uses a 2-head GQA
   projection with a 128-wide head, Phi a 32-head MHA with a 96-wide head and
@@ -1194,9 +1204,9 @@ Retention is the bounded/full ratio over records Full-KV answers.
   costs are an architectural property, and both are reported here rather than
   assumed.
 
-**Can the cross-family gap be closed by tuning the anchors?** `niah_multikey_3`
-on Qwen2.5-3B was re-run three ways (20 records, 12-15 of them matched by the
-Full-KV arm):
+**Can the cross-family gap be closed by tuning the anchors?**
+`niah_multikey_3` on Qwen2.5-3B was run three ways (20 records, 12-15 of them
+matched by the Full-KV arm):
 
 | anchor configuration | retained slots | state | bounded | Full-KV | retention |
 |---|---:|---:|---:|---:|---:|
@@ -1214,8 +1224,8 @@ attention. This is why the tables above carry absolute scores next to the ratios
 
 ### 3.25 The worst task is not a configuration problem
 
-Qwen2.5-3B's `niah_multikey_3` retention has now been measured under five
-selection configurations (20 records, 12-15 matched by the Full-KV arm, all at
+Qwen2.5-3B's `niah_multikey_3` retention has been measured under five selection
+configurations (20 records, 12-15 matched by the Full-KV arm, all at
 4,608-5,120 retained slots):
 
 | configuration | bounded | Full-KV | retention |
@@ -1229,9 +1239,8 @@ selection configurations (20 records, 12-15 matched by the Full-KV arm, all at
 The ratio is identical across every variant, and the absolute score moves by one
 record at most; Phi-3.5-mini's `niah_multikey_3` under the window-mean variant is
 likewise unchanged at 0.889. **The cross-family gap on this task is therefore not
-an anchor budget, an anchor alphabet or a scoring-window problem.** Two honest
-caveats remain attached: on a task where the models themselves sit near their
-floor (Full-KV answers 0.80 for Qwen, 0.90 for Phi) the ratio is computed over
+an anchor budget, an anchor alphabet or a scoring-window problem.** Two caveats
+apply: on a task where the models themselves sit near their floor (Full-KV answers 0.80 for Qwen, 0.90 for Phi) the ratio is computed over
 12-15 records and a bf16 run can flip one, which is exactly why the tables here
 carry absolute scores beside the ratios.
 
@@ -1256,7 +1265,7 @@ parity.
 
 RULER's `niah_multikey_3` is scored by the fraction of three reference keys found
 in the answer, so a model that retrieves one of them should score 0.33. It does
-not: pooling every run of this task in the campaign, the per-record recall is
+not: pooling every run of this task across the stored artifacts, the per-record
 **either 0.0 or 1.0 and nothing in between**.
 
 | model | arm | records | zeros | ones | mean |
@@ -1270,7 +1279,7 @@ not: pooling every run of this task in the campaign, the per-record recall is
 | Phi-3.5-mini | full | 20 | 2 | 18 | 0.900 |
 | Phi-3.5-mini | bounded | 20 | 4 | 16 | 0.800 |
 
-Read against 3.25, this closes the question the cross-family table opened. The
+Read against 3.25, this answers the question the cross-family table opened. The
 whole difference between the bounded arm and Full-KV on this task is **4 records
 on Llama-1B, 0 on Llama-3.1-8B, 3 on Qwen and 2 on Phi**, and on every one of
 them the answer collapses from complete to absent - the model either lists all
@@ -1279,8 +1288,8 @@ improving selection. Five selection configurations leave the ratio unchanged
 (3.25) because there is nothing for a better selection to recover; the 8B
 checkpoint, where the same configuration loses nothing at all, is the control.
 **And the collapse is not a token-budget truncation.** For every record whose
-recall is zero, the number of tokens the model actually generated tells us
-whether it ran out of budget (128) or stopped itself:
+recall is zero, the number of tokens the model actually generated shows whether
+it ran out of budget (128) or stopped itself:
 
 | model | arm | zero-recall records | generated at those records |
 |---|---|---:|---|
@@ -1297,7 +1306,7 @@ single 8B record reach the 128-token limit, and the 8B one is identical in both
 arms. So the shortfall is neither missing information in the cache (3.25), nor
 partially-retained answers (this section), nor a truncated generation: it is the
 checkpoint ending its own answer on a task where it is near chance, and no cache
-policy can recover it. That is the honest shape of the remaining cross-family
+policy can recover it. That is the shape of the remaining cross-family
 shortfall - and it is why the report's tables carry absolute scores next to every
 ratio.
 
@@ -1308,7 +1317,7 @@ Establishes (every number produced by the shipped `compile_bounded_cache`, see
 
 * A **causal**, **training-free**, **zero-new-parameter** retention law preserves
   the retrieval quality of exact Full-KV. On the official 80-record RULER split
-  through the packaged entry point: **aggregate retention 1.0071, worst task
+  through the shipped entry point: **aggregate retention 1.0071, worst task
   1.000** at 4,608 retained slots (144 MiB), with the harness run agreeing on all
   80 records (3.20).
 * It is **not a RULER artefact**. On nine official LongBench tasks (20 records
@@ -1331,40 +1340,43 @@ Establishes (every number produced by the shipped `compile_bounded_cache`, see
   aggregate (single_1 and vt at parity); a *task-agnostic* rarity cue lifts that
   to 0.938; the pattern anchors and chain following of the shipped configuration
   add the last 0.07 and the worst-task floor (3.21).
-* **Reproducibility is checked, not assumed.** The packaged API reproduces the
+* **Reproducibility is checked, not assumed.** The shipped API reproduces the
   benchmark harness on all eighty records, with bitwise-equal scores and
   identical selected slot sets; ragged batches compile per request and merge by
   exact slot duplication (3.19, 3.20).
-* The serving consequences measured earlier stand: at 32K, 8x fixed-SLA
-  concurrency (32 resident requests against Full-KV's 4), 15.6x decode
-  throughput in the speed configuration and 5.0x in the quality configuration,
-  and 4.21x single-stream TPOT at 128K against a baseline that cannot use the
-  same CUDA-graph optimisation on this card (3.7-3.11, 3.18).
+* The serving consequences hold: at 32K, 8x fixed-SLA concurrency (32 resident
+  requests against Full-KV's 4), 15.6x decode throughput in the speed
+  configuration and 5.0x in the quality configuration, and a parity-gated
+  4.9-5.0x single-stream TPOT ratio at 32K with both arms CUDA-graphed (3.7-3.11b,
+  3.18). At 128K the Full-KV arm cannot use the same optimisation on this
+  hardware class, so the bounded arm's own floor of 11.0 ms/token is the
+  defensible 128K number.
 
 Does not establish:
 
-* **1M retrieval (>= 99.5%) or 1M TPOT.** Blocked by hardware and checkpoints,
+* **1M retrieval (>= 99.5%) or 1M TPOT.** Limited by hardware and checkpoints,
   not by the method: a 1M bf16 Full-KV cache for this model is 32 GiB against
   24 GiB of HBM, so the baseline cannot be run at 1M either, and no 1M-native
-  checkpoint is available here. The state-growth claim is closed-form plus
-  measured to 128K; the 256K/512K rows are recorded as OOM from a co-tenant.
+  checkpoint was available for this measurement. The state-growth claim is
+  closed-form plus measured to 256K; the 512K row is recorded as OOM because an
+  exact prefill at that length needs about 19 GiB of KV plus activations.
 * **128K TPOT >= 5x.** The matched, repeated, parity-gated comparison reaches
   **5.0x at 32K** (3.11b). At 128K there is no matched baseline to divide by: the
-  Full-KV arm cannot be measured on this card at that length, on its own
+  Full-KV arm cannot be measured on a 24 GiB card at that length, on its own
   footprint, with any of the execution paths tried.
-* **Latency percentiles or a clean systems table.** The card is shared: the same
-  configuration measured between 6.87 and 18.4 ms depending on co-tenants, so
-  every latency number here names its measurement window, and percentiles need
-  exclusive hardware.
-* **Cross-model generality beyond Llama-3.2-1B-Instruct** (the Phi-3.5,
-  Qwen2.5-3B and Llama-3.1-8B runs are in flight; until they land, the
-  architecture adapter and the LongRoPE chunking fix are the only cross-family
-  evidence).
+* **Latency percentiles or a clean systems table.** The measurement GPU is
+  shared: the same configuration measured between 6.87 and 18.4 ms depending on
+  concurrent load, so every latency number here names its measurement window,
+  and p95-style percentiles require an idle GPU.
+* **Cross-model generality beyond the four measured checkpoints.** Four
+  checkpoints across three families are measured at one configuration (3.24),
+  and the residual shortfall on `niah_multikey_3` is characterised but not
+  closed (3.25-3.26); models outside those families are unmeasured.
 * **Bounded prefill transient memory.** Retained decode state is bounded; the
   chunked prefill of one long prompt still holds that prompt's exact KV until
   the compile step, which is `O(L)` for one request.
 * **That this int4 configuration is the best int4.** The key axis used a single
-  scale per (layer, kv-head); finer granularity was not tried.
+  scale per (layer, kv-head); finer granularity was not measured.
 * **That language-modelling perplexity is preserved.** Bounded retention costs
   NLL relative to Full-KV (3.10): the retrieved facts survive, the full
   distribution does not.
@@ -1389,7 +1401,7 @@ approximation. All QCC archive/recurrence/gate machinery can be bypassed:
 4. No new parameters, no calibration, no fine-tuning; the pretrained checkpoint
    is untouched.
 
-Against the objective's metric table this design directly addresses
+Against the project's metric targets this design directly addresses
 `trainable params <= 0.5%` (it is exactly 0), `retrofit` (frozen pretrained LM),
 `historical state O(1)` and `128K -> 1M growth <= 1.25x` (the retained decode
 cache is bit-identical in size at every context length). It does **not** by
@@ -1406,22 +1418,26 @@ holds the full KV transiently. Two candidate directions:
 * keep exact K/V in host memory (or a compressed bf16/fp8 tier) during prefill
   and only materialise the bounded GPU cache afterwards.
 
-## 6. Next steps
+## 6. Open questions
 
-1. Implement the retention law inside `qcc_transformer` as a cache policy with
-   an HF-retrofit entry point; verify against this harness on the same records.
-2. Move from synthetic NIAH to the official RULER JSONL split
-   (`/home/waas/ruler_a10_v1/ruler_subset.jsonl`), then LongBench and PG-19, and
-   report aggregate and worst-task retention rather than retrieval only.
-3. Measure serving behaviour: decode TPOT and throughput at 128K and 1M,
-   fixed-SLA concurrency, and peak memory with the bounded cache.
-4. Resolve the prefill-state question above.
+* **Prefill state.** An exact prefill still holds the full KV transiently; a
+  bounded or host-resident prefill that produces the same selected slot sets is
+  not established (5).
+* **1M scale.** A 1M bf16 Full-KV cache for this model is 32 GiB against 24 GiB
+  of HBM, so the exact-prefill baseline cannot be measured at that length on the
+  hardware used here.
+* **128K TPOT ratio.** No step-matched baseline exists at 128K on this hardware
+  class; the matched, parity-gated ratio is measured at 32K (3.11b).
+* **Mechanism predictions.** The failure cliff and the dependency-density axis in
+  `MECHANISM.md` are predictions, not measurements.
 
-## 7. What this does not claim
+## 7. Scope
 
-No official RULER/LongBench/PG-19 result, no 1M retrieval result on a
-1M-native checkpoint, no vLLM/TPOT/throughput/concurrency measurement, and no
-claim about the QCC package itself: this is a standalone diagnostic harness.
+This page reports the retention law as measured: official RULER and LongBench
+records, matched Full-KV baselines, decode-state accounting, and serving and
+latency measurements on one 24 GiB GPU. It makes no claim about the
+archive/recurrence modules in `qcc_transformer/` beyond the retention path, and
+reports no 1M result and no PG-19 result.
 
 ## 8. Reproduction
 
@@ -1475,8 +1491,9 @@ python benchmarks/summarize_bounded_decode.py \
   artifacts/bounded-decode-frontier-union-v1.json
 ```
 
-Model path defaults to `/root/qcc/models/Llama-3.2-1B-Instruct`; override with
-`--model`. The harness needs only `torch` and `transformers` (no accelerate,
-no triton, no vLLM). Each result JSON contains every per-record prediction,
-selection statistic and timing, so the tables are recomputable from the
-committed files.
+The model defaults to `$QCC_MODEL`, falling back to
+`meta-llama/Llama-3.2-1B-Instruct`, and the RULER split to `$QCC_RULER_JSONL`
+(or `--ruler-jsonl`); both are overridable per command. The harness needs only
+`torch` and `transformers` (no accelerate, no triton, no vLLM). Each result
+JSON contains every per-record prediction, selection statistic and timing, so
+the tables are recomputable from the committed files.

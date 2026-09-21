@@ -1,4 +1,4 @@
-"""CPU tests for the packaged retention law.
+"""CPU tests for the shipped retention law.
 
 These build a tiny randomly-initialised Llama so they run without a download or
 a GPU, and they assert the invariants the design depends on:

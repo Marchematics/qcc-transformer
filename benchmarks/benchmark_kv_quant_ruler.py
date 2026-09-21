@@ -37,7 +37,7 @@ own and peak memory is one cache at a time; a bigger ``--limit`` therefore costs
 retained width (``budget + lex_cap``, like ``RetentionConfig``); pass
 ``--lex-cap 0`` to compare with eviction budgets measured without anchors.
 
-``state_bytes`` is the *stored* decode state, which is the honest size of a
+``state_bytes`` is the *stored* decode state, which is the true size of a
 quantized cache.  This reference implementation has no fused int8/int4 attention
 kernel, so ``dequantize_cache`` materialises a dense cache in the model dtype
 before decoding: ``resident_bytes`` reports that footprint too, and decode
@@ -47,11 +47,11 @@ and bytes are comparable across arms; decode speed is not.
 Usage::
 
     python benchmarks/benchmark_kv_quant_ruler.py \
-        --model /root/qcc/models/Llama-3.2-1B-Instruct \
-        --ruler-jsonl /home/waas/ruler_a10_v1/ruler_subset.jsonl \
+        --model meta-llama/Llama-3.2-1B-Instruct \
+        --ruler-jsonl ruler_subset.jsonl \
         --tasks niah_single_1 niah_multikey_2 niah_multikey_3 vt \
         --limit 4 --budget 4096 --group-size 128 --max-new 64 \
-        --out experiments/kv_quant_ruler_llama32_1b.json
+        --out artifacts/bounded-decode-frontier-kv-quant.json
 """
 
 from __future__ import annotations
@@ -70,9 +70,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import kv_quant as KQ  # noqa: E402  (benchmarks/ is on sys.path above)
+import os
 from qcc_transformer.hf_loading import _ensure_remote_code_compat, load_hf_causal_lm  # noqa: E402
 from qcc_transformer.retention import (RetentionConfig, compile_bounded_cache,  # noqa: E402
                                        fixed_rope_length, prefill_capture)
+
+DEFAULT_MODEL = os.environ.get("QCC_MODEL", "meta-llama/Llama-3.2-1B-Instruct")
 
 ARM_PATTERN = re.compile(r"^(full|bounded(\d+)?)(?:_(int8|int4|nf4))?$")
 DEFAULT_ARMS = ["full", "full_int8", "full_int4", "bounded4096_int8", "bounded4096_int4"]
@@ -397,9 +400,10 @@ def summarize(results, args, task_names):
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--model", default="/root/qcc/models/Llama-3.2-1B-Instruct")
+    parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--label", default=None)
-    parser.add_argument("--ruler-jsonl", default="/home/waas/ruler_a10_v1/ruler_subset.jsonl")
+    parser.add_argument("--ruler-jsonl", default=os.environ.get("QCC_RULER_JSONL", ""),
+                        help="RULER split JSONL (env: QCC_RULER_JSONL)")
     parser.add_argument("--tasks", nargs="*",
                         default=["niah_single_1", "niah_multikey_2", "niah_multikey_3", "vt"])
     parser.add_argument("--limit", type=int, default=None, help="records per task")
@@ -430,11 +434,15 @@ def parse_args(argv=None):
     parser.add_argument("--no-answer-prefix", action="store_true")
     parser.add_argument("--match-tolerance", type=float, default=0.15,
                         help="relative byte gap that still counts as matched decode state")
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    return args
 
 
 def main(argv=None):
     args = parse_args(argv)
+    if not args.ruler_jsonl:
+        raise SystemExit("--ruler-jsonl is required (or set QCC_RULER_JSONL): "
+                         "point it at the RULER split JSONL")
     if args.trust_remote_code:
         _ensure_remote_code_compat()
     from transformers import AutoTokenizer

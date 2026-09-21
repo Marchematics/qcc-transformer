@@ -11,7 +11,7 @@ depends on:
    (monotonicity of the top-k family);
 5. sorting the kept indices preserves the relative order of the original keys.
 
-Run: python check_selection.py
+Run: python benchmarks/check_bounded_decode_selection.py
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ import torch
 
 try:  # repo layout
     import benchmark_bounded_decode_frontier as L
-except ImportError:  # authoring workspace layout
+except ImportError:  # flat fallback when benchmarks/ is not on sys.path
     import longctx as L
 
 

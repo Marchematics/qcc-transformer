@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Parallel layer-wise calibration sweep. Each configuration owns one GPU.
-# This script is diagnostic: it does not create 99-gate evidence by itself.
+# This script is a diagnostic sweep, not a quality-gate measurement.
 
 set -euo pipefail
 
-PROJECT_DIR="${PROJECT_DIR:-/home/frankwang122222/zjh/zjh/工作文件/qcc-transformer-next}"
-MODEL_PATH="${MODEL_PATH:-$PROJECT_DIR/models/phi-4-mini-instruct}"
+PROJECT_DIR="${PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+MODEL_PATH="${MODEL_PATH:-microsoft/Phi-4-mini-instruct}"
 OUTPUT_DIR="${OUTPUT_DIR:-$PROJECT_DIR/artifacts/hf_99/layerwise_10gpu}"
 RUN_ID="${RUN_ID:-layerwise10_$(date +%Y%m%d_%H%M%S)}"
 MAX_TOKENS="${MAX_TOKENS:-512}"
@@ -43,7 +43,7 @@ for config in "${CONFIGS[@]}"; do
     cmd=(python3 benchmarks/calibrate_hf_layerwise.py \
       --model "$MODEL_PATH" \
       --train-file README.md \
-      --held-out-file HANDOFF.md \
+      --held-out-file docs/REPORT.md \
       --output "$output_file" \
       --calibrate-layers "$layers" \
       --window-size "$window" \

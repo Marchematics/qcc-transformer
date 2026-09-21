@@ -1,6 +1,6 @@
 """Long-context frontier harness: bounded exact-KV decode with causal selection.
 
-Extends frontier.py with:
+Extends the selection-frontier harness with:
   * O(obs) hidden-state capture via attention forward hooks, so prefill memory
     does not grow with the number of stored hidden states;
   * last-token-only LM head, avoiding an O(L * vocab) logits tensor;
@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import random
 import re
 import time
@@ -28,6 +29,8 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 from transformers import AutoModelForCausalLM, AutoTokenizer, DynamicCache
+
+DEFAULT_MODEL = os.environ.get("QCC_MODEL", "meta-llama/Llama-3.2-1B-Instruct")
 
 FILLER = [
     "The grass is green and the sky is blue in the quiet valley.",
@@ -431,7 +434,7 @@ def question_lexical_positions(tokenizer, prompt, n_question_tokens, max_positio
                 line = prompt[line_start: line_end if line_end >= 0 else len(prompt)]
                 identifiers.update(re.findall(r"[A-Za-z][A-Za-z0-9_\-]{%d,}" % (min_word_len - 1), line))
     # Chain following for value-tracking tasks: a value reaches other variables
-    # through assignment lines, so after anchoring the queried value we follow
+    # through assignment lines, so after anchoring the queried value the search follows
     # only identifiers that are *defined* somewhere in the context.  Restricting
     # to defined symbols is what stops filler words from exploding the anchor
     # set (a generic identifier scan was measured to blow past the cap and lose
@@ -665,7 +668,7 @@ def run_one(model, tokenizer, length, args, eos_ids, seed):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--model", default="/root/qcc/models/Llama-3.2-1B-Instruct")
+    ap.add_argument("--model", default=DEFAULT_MODEL)
     ap.add_argument("--lengths", type=int, nargs="+", default=[32768, 65536, 131072])
     ap.add_argument("--policies", nargs="+",
                     default=["full", "recent", "obs_mean", "obs_last", "obs_max", "oracle_needle"])

@@ -1,14 +1,16 @@
-"""One RULER record through the packaged API on a non-Llama checkpoint.
+"""One RULER record through the shipped API on a non-Llama checkpoint.
 
 Smoke test for the architecture adapter: Phi-3.5-mini has a fused ``qkv_proj``,
 its rotary embedding lives on the attention module, and its remote code uses
 the legacy cache API.  Asserts the bounded answer still matches Full-KV.
 """
 import json
+import os
 import sys
 import time
+from pathlib import Path
 
-sys.path.insert(0, "/root/qcc/repo/qcc-transformer")
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import torch
 from transformers import AutoTokenizer
 
@@ -16,7 +18,12 @@ from qcc_transformer.hf_loading import _ensure_remote_code_compat, load_hf_causa
 from qcc_transformer.retention import (RetentionConfig, compile_bounded_cache,
                                        forward_accepts)
 
-MODEL = sys.argv[1] if len(sys.argv) > 1 else "/datasets/ComfyUI/models/LLM/Phi-3.5-mini-instruct"
+DEFAULT_MODEL = os.environ.get("QCC_MODEL", "microsoft/Phi-3.5-mini-instruct")
+RULER_JSONL = os.environ.get("QCC_RULER_JSONL", "")
+if not RULER_JSONL:
+    raise SystemExit("QCC_RULER_JSONL is not set: point it at the RULER split JSONL")
+
+MODEL = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_MODEL
 LIMIT = int(sys.argv[2]) if len(sys.argv) > 2 else 2
 _ensure_remote_code_compat()
 TOK = AutoTokenizer.from_pretrained(MODEL, trust_remote_code=True)
@@ -24,7 +31,7 @@ model = load_hf_causal_lm(MODEL, dtype=torch.bfloat16, device="cuda",
                           trust_remote_code=True,
                           attn_implementation="eager").eval()
 
-rows = [json.loads(line) for line in open("/home/waas/ruler_a10_v1/ruler_subset.jsonl")]
+rows = [json.loads(line) for line in open(RULER_JSONL)]
 rows = [r for r in rows if r["task"] == "niah_single_1" and 7000 < r["length"] < 17000][:LIMIT]
 config = RetentionConfig(budget=4096, lex_cap=512, chain_hops=6,
                          prefill_chunk=1024)

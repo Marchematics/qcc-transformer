@@ -1,14 +1,25 @@
-"""Does the packaged API reproduce the benchmark's answer on a real record?"""
-import json, sys, time
-sys.path.insert(0, "/root/qcc/repo/qcc-transformer")
+"""Does the shipped API reproduce the benchmark's answer on a real record?"""
+import json
+import os
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
+
 from qcc_transformer.retention import RetentionConfig, compile_bounded_cache
 
-M = "/root/qcc/models/Llama-3.2-1B-Instruct"
+DEFAULT_MODEL = os.environ.get("QCC_MODEL", "meta-llama/Llama-3.2-1B-Instruct")
+RULER_JSONL = os.environ.get("QCC_RULER_JSONL", "")
+if not RULER_JSONL:
+    raise SystemExit("QCC_RULER_JSONL is not set: point it at the RULER split JSONL")
+
+M = DEFAULT_MODEL
 tok = AutoTokenizer.from_pretrained(M)
 model = AutoModelForCausalLM.from_pretrained(M, dtype=torch.bfloat16).to("cuda").eval()
-rows = [json.loads(l) for l in open('/home/waas/ruler_a10_v1/ruler_subset.jsonl')]
+rows = [json.loads(l) for l in open(RULER_JSONL)]
 records = [r for r in rows if r['task'] in ('niah_single_1', 'niah_multikey_2')
            and 12000 < r['length'] < 20000][:4]
 out = []

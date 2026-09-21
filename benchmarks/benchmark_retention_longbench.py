@@ -2,16 +2,16 @@
 """LongBench retention: bounded decode cache vs matched Full-KV, real documents.
 
 The RULER evidence in ``docs/REPORT.md`` is
-synthetic (needle-in-a-haystack and variable tracking) and can be dismissed as
-benchmark engineering.  This harness runs the same packaged law on **LongBench**
-(THUDM, 2023): real long-document QA, summarisation and retrieval, scored with
-the official metrics, so the retention number cannot be gamed by rare strings.
+synthetic (needle-in-a-haystack and variable tracking).  This harness runs the
+same shipped law on **LongBench** (THUDM, 2023): real long-document QA,
+summarisation and retrieval, scored with the official metrics, so the retention
+number does not depend on synthetic needle strings.
 
 Structure (mirrors ``benchmarks/benchmark_retention_multimodel.py``):
 
 * for every record, build the official prompt and run each arm --
   ``full`` = exact chunked Full-KV prefill (:func:`prefill_capture`),
-  ``bounded`` = the packaged :func:`compile_bounded_cache` --
+  ``bounded`` = :func:`compile_bounded_cache` --
 * decode greedily with the usual max_new/stop-at-EOS loop and absolute
   position ids, so a shorter-than-prompt cache still decodes correctly,
 * score the decoded text with the official LongBench metric of the task,
@@ -21,21 +21,21 @@ Structure (mirrors ``benchmarks/benchmark_retention_multimodel.py``):
 Truncation (explicit): a prompt longer than ``--max-input-tokens`` is truncated
 the way the official LongBench harness does it -- keep the first half and the
 last half of the *token ids* -- because both ends carry instruction (the head)
-and question (the tail).  We keep the token ids instead of the official
+and question (the tail).  Token ids are kept instead of the official
 detokenise/re-encode round trip.  ``--truncation skip`` drops such records
 instead; either way the choice is recorded per record and in the JSON header
 (``truncation_policy``).
 
 ``--tasks`` defaults to the English non-code LongBench subset.  ``vcsum`` is in
-that default list because it was requested, but it is skipped with an explicit
-reason unless ``jieba`` is installed: its official metric is Chinese
-ROUGE-L (:mod:`longbench_metrics`); the skip is recorded in
-``skipped_tasks`` and never silently scored as zero.
+that default list, but it is skipped with an explicit reason unless ``jieba`` is
+installed: its official metric is Chinese ROUGE-L
+(:mod:`longbench_metrics`); the skip is recorded in ``skipped_tasks`` and never
+silently scored as zero.
 
-Example (one 1B model, one shared GPU)::
+Example (one 1B model, one GPU)::
 
     python benchmarks/benchmark_retention_longbench.py \\
-        --model /root/qcc/models/Llama-3.2-1B-Instruct \\
+        --model meta-llama/Llama-3.2-1B-Instruct \\
         --tasks narrativeqa qasper hotpotqa 2wikimqa gov_report multi_news \\
                 triviaqa samsum vcsum passage_retrieval_en \\
         --limit 20 --budget 4096 --lex-cap 512 --hops 6 \\
@@ -60,6 +60,7 @@ for entry in (str(REPO_ROOT), str(BENCH_DIR)):
 
 import longbench_data as lbd
 import longbench_metrics as lbm
+import os
 from qcc_transformer.hf_loading import _ensure_remote_code_compat, load_hf_causal_lm
 from qcc_transformer.retention import (RetentionConfig, compile_bounded_cache,
                                        fixed_rope_length, prefill_capture)
@@ -97,8 +98,8 @@ def parse_args(argv=None):
     parser.add_argument("--arms", nargs="*", default=["full", "bounded"],
                         choices=("full", "bounded"))
     parser.add_argument("--cache-dir", default=None,
-                        help="LongBench cache; default $QCC_LONGBENCH_DIR or "
-                             "/root/qcc/data/longbench")
+                        help=f"LongBench cache; default ${lbd.ENV_CACHE_DIR} or "
+                             f"{lbd.DEFAULT_CACHE_DIR}")
     parser.add_argument("--trust-remote-code", action="store_true")
     parser.add_argument("--load-4bit", action="store_true")
     parser.add_argument("--dtype", default="bfloat16",

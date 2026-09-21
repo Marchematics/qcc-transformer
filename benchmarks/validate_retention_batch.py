@@ -1,4 +1,4 @@
-"""Is a ragged batch through the packaged API the same computation?
+"""Is a ragged batch through the shipped API the same computation?
 
 Two RULER records of different lengths are packed into one left-padded batch,
 compiled, decoded together, and compared against compiling and decoding each
@@ -15,22 +15,28 @@ record on its own.  Checked at three levels:
   printed so that a difference can be attributed rather than assumed.
 """
 import json
+import os
 import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, "/root/qcc/repo/qcc-transformer")
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, DynamicCache
 
 from qcc_transformer.retention import RetentionConfig, compile_bounded_cache
 
-MODEL = "/root/qcc/models/Llama-3.2-1B-Instruct"
+DEFAULT_MODEL = os.environ.get("QCC_MODEL", "meta-llama/Llama-3.2-1B-Instruct")
+RULER_JSONL = os.environ.get("QCC_RULER_JSONL", "")
+if not RULER_JSONL:
+    raise SystemExit("QCC_RULER_JSONL is not set: point it at the RULER split JSONL")
+
+MODEL = DEFAULT_MODEL
 STEPS = 24
 TOK = AutoTokenizer.from_pretrained(MODEL)
 model = AutoModelForCausalLM.from_pretrained(MODEL, dtype=torch.bfloat16).to("cuda").eval()
 
-rows = [json.loads(line) for line in open("/home/waas/ruler_a10_v1/ruler_subset.jsonl")]
+rows = [json.loads(line) for line in open(RULER_JSONL)]
 by_length = {}
 for record in rows:
     by_length.setdefault((record["task"], record["length"]), record)

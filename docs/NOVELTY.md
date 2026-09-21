@@ -11,7 +11,7 @@ overlap with the following families:
 - [HOLA (2026)](https://arxiv.org/abs/2607.02303) and [GLIDE (2026)](https://arxiv.org/abs/2607.24788): hybrid exact-window/recurrent long-context attention.
 - [Kimi Linear/KDA (2025)](https://arxiv.org/abs/2510.26692): recurrent KV replacement with fine-grained decay.
 
-The current-date audit also found especially close 2026 overlap in [PCAF
+The review also found especially close 2026 overlap in [PCAF
 (2026)](https://arxiv.org/abs/2606.10435), which writes bounded causal
 successor records and retrieves successor-token distributions, and in [HiLS
 Attention (2026)](https://arxiv.org/abs/2607.02980), [MARCH
@@ -42,10 +42,8 @@ The implementation also exposes optional RoPE with a long-context theta for
 relative-position stability. RoPE is established prior art and is included
 only as a quality/compatibility control, not as a novelty claim.
 
-The current assessment is **proceed with caution**. A publishable contribution
-would need a matched recall/latency/memory Pareto comparison against Infini,
-ABC/GSA, PCAF, KVM, KDA, HOLA, and a strong full-KV baseline, plus fused GPU
-kernels. The
+The assessment is therefore cautious. A publishable contribution would need a
+matched recall/latency/memory Pareto comparison against Infini, ABC/GSA, PCAF,
+KVM, KDA and HOLA, plus a strong full-KV baseline, plus fused GPU kernels. The
 lazy sparse update is an implementation hypothesis, not evidence of a new
-algorithmic class or a universal speedup. The repository's [review trace](.aris/traces/novelty-check/2026-09-01_run01/trace.md)
-records the search boundary.
+algorithmic class or a universal speedup.

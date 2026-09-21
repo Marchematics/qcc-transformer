@@ -1,8 +1,8 @@
 # Why a fixed number of slots can be enough — and when it must fail
 
 This page states the mechanism behind the retention law, the measurements that
-support it, and the predictions that would falsify it. It exists because the
-central claim of the project is not a leaderboard row but a proposition:
+support it, and the predictions that would falsify it. The central claim is a
+proposition rather than a leaderboard row:
 
 > Long-context inference does not inherently require persistent state
 > proportional to context length.
@@ -53,15 +53,15 @@ and `artifacts/lm_nll_pinned_b*`):
 | synthetic, self-similar | 3.188 | – | 1.137x | 1.091x | **0.995x** | – |
 | natural text | 1.348 | 1.148x | 1.064x | 1.084x | 1.082x | 1.061x |
 
-Read together, and honestly: the NLL ratio is `1.06-1.15x` below ~8K slots and
-lands between `0.99x` and `1.08x` at 8-16K. On the self-similar corpus the
-bounded support *beats* Full-KV at 8K slots — a cleaner context predicts the
-suffix slightly better than a 32K window padded with filler, the same effect seen
-on narrativeqa (+10.7%) and on the anchors-only configuration. On natural text a
-6-8% gap persists even at half the context, so the project does **not** claim
-that perplexity is preserved: what the evidence supports is that the gap is a
-function of how much genuine long-range, non-redundant mass the corpus has, and
-that it is small and slowly varying with budget rather than exploding.
+Read together, the NLL ratio is `1.06-1.15x` below ~8K slots and lands between
+`0.99x` and `1.08x` at 8-16K. On the self-similar corpus the bounded support
+*beats* Full-KV at 8K slots — a cleaner context predicts the suffix slightly
+better than a 32K window padded with filler, the same effect seen on narrativeqa
+(+10.7%) and on the anchors-only configuration. On natural text a 6-8% gap
+persists even at half the context, so no claim is made that perplexity is
+preserved: what the evidence supports is that the gap is a function of how much
+genuine long-range, non-redundant mass the corpus has, and that it is small and
+slowly varying with budget rather than exploding.
 
 ## Falsifiable predictions
 
@@ -69,31 +69,31 @@ that it is small and slowly varying with budget rather than exploding.
    Hold the task fixed and grow the context: quality is flat. Hold the context
    fixed and grow the number of keys the question must disambiguate: the required
    budget grows linearly in that number. *Test:* budget sweep on
-   `niah_multikey_k` for `k = 1..8` at a fixed length. *Status:* partially
-   observed — single-needle saturates at 1,536 slots while three-key records need
-   the full 4,608, and RULER's 1B Full-KV arm only answers 45% of them.
+   `niah_multikey_k` for `k = 1..8` at a fixed length. *Evidence so far:*
+   single-needle retrieval saturates at 1,536 slots while three-key records need
+   the full 4,608, and RULER's 1B Full-KV arm answers only 45% of the three-key
+   records, so the scaling axis is observed up to `k = 3`.
 2. **Failure is a cliff, not a slope, once the required set exceeds the budget.**
    A task whose answer needs `m` scattered items must collapse when
    `m x tokens-per-item > budget`, and the collapse is predictable from the task
    description. *Test:* aggregation/counting over `m` scattered numbers (`m` swept
-   past the budget) and a multi-needle retrieval with `m` needles. *Status:*
-   predicted here, **not yet measured** — this is the experiment that would turn
-   the mechanism into a law with a stated domain of validity.
+   past the budget) and a multi-needle retrieval with `m` needles. *Not measured:*
+   this is the experiment that would turn the mechanism into a law with a stated
+   domain of validity.
 3. **The NLL gap tracks long-range dependency density, not context length.**
    Two corpora with the same `L` but different dependency density should show
    different gaps at the same budget. *Test:* measure NLL at fixed budget and `L`
-   across corpora of increasing dependency density. *Status:* two corpora measured
-   (above) differ as predicted, but the density axis has not been swept.
+   across corpora of increasing dependency density. *Evidence so far:* the two
+   corpora above differ as predicted, but the density axis has not been swept.
 
-## What this buys the paper
+## What the mechanism establishes
 
-If predictions 1-3 hold, the paper's claim stops being "a cache policy matches
-Full-KV on benchmarks" and becomes a statement about where long-context state is
-*needed*: the retained set is the sum of a concentrated retrieval component and a
-recent component, both `O(1)` in `L`, and the tasks that break the policy are
-exactly those whose answers are spread across more positions than the budget
-allows. That is a claim other people can test, extend and disagree with — which
-is the property that outlives any single benchmark table.
+If predictions 1-3 hold, the claim is no longer "a cache policy matches Full-KV
+on benchmarks" but a statement about where long-context state is *needed*: the
+retained set is the sum of a concentrated retrieval component and a recent
+component, both `O(1)` in `L`, and the tasks that break the policy are exactly
+those whose answers are spread across more positions than the budget allows.
+That is a claim other groups can test, extend or contradict.
 
 ## Related pages
 

@@ -1,4 +1,4 @@
-"""Turn campaign JSONs into the tables the report quotes.
+"""Turn the stored benchmark JSONs into the tables the report quotes.
 
 Two record formats are supported, detected by their keys:
 
@@ -15,9 +15,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from collections import defaultdict
 
 from transformers import AutoConfig
+
+DEFAULT_MODEL = os.environ.get("QCC_MODEL", "meta-llama/Llama-3.2-1B-Instruct")
 
 
 def state_bytes(model_path, slots, dtype_bytes=2):
@@ -81,7 +84,7 @@ def baselines(path):
     model_path = (data.get("config") or {}).get("model") or data.get("model")
     if model_path is None:                      # partial writes carry rows only
         model_path = json.load(open(rows[0]["source_json"]))["config"]["model"] \
-            if "source_json" in rows[0] else "/root/qcc/models/Llama-3.2-1B-Instruct"
+            if "source_json" in rows[0] else DEFAULT_MODEL
     policies = sorted({row["policy"] for row in rows})
     tasks = sorted({row["task"] for row in rows})
     full = {(row["task"], tuple(row["outputs"])): row for row in rows if row["policy"] == "full"}
