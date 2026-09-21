@@ -66,40 +66,39 @@ slowly varying with budget rather than exploding.
 ## Falsifiable predictions
 
 1. **Required slots scale with the number of competing items, not with `L`.**
-   Hold the task fixed and grow the context: quality is flat. Hold the context
-   fixed and grow the number of keys the question must disambiguate: the required
-   budget grows linearly in that number. *Test:* budget sweep on
-   `niah_multikey_k` for `k = 1..8` at a fixed length. *Evidence so far:*
-   single-needle retrieval saturates at 1,536 slots while three-key records need
-   the full 4,608, and RULER's 1B Full-KV arm answers only 45% of the three-key
-   records, so the scaling axis is observed up to `k = 3`.
+   Weakly supported, and the binding constraint turned out not to be the slot
+   count. Two sweeps at 32K (`artifacts/prediction-distractors.json`,
+   `artifacts/prediction-needles.json`, `artifacts/prediction-needles-llama8b.json`):
+
+   * *Competition axis.* With one asked key plus 4 competing keys, a 512-slot
+     budget already matches Full-KV (1.000). At 33 competing keys Full-KV is still
+     1.000 while the bounded arm needs **1,024** slots; at 129 and 513 competing
+     keys the model itself drops to 0.667, so the axis cannot be extended on this
+     checkpoint.
+   * *Required-set axis.* Asking for all `k` needle values, an 8B checkpoint
+     answers k=8 perfectly with Full-KV (1.000) while the bounded arm reaches only
+     0.333 - **at every budget from 1,024 to 8,192 slots**. The needle statements
+     occupy about 136 tokens at k=8, so the retained width covers the required set
+     by a wide margin and coverage is not the constraint. The limit is the anchor
+     policy: with `lex_cap=512` the expanded anchor sets for eight needles compete
+     for the same cap, so needles are dropped before the slot budget is reached.
+
+   The operational consequence is a stated design rule to test next: scale the
+   anchor budget with the number of items the question names (`lex_cap` proportional
+   to `k`), not with the context length. Past k=16 both checkpoints fail the task
+   with exact attention as well, so the probe is bounded by model capability before
+   it is bounded by the cache.
+
 2. **Failure is a cliff, not a slope, once the required set exceeds the budget.**
-   A task whose answer needs `m` scattered items must collapse when
-   `m x tokens-per-item > budget`, and the collapse is predictable from the task
-   description. *Test:* aggregation/counting over `m` scattered numbers (`m` swept
-   past the budget) and a multi-needle retrieval with `m` needles. *Not measured:*
-   this is the experiment that would turn the mechanism into a law with a stated
-   domain of validity.
-3. **The NLL gap tracks long-range dependency density, not context length.**
-   Supported. One token pool (32K, Llama-3.2-1B) is reordered into four levels -
-   natural, paragraph-shuffled, sentence-shuffled, fully shuffled - so unigram
-   statistics are identical and only the dependency structure changes. The density
-   proxy is the fraction of tokens whose nearest earlier 5-gram repeat lies more
-   than 512 tokens back, i.e. exactly the tokens a bounded cache cannot see.
-   Ratios to Full-KV (`artifacts/prediction-density.json`):
-
-   | budget | mean NLL ratio | Pearson r (density vs ratio) | Spearman rho |
-   |---|---:|---:|---:|
-   | 4,096 slots | 1.226 | **0.94** | 0.80 |
-   | 8,192 slots | 1.170 | **0.91** | 0.80 |
-
-   Fully shuffled text sits at a ratio of about 1 - no long-range structure, so
-   nothing for the cache to miss - although it is far harder in absolute terms
-   (Full-KV NLL 7.95 against 1.5-2.6 for the structured levels). The measured
-   density order is `sentence (0.123) > paragraph (0.096) > natural (0.085) >
-   token (0.000)`: block shuffling *relocates* repeated n-grams beyond the near
-   window instead of deleting them, so "natural" is not the densest level, and the
-   axis is reported as measured rather than as assumed.
+   Not measured, and the simple form of the prediction is now in question. The
+   conditional analysis (accuracy on rows whose retained width covers the required
+   set, against rows where it does not) has 60 covered rows and **0** not-covered
+   rows in the needles sweep, because the required set is small compared with any
+   tested budget; the distractor sweep does produce 18 not-covered rows, with
+   accuracy 0.667 against 0.881 when covered, but in exactly those cells the
+   model's own Full-KV arm is already at 0.667. The honest statement is therefore
+   that the required-set framework explains the *small*-k regime and that the
+   transition is governed by anchor capacity rather than by slot capacity.
 
 ## What the mechanism establishes
 
