@@ -1,7 +1,7 @@
 # LongBench retention: bounded decode cache vs Full-KV
 
 The RULER evidence behind the retention law
-(`artifacts/bounded-decode-frontier-20260920.md`) is synthetic: needle-in-a-
+(`docs/REPORT.md`) is synthetic: needle-in-a-
 haystack and variable tracking.  This harness adds the piece a reviewer asks
 for next — **LongBench** (Bai et al., 2023), real long-document QA,
 summarisation, classification and retrieval — and runs the packaged law

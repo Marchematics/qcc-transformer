@@ -2,7 +2,7 @@
 
 This module is the packaged form of the retention law measured in
 ``benchmarks/benchmark_bounded_decode_frontier.py`` and documented in
-``artifacts/bounded-decode-frontier-20260920.md``.  It is a *cache policy*, not
+``docs/REPORT.md``.  It is a *cache policy*, not
 an attention approximation: prefill runs the model's own exact causal attention,
 the cache is then compiled down to a fixed number of slots per
 ``(layer, kv-head)``, and decode computes exact softmax attention over whatever
