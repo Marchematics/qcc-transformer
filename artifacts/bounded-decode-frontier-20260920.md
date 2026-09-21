@@ -529,8 +529,15 @@ tables:
   both sides: the bounded number it used (6.87 ms) is not reproducible, and the
   baseline number it used (28.95 ms) came from a harness configuration that no
   longer completes. The defensible 128K statement is the bounded arm alone:
-  **11.0 ms per token, p95 11.0 ms, flat from 32K to 128K**, against a baseline
-  that cannot be measured there at all.
+  **11.0 ms per token, p95 11.0 ms, flat from 32K to 128K**.
+* One qualification, added after a last attempt: the 128K baseline *can* be run
+  through the frontier harness with `--prefill-chunk 2048` (the smaller chunk is
+  what makes it fit); it answered the record correctly at 127,501 tokens and
+  decoded at **38.1 ms/token - but over only 5 tokens, because the model hit EOS
+  there, while the bounded arm's 11.0 ms is a 32-token mean**. The two decode
+  windows are not matched, so no 128K ratio is quoted from this pair; it does
+  establish that the baseline is measurable at 128K with a smaller prefill chunk,
+  and a step-matched rerun is the one measurement still worth doing.
 * The bounded+graph floor itself is stable at **11.0 ms** across lengths and
   repeats. With four to eight parity-gated repeats per length (raw files
   `experiments/retention_frontier/latency/{clean,p95}-*.json`, summary
