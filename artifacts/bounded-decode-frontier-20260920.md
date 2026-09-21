@@ -960,12 +960,16 @@ factor, and it is the only one that matches Full-KV on the two hardest tasks.
 
 | configuration (Llama-3.2-1B, 80 records) | single_1 | multikey_2 | multikey_3 | vt | aggregate | worst task |
 |---|---:|---:|---:|---:|---:|---:|
-| attention ranking only (`lex_cap=0`, packaged) | 1.000 | 0.895 | 0.333 | 1.039 | **0.817** | 0.333 |
-| best ranking variant as a baseline (`obs_mean`, 4,096 slots) | 1.000 | 0.800 | 0.200 | 0.640 | **0.880** | 0.000 |
+| attention ranking, last query (`lex_cap=0`, packaged) | 1.000 | 0.895 | 0.333 | 1.039 | **0.817** | 0.333 |
+| attention ranking, window mean (`lex_cap=0`, packaged) | 1.000 | 0.870 | 0.667 | 1.022 | **0.870** | 0.667 |
+| best ranking variant as a harness baseline (`obs_mean`, 4,096 slots) | 1.000 | 0.800 | 0.200 | 0.640 | **0.880** | 0.000 |
 | + task-agnostic rarity anchors (`anchor_mode="rare"`) | 1.000 | 0.895 | **0.889** | 0.968 | **0.938** | 0.889 |
 | shipped: pattern anchors + chain following | 1.000 | 1.000 | 1.000 | 1.028 | **1.007** | 1.000 |
 
-The third row matters most for generality. `anchor_mode="rare"` removes every
+Averaging the observation window instead of reading its last query is worth
++0.05 aggregate and +0.33 worst task on its own, which is the SnapKV intuition
+holding up; the anchors are worth a further +0.14 and +0.33 on top of that. The
+anchored row matters most for generality. `anchor_mode="rare"` removes every
 task-shaped element: no UUID, hyphenated-identifier or long-number patterns, no
 assignment-chain following - a question token is a cue if the context contains it
 at most `max_occurrences` times. That alone lifts the hardest task from 0.333 to
