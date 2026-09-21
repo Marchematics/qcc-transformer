@@ -330,6 +330,14 @@ B=1024（占 3.1%）是 **1.75x**、2048 是 1.55x、4096 是 1.34x、8192（25.
 专用**的——给出 100% NIAH retention 的 3% 预算会让通用语言建模的困惑度上升
 75%；而语言建模下 `obs_mean`(1.56x) 反而优于 `obs_last`(1.75x)，与检索相反。
 
+**2026-09-24 补充**：VS Code 的 git IPC socket 会挂（`git push` 超过 4 分钟无输出、
+exit 124）。此时改用 gh CLI 已存的 token 推送，不要再等 socket：
+
+```bash
+TOKEN=$(/root/qcc/venv/bin/python -c "import re;print(re.search(r'oauth_token:\s*(\S+)', open('/root/.config/gh/hosts.yml').read()).group(1))")
+git -c credential.helper= push "https://x-access-token:${TOKEN}@github.com/Marchematics/qcc-transformer.git" main
+```
+
 ## 推送凭据（重要，2026-09-20）
 
 本机 git 推送依赖 VS Code 的 askpass：`GIT_ASKPASS` 会通过
