@@ -495,6 +495,44 @@ Reading this honestly:
   this card; the bandwidth bound says it cannot be for a 1B model whose weights
   alone are 4.12 ms of the step.
 
+#### 3.11b Matched-optimisation TPOT, parity-gated and repeated
+
+`benchmarks/benchmark_bounded_decode_tpot_floor.py` gives *both* arms the same
+execution path (plain dynamic cache, static cache, CUDA graph) and gates every
+timing behind a token-parity check against the dynamic path, so a ratio is never
+an artefact of optimising only one side. Three repeats per length, one card,
+`budget=4096`, 32 greedy tokens:
+
+| context | variant | repeats ok | p50 TPOT |
+|---:|---|---:|---:|
+| ~32K | bounded + CUDA graph | 3/3 | **11.01 ms** |
+| ~32K | Full-KV + CUDA graph | 1/3 (capture OOM in the others) | **53.7-55.2 ms** |
+| ~32K | bounded, dynamic cache | 3/3 | 16.8 ms |
+| ~32K | Full-KV, dynamic cache | 0/3 (OOM) | - |
+| 128K | bounded + CUDA graph | 3/3 | **11.01 ms** |
+| 128K | bounded, dynamic cache | 3/3 | 16.7-16.8 ms |
+| 128K | Full-KV, either path | 0/3 (OOM) | - |
+
+Two readings, and they point in opposite directions from the earlier single-shot
+tables:
+
+* **At 32K the matched-optimisation ratio is 4.9-5.0x** (53.7/11.0 and
+  55.2/11.0), which is stronger than anything reported in 3.11 because both arms
+  now pay the same framework overhead. This is the number a reviewer should
+  compare against the 5x target.
+* **At 128K the baseline could not be run at all** in this window (its dynamic
+  cache plus a 128K forward OOMs on a 24 GiB card, with or without capture), so
+  no 128K matched-optimisation ratio is claimed: the historical 4.21x stands as
+  bounded+graph against Full-KV *dynamic*, which is the only pairing that could
+  be completed.
+* The bounded+graph floor itself is stable at **11.0 ms** across lengths and
+  repeats (128K rows: 11.015, 11.013, 11.015). Earlier single-shot runs reported
+  6.87 ms for the same configuration; that number is not reproduced under
+  repeated, parity-gated measurement and should be treated as superseded.
+
+Raw files: `experiments/retention_frontier/latency/clean-tpot-*.json`,
+summarised in `artifacts/bounded-decode-frontier-tpot-percentiles.json`.
+
 ### 3.12 The quality/budget frontier: retention is task-family dependent
 
 Putting the three quality experiments on one axis — how much of the context has

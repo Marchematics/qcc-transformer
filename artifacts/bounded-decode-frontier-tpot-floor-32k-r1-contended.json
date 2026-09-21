@@ -1,0 +1,72 @@
+{
+ "context_tokens": 31851,
+ "budget": 4096,
+ "kept_slots": 4096,
+ "model": "/root/qcc/models/Llama-3.2-1B-Instruct",
+ "max_new": 32,
+ "load_in_4bit": false,
+ "variants": {
+  "full_kv_dynamic": {
+   "error": "CUDA out of memory. Tried to allocate 32.00 MiB. GPU 0 has a total capacity of 23.55 GiB of which 8.25 MiB is free. Process 3686475 has 23.54 GiB memory in use. Of the allocated memory 22.65 GiB is allocated by PyTorch, and 595.80 MiB is reserved by PyTorch but unallocated. If reserved but unallocat"
+  },
+  "full_kv_static": {
+   "error": "CUDA out of memory. Tried to allocate 126.00 MiB. GPU 0 has a total capacity of 23.55 GiB of which 48.25 MiB is free. Process 3686475 has 23.50 GiB memory in use. Of the allocated memory 22.98 GiB is allocated by PyTorch, and 220.21 MiB is reserved by PyTorch but unallocated. If reserved but unalloc"
+  },
+  "full_kv_graph": {
+   "tpot_ms": 53.72,
+   "tpot_mean_ms": 53.731,
+   "state_bytes": 1043693568,
+   "speedup_vs_full_kv_same_optimization": 1.0
+  },
+  "bounded_dynamic": {
+   "tpot_ms": 16.772,
+   "tpot_mean_ms": 16.898,
+   "state_bytes": 134217728,
+   "speedup_vs_full_kv_same_optimization": 3.203
+  },
+  "bounded_static": {
+   "error": "CUDA out of memory. Tried to allocate 18.00 MiB. GPU 0 has a total capacity of 23.55 GiB of which 2.25 MiB is free. Process 3686475 has 23.54 GiB memory in use. Of the allocated memory 23.10 GiB is allocated by PyTorch, with 11.88 MiB allocated in private pools (e.g., CUDA Graphs), and 114.89 MiB is"
+  },
+  "bounded_graph": {
+   "tpot_ms": 11.015,
+   "tpot_mean_ms": 11.027,
+   "state_bytes": 134217728,
+   "speedup_vs_full_kv_same_optimization": 4.877
+  }
+ },
+ "parity_reference_tokens": [
+  11584,
+  19697,
+  19,
+  13,
+  128009,
+  128006,
+  78191,
+  1473,
+  40,
+  1541,
+  956,
+  617,
+  3403,
+  2038,
+  311,
+  4320,
+  279,
+  3488,
+  13,
+  578,
+  1495,
+  1587,
+  539,
+  6420,
+  279,
+  3361,
+  11204,
+  1396,
+  369,
+  49328,
+  9799,
+  13
+ ],
+ "parity_error": "CUDA out of memory. Tried to allocate 18.00 MiB. GPU 0 has a total capacity of 23.55 GiB of which 8.25 MiB is free. Process 3686475 has 23.54 GiB memory in use. Of the allocated memory 23.01 GiB is al"
+}
