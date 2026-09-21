@@ -34,7 +34,7 @@ def main():
     grouped = {}
     for path in args.paths:
         data = json.loads(Path(path).read_text())
-        length = data["context_tokens"]
+        length = (data["context_tokens"] // 1024) * 1024   # bucket near-equal lengths
         for variant, entry in data["variants"].items():
             grouped.setdefault((length, variant), []).append(entry)
 

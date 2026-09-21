@@ -526,9 +526,15 @@ tables:
   bounded+graph against Full-KV *dynamic*, which is the only pairing that could
   be completed.
 * The bounded+graph floor itself is stable at **11.0 ms** across lengths and
-  repeats (128K rows: 11.015, 11.013, 11.015). Earlier single-shot runs reported
-  6.87 ms for the same configuration; that number is not reproduced under
-  repeated, parity-gated measurement and should be treated as superseded.
+  repeats. With four to eight parity-gated repeats per length (raw files
+  `experiments/retention_frontier/latency/{clean,p95}-*.json`, summary
+  `artifacts/bounded-decode-frontier-tpot-p95.json`): bounded+graph **p50 11.01 ms,
+  p95 11.03 ms, min 11.009, max 11.028** at 32K and **11.01 ms** at 128K, against
+  Full-KV+graph **p50 55.0 ms, p95 55.2 ms** at 32K - a p95-to-p95 ratio of
+  **5.0x**. The bounded arm's own spread is 0.02 ms; the baseline's is 1.5 ms.
+  Earlier single-shot runs reported 6.87 ms for the bounded+graph configuration;
+  that is not reproduced under repeated, parity-gated measurement and is
+  superseded.
 
 Raw files: `experiments/retention_frontier/latency/clean-tpot-*.json`,
 summarised in `artifacts/bounded-decode-frontier-tpot-percentiles.json`.
