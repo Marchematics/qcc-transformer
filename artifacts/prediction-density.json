@@ -1,0 +1,492 @@
+{
+ "model": "/root/qcc/models/Llama-3.2-1B-Instruct",
+ "label": "Llama-3.2-1B-Instruct",
+ "config": {
+  "model": "/root/qcc/models/Llama-3.2-1B-Instruct",
+  "length": 32768,
+  "suffix": 256,
+  "budgets": [
+   4096,
+   8192
+  ],
+  "levels": [
+   "natural",
+   "paragraph",
+   "sentence",
+   "token"
+  ],
+  "corpus": [
+   "/root/qcc/repo/qcc-transformer/*.md",
+   "/root/qcc/repo/qcc-transformer/docs/*.md",
+   "/root/qcc/repo/qcc-transformer/benchmarks/*.py",
+   "/root/qcc/repo/qcc-transformer/qcc_transformer/*.py"
+  ],
+  "synthetic": false,
+  "min_bytes": 2000,
+  "seed": 0,
+  "ngram": 5,
+  "near_window": 512,
+  "obs": 64,
+  "nsink": 4,
+  "pool": 7,
+  "dilate": 9,
+  "lex_cap": 0,
+  "scoring": "last",
+  "prefill_chunk": 8192,
+  "key_chunk": 4096,
+  "dtype": "bfloat16",
+  "device": "cuda",
+  "attn_impl": "sdpa",
+  "load_4bit": false,
+  "trust_remote_code": false,
+  "shared_prefill": true,
+  "label": null,
+  "out": "artifacts/prediction-density.json"
+ },
+ "corpus": {
+  "synthetic": false,
+  "sources": [
+   "/root/qcc/repo/qcc-transformer/*.md",
+   "/root/qcc/repo/qcc-transformer/docs/*.md",
+   "/root/qcc/repo/qcc-transformer/benchmarks/*.py",
+   "/root/qcc/repo/qcc-transformer/qcc_transformer/*.py"
+  ],
+  "files": 98,
+  "chars": 1618243
+ },
+ "density_proxy_formula": "see dependency_density(): dependency_density = fraction of scored positions whose nearest earlier copy of their ngram-gram is more than near_window tokens back",
+ "summary": {
+  "levels": [
+   "natural",
+   "paragraph",
+   "sentence",
+   "token"
+  ],
+  "budgets": [
+   4096,
+   8192
+  ],
+  "full_kv": {
+   "natural": {
+    "nll": 2.20297,
+    "perplexity": 9.0518
+   },
+   "paragraph": {
+    "nll": 1.52038,
+    "perplexity": 4.574
+   },
+   "sentence": {
+    "nll": 2.55438,
+    "perplexity": 12.8634
+   },
+   "token": {
+    "nll": 7.94596,
+    "perplexity": 2824.131
+   }
+  },
+  "by_budget": {
+   "b4096": {
+    "budget": 4096,
+    "levels": [
+     "natural",
+     "paragraph",
+     "sentence",
+     "token"
+    ],
+    "density_proxy": [
+     0.085154,
+     0.09599,
+     0.122574,
+     0.0
+    ],
+    "nll_ratio_to_full": [
+     1.21519,
+     1.35778,
+     1.32069,
+     1.0117
+    ],
+    "mean_nll_ratio": 1.22634,
+    "pearson_r": 0.940651,
+    "spearman_r": 0.8,
+    "n_levels": 4
+   },
+   "b8192": {
+    "budget": 8192,
+    "levels": [
+     "natural",
+     "paragraph",
+     "sentence",
+     "token"
+    ],
+    "density_proxy": [
+     0.085154,
+     0.09599,
+     0.122574,
+     0.0
+    ],
+    "nll_ratio_to_full": [
+     1.16369,
+     1.28474,
+     1.22669,
+     1.00472
+    ],
+    "mean_nll_ratio": 1.16996,
+    "pearson_r": 0.90821,
+    "spearman_r": 0.8,
+    "n_levels": 4
+   }
+  },
+  "density_proxy_formula": "dependency_density = fraction of scored positions whose nearest earlier copy of their k-gram is more than `near_window` tokens back (see the module docstring)",
+  "density_order_highest_first": [
+   "sentence",
+   "paragraph",
+   "natural",
+   "token"
+  ],
+  "expected_order_highest_first": [
+   "natural",
+   "paragraph",
+   "sentence",
+   "token"
+  ],
+  "expected_order_note": "prediction 3's convention, reported next to the measured order: natural text carries the most long-range structure and a full token permutation carries none.  Note that a block-level permutation moves repeated n-grams *beyond* the near window instead of deleting them, so the far-repeat proxy can be larger for a paragraph or sentence shuffle than for the corpus order; that is a property of this proxy, and the per-budget correlation below is what the experiment reports"
+ },
+ "rows": [
+  {
+   "level": "natural",
+   "arm": "full",
+   "budget": null,
+   "kept_slots": 32768,
+   "slots_per_token": 1.0,
+   "nll": 2.20297,
+   "perplexity": 9.0518,
+   "prefill_s": 2.34,
+   "peak_mib": 7941.7,
+   "peak_rss_mib": 3440.1,
+   "suffix": 256,
+   "length": 32768,
+   "density_proxy": {
+    "ngram": 5,
+    "near_window": 512,
+    "tokens": 32768,
+    "scored_positions": 32764,
+    "repeat_fraction": 0.172659,
+    "far_repeat_fraction": 0.085154,
+    "long_range_share": 0.493194,
+    "mean_nearest_span": 3783.59,
+    "median_nearest_span": 480.0,
+    "dependency_density": 0.085154
+   },
+   "nll_ratio_to_full": 1.0,
+   "ppl_ratio_to_full": 1.0
+  },
+  {
+   "level": "natural",
+   "arm": "b4096",
+   "budget": 4096,
+   "kept_slots": 4352,
+   "slots_per_token": 0.13281,
+   "nll": 2.67703,
+   "perplexity": 14.5419,
+   "prefill_s": 2.34,
+   "peak_mib": 7941.7,
+   "peak_rss_mib": 3440.1,
+   "suffix": 256,
+   "length": 32768,
+   "density_proxy": {
+    "ngram": 5,
+    "near_window": 512,
+    "tokens": 32768,
+    "scored_positions": 32764,
+    "repeat_fraction": 0.172659,
+    "far_repeat_fraction": 0.085154,
+    "long_range_share": 0.493194,
+    "mean_nearest_span": 3783.59,
+    "median_nearest_span": 480.0,
+    "dependency_density": 0.085154
+   },
+   "nll_ratio_to_full": 1.21519,
+   "ppl_ratio_to_full": 1.60651
+  },
+  {
+   "level": "natural",
+   "arm": "b8192",
+   "budget": 8192,
+   "kept_slots": 8448,
+   "slots_per_token": 0.25781,
+   "nll": 2.56357,
+   "perplexity": 12.9821,
+   "prefill_s": 2.34,
+   "peak_mib": 7941.7,
+   "peak_rss_mib": 3440.1,
+   "suffix": 256,
+   "length": 32768,
+   "density_proxy": {
+    "ngram": 5,
+    "near_window": 512,
+    "tokens": 32768,
+    "scored_positions": 32764,
+    "repeat_fraction": 0.172659,
+    "far_repeat_fraction": 0.085154,
+    "long_range_share": 0.493194,
+    "mean_nearest_span": 3783.59,
+    "median_nearest_span": 480.0,
+    "dependency_density": 0.085154
+   },
+   "nll_ratio_to_full": 1.16369,
+   "ppl_ratio_to_full": 1.4342
+  },
+  {
+   "level": "paragraph",
+   "arm": "full",
+   "budget": null,
+   "kept_slots": 32768,
+   "slots_per_token": 1.0,
+   "nll": 1.52038,
+   "perplexity": 4.574,
+   "prefill_s": 2.06,
+   "peak_mib": 7941.7,
+   "peak_rss_mib": 3440.1,
+   "suffix": 256,
+   "length": 32768,
+   "density_proxy": {
+    "ngram": 5,
+    "near_window": 512,
+    "tokens": 32768,
+    "scored_positions": 32764,
+    "repeat_fraction": 0.172598,
+    "far_repeat_fraction": 0.09599,
+    "long_range_share": 0.556145,
+    "mean_nearest_span": 5050.76,
+    "median_nearest_span": 1334.0,
+    "dependency_density": 0.09599
+   },
+   "nll_ratio_to_full": 1.0,
+   "ppl_ratio_to_full": 1.0
+  },
+  {
+   "level": "paragraph",
+   "arm": "b4096",
+   "budget": 4096,
+   "kept_slots": 4352,
+   "slots_per_token": 0.13281,
+   "nll": 2.06435,
+   "perplexity": 7.8801,
+   "prefill_s": 2.06,
+   "peak_mib": 7941.7,
+   "peak_rss_mib": 3440.1,
+   "suffix": 256,
+   "length": 32768,
+   "density_proxy": {
+    "ngram": 5,
+    "near_window": 512,
+    "tokens": 32768,
+    "scored_positions": 32764,
+    "repeat_fraction": 0.172598,
+    "far_repeat_fraction": 0.09599,
+    "long_range_share": 0.556145,
+    "mean_nearest_span": 5050.76,
+    "median_nearest_span": 1334.0,
+    "dependency_density": 0.09599
+   },
+   "nll_ratio_to_full": 1.35778,
+   "ppl_ratio_to_full": 1.72282
+  },
+  {
+   "level": "paragraph",
+   "arm": "b8192",
+   "budget": 8192,
+   "kept_slots": 8448,
+   "slots_per_token": 0.25781,
+   "nll": 1.95329,
+   "perplexity": 7.0519,
+   "prefill_s": 2.06,
+   "peak_mib": 7941.7,
+   "peak_rss_mib": 3440.1,
+   "suffix": 256,
+   "length": 32768,
+   "density_proxy": {
+    "ngram": 5,
+    "near_window": 512,
+    "tokens": 32768,
+    "scored_positions": 32764,
+    "repeat_fraction": 0.172598,
+    "far_repeat_fraction": 0.09599,
+    "long_range_share": 0.556145,
+    "mean_nearest_span": 5050.76,
+    "median_nearest_span": 1334.0,
+    "dependency_density": 0.09599
+   },
+   "nll_ratio_to_full": 1.28474,
+   "ppl_ratio_to_full": 1.54174
+  },
+  {
+   "level": "sentence",
+   "arm": "full",
+   "budget": null,
+   "kept_slots": 32768,
+   "slots_per_token": 1.0,
+   "nll": 2.55438,
+   "perplexity": 12.8634,
+   "prefill_s": 2.06,
+   "peak_mib": 7941.7,
+   "peak_rss_mib": 3440.1,
+   "suffix": 256,
+   "length": 32768,
+   "density_proxy": {
+    "ngram": 5,
+    "near_window": 512,
+    "tokens": 32768,
+    "scored_positions": 32764,
+    "repeat_fraction": 0.154285,
+    "far_repeat_fraction": 0.122574,
+    "long_range_share": 0.794461,
+    "mean_nearest_span": 5644.27,
+    "median_nearest_span": 3056.0,
+    "dependency_density": 0.122574
+   },
+   "nll_ratio_to_full": 1.0,
+   "ppl_ratio_to_full": 1.0
+  },
+  {
+   "level": "sentence",
+   "arm": "b4096",
+   "budget": 4096,
+   "kept_slots": 4352,
+   "slots_per_token": 0.13281,
+   "nll": 3.37356,
+   "perplexity": 29.1822,
+   "prefill_s": 2.06,
+   "peak_mib": 7941.7,
+   "peak_rss_mib": 3440.1,
+   "suffix": 256,
+   "length": 32768,
+   "density_proxy": {
+    "ngram": 5,
+    "near_window": 512,
+    "tokens": 32768,
+    "scored_positions": 32764,
+    "repeat_fraction": 0.154285,
+    "far_repeat_fraction": 0.122574,
+    "long_range_share": 0.794461,
+    "mean_nearest_span": 5644.27,
+    "median_nearest_span": 3056.0,
+    "dependency_density": 0.122574
+   },
+   "nll_ratio_to_full": 1.32069,
+   "ppl_ratio_to_full": 2.26863
+  },
+  {
+   "level": "sentence",
+   "arm": "b8192",
+   "budget": 8192,
+   "kept_slots": 8448,
+   "slots_per_token": 0.25781,
+   "nll": 3.13345,
+   "perplexity": 22.953,
+   "prefill_s": 2.06,
+   "peak_mib": 7941.7,
+   "peak_rss_mib": 3440.1,
+   "suffix": 256,
+   "length": 32768,
+   "density_proxy": {
+    "ngram": 5,
+    "near_window": 512,
+    "tokens": 32768,
+    "scored_positions": 32764,
+    "repeat_fraction": 0.154285,
+    "far_repeat_fraction": 0.122574,
+    "long_range_share": 0.794461,
+    "mean_nearest_span": 5644.27,
+    "median_nearest_span": 3056.0,
+    "dependency_density": 0.122574
+   },
+   "nll_ratio_to_full": 1.22669,
+   "ppl_ratio_to_full": 1.78437
+  },
+  {
+   "level": "token",
+   "arm": "full",
+   "budget": null,
+   "kept_slots": 32768,
+   "slots_per_token": 1.0,
+   "nll": 7.94596,
+   "perplexity": 2824.131,
+   "prefill_s": 2.05,
+   "peak_mib": 7941.7,
+   "peak_rss_mib": 3440.1,
+   "suffix": 256,
+   "length": 32768,
+   "density_proxy": {
+    "ngram": 5,
+    "near_window": 512,
+    "tokens": 32768,
+    "scored_positions": 32764,
+    "repeat_fraction": 0.0,
+    "far_repeat_fraction": 0.0,
+    "long_range_share": 0.0,
+    "mean_nearest_span": 0.0,
+    "median_nearest_span": 0.0,
+    "dependency_density": 0.0
+   },
+   "nll_ratio_to_full": 1.0,
+   "ppl_ratio_to_full": 1.0
+  },
+  {
+   "level": "token",
+   "arm": "b4096",
+   "budget": 4096,
+   "kept_slots": 4352,
+   "slots_per_token": 0.13281,
+   "nll": 8.0389,
+   "perplexity": 3099.2165,
+   "prefill_s": 2.05,
+   "peak_mib": 7941.7,
+   "peak_rss_mib": 3440.1,
+   "suffix": 256,
+   "length": 32768,
+   "density_proxy": {
+    "ngram": 5,
+    "near_window": 512,
+    "tokens": 32768,
+    "scored_positions": 32764,
+    "repeat_fraction": 0.0,
+    "far_repeat_fraction": 0.0,
+    "long_range_share": 0.0,
+    "mean_nearest_span": 0.0,
+    "median_nearest_span": 0.0,
+    "dependency_density": 0.0
+   },
+   "nll_ratio_to_full": 1.0117,
+   "ppl_ratio_to_full": 1.09741
+  },
+  {
+   "level": "token",
+   "arm": "b8192",
+   "budget": 8192,
+   "kept_slots": 8448,
+   "slots_per_token": 0.25781,
+   "nll": 7.98349,
+   "perplexity": 2932.1352,
+   "prefill_s": 2.05,
+   "peak_mib": 7941.7,
+   "peak_rss_mib": 3440.1,
+   "suffix": 256,
+   "length": 32768,
+   "density_proxy": {
+    "ngram": 5,
+    "near_window": 512,
+    "tokens": 32768,
+    "scored_positions": 32764,
+    "repeat_fraction": 0.0,
+    "far_repeat_fraction": 0.0,
+    "long_range_share": 0.0,
+    "mean_nearest_span": 0.0,
+    "median_nearest_span": 0.0,
+    "dependency_density": 0.0
+   },
+   "nll_ratio_to_full": 1.00472,
+   "ppl_ratio_to_full": 1.03824
+  }
+ ]
+}

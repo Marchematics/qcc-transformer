@@ -4,13 +4,13 @@
 
 1. **The required slot count scales with the number of competing items, not with
    the context length.**  Grow ``L`` at a fixed task: quality is flat.  Grow the
-   number of items the answer depends on: the budget needed to match Full-KV
-   grows with it.
+   number of items the answer depends on (or the number of items competing with
+   it): the budget needed to match Full-KV grows with it.
 2. **Failure is a cliff once the required set exceeds the budget.**  A task whose
    answer needs ``m`` scattered items must collapse when ``m x tokens-per-item``
    exceeds the retained budget.
 
-This runner sweeps exactly those two axes on two synthetic families, both
+This runner sweeps exactly those two axes on three synthetic families, all
 generated from a seed so a run is reproducible:
 
 ``multikey``
@@ -18,15 +18,40 @@ generated from a seed so a run is reproducible:
     values scattered through filler, all sharing the surface form
     ``trace-<hex>``, and a question about one of them.  ``--items`` is ``k``.
     Score: exact match of the asked value (the headline); character-level F1 of
-    the best numeric candidate is reported as partial credit.
+    the best numeric candidate is reported as partial credit.  Two axes grow the
+    competition for the asked key:
+
+    * ``--items`` (legacy shape): ``k`` keys in the context, ``k - 1`` of them
+      competing with the asked one.  On a real 1B model ``k <= 16`` is answered
+      from a 512-slot cache, so this axis alone does not stress retention.
+    * ``--distractors N``: one asked key plus ``N`` *other* keys of the same
+      surface form (``trace-<hex>``), i.e. ``N + 1`` keys in the context.  With
+      ``N`` in the hundreds the observation window alone cannot find the asked
+      key, so the anchors/selection have to do the work.  When ``--distractors``
+      is given, the multikey records are generated from that axis and the cell
+      label ``items`` is the total key count ``N + 1``; ``--items`` is ignored
+      for ``multikey`` in that mode.
+
+``needles``
+    The capacity probe that avoids arithmetic altogether: ``k`` needles are
+    placed in the context, each a distinct rare key (``trace-<hex>``) with a
+    distinct value, and the question names **all** ``k`` keys and asks for all
+    ``k`` values.  ``--items`` is ``k``.  The answer needs exactly ``k``
+    statements, so ``required_set_tokens`` (= ``k x`` tokens per statement) is a
+    known quantity.  Score: partial recall, exactly RULER's ``string_match_all``
+    (mean fraction of the ``k`` references present, case-insensitive substring),
+    plus ``exact_set_match`` (all ``k`` present) as the strict headline.
 
 ``aggregate``
     ``m`` numbers scattered through filler; the question asks for their sum
     (small integers, so the sum is unambiguous) or for the count of items with a
     given status (``--aggregate sum|count``).  ``--items`` is ``m``.  Score:
-    exact match of the numeric answer.
+    exact match of the numeric answer.  Kept for continuity, but note that a
+    real 1B model cannot add, so ``aggregate sum`` with ``m >= 2`` measures
+    arithmetic and is reported as ``full_kv_unsolved`` rather than as a cache
+    result.
 
-Both families are ran against a matched **Full-KV** arm through
+All families are run against a matched **Full-KV** arm through
 ``prefill_capture`` and against a bounded arm through the packaged retention API
 (``RetentionConfig`` + ``compile_bounded_cache``), with the same greedy decode
 loop for every arm.  ``--budgets`` is swept; ``--lengths`` optionally repeats the
@@ -36,9 +61,45 @@ whole sweep at several context lengths, which is what prediction 1 needs
 The derived field the experiment exists for is ``required_budget`` per
 ``(family, items)``: the smallest tested budget whose accuracy matches the
 Full-KV arm's accuracy on that record set, or ``null`` when no tested budget
-does.  When several lengths are swept, ``summary["by_length"][L]`` carries the
-per-length value and the top-level ``summary["required_budget"]`` is the largest
-across lengths (the budget that matched at *every* tested length).
+does.  The multikey competition axis gets the same field per distractor count in
+``summary["required_budget_by_distractors"]``.  When several lengths are swept,
+``summary["by_length"][L]`` carries the per-length value and the top-level
+``summary["required_budget"]`` is the largest across lengths (the budget that
+matched at *every* tested length).
+
+Making the cliff measurable
+---------------------------
+
+Prediction 2 is not assumed here, it is measured.  Every bounded row carries
+``budget_covers_required_set = required_set_tokens <= kept_slots`` -- the
+*measured* retained width of the bounded arm, not the nominal budget -- and
+``summary["budget_covers_required_set"]`` reports accuracy (and partial recall)
+**conditional on that split**, overall, per family and per cell, with the cell
+and row counts.  That conditional block is the operational form of prediction 2:
+if the prediction holds, accuracy is high in the ``covered`` side and collapses
+in the ``not_covered`` side, and the separation between the two means is the
+size of the cliff.  Nothing in the derivation assumes it: the two sides are
+whatever the sweep produced.
+
+``required_set_tokens`` is the tokens the item statements occupy, i.e.
+``items x tokens_per_item`` where ``tokens_per_item`` is the mean tokens of one
+item statement and ``items`` counts the statements the answer's support has to
+resolve (``k`` needles, ``m`` aggregate items, ``key_count`` multikey keys).
+``statement_tokens`` remains the tokens of the whole statement block, so
+``required_set_tokens == statement_tokens`` up to rounding; earlier revisions
+multiplied the block by ``items`` a second time and so overstated the required
+set by that factor, which would have made ``budget_covers_required_set`` almost
+never true.  The sweep only produces a meaningful cliff where
+``items x tokens_per_item`` actually crosses the budget: with ~13-20 tokens per
+statement for a Llama-3.2 tokenizer, ``k = 32`` needles need ~400-600 tokens, so
+budgets below that are the interesting ones and larger ``k`` values extend the
+axis past 8,192 slots.
+
+Two derived fields keep a model failure from being read as a cache result.  When
+the Full-KV arm scores zero on a cell, ``required_budget`` for that cell stays
+``null`` (there is nothing for a bounded budget to match) and the cell is listed
+under ``summary["full_kv_unsolved"]`` with its record count and the reason.  The
+same flag is on ``summary["cells"][family][items]``.
 
 Everything here is a measurement harness: it never modifies the checkpoint, and
 on CPU it can be exercised end to end with a tiny randomly-initialised model
@@ -187,9 +248,133 @@ def score_prediction(prediction, expected, distractors=()):
     }
 
 
-def record_rng(family, items, seed, aggregate="sum"):
-    """A seed-stable generator: the same triple always rebuilds the same task."""
-    return random.Random(f"qcc-required-set:{family}:{items}:{aggregate}:{seed}")
+def reference_recall(references, prediction):
+    """RULER's ``string_match_all``: mean fraction of the references present.
+
+    A reference counts when it appears in the prediction as a case-insensitive
+    substring, which is exactly the RULER/HuggingFace ``string_match_all`` rule
+    (``mean(out in prediction for out in references)``).  Multi-reference tasks
+    (``needles``) are scored with this; single-reference tasks get ``1.0`` when
+    the one reference is present and ``0.0`` otherwise.
+    """
+    refs = [str(reference) for reference in references if str(reference)]
+    if not refs:
+        return 0.0
+    low = (prediction or "").lower()
+    return round(sum(1.0 for reference in refs if reference.lower() in low) / len(refs), 4)
+
+
+def exact_set_match(references, prediction):
+    """Whether **every** reference appears in the prediction (strict recall)."""
+    refs = [str(reference) for reference in references if str(reference)]
+    return bool(refs) and reference_recall(refs, prediction) >= 1.0
+
+
+def score_needles(prediction, references):
+    """Multi-reference scoring with RULER's ``string_match_all``.
+
+    ``partial_recall`` is the headline graded number: the fraction of the ``k``
+    needle values present in the prediction.  ``correct``/``exact_set_match`` is
+    the strict all-or-nothing version.  ``partial`` mirrors ``partial_recall``
+    so every family's rows expose the same field name for graded quality.
+    """
+    refs = [str(reference) for reference in references if str(reference)]
+    low = (prediction or "").lower()
+    present = [reference for reference in refs if reference.lower() in low]
+    missing = [reference for reference in refs if reference not in present]
+    recall = reference_recall(refs, prediction)
+    candidates = parse_numbers(prediction)
+    return {
+        "parsed": candidates[0] if candidates else None,
+        "correct": bool(refs) and not missing,
+        "partial": recall,
+        "partial_recall": recall,
+        "exact_set_match": bool(refs) and not missing,
+        "distractor_hit": False,
+        "candidates": candidates[:8],
+        "references": refs,
+        "present": present,
+        "missing": missing,
+    }
+
+
+def score_record(record, prediction):
+    """Score a prediction the way its family defines the answer.
+
+    Every branch returns the same fields, so a row always carries ``correct``
+    (strict), ``partial`` (graded), ``partial_recall`` (fraction of the answer's
+    references present), ``exact_set_match``, ``present`` and ``missing``.  For
+    the single-answer families the answer has exactly one reference, so
+    ``partial_recall`` and ``exact_set_match`` coincide with ``correct`` while
+    ``partial`` keeps the character-level partial credit.
+    """
+    if record["family"] == "needles":
+        return score_needles(prediction, record["references"])
+    expected = str(record["expected"])
+    scored = score_prediction(prediction, expected, record.get("distractors") or ())
+    present = [expected] if scored["correct"] else []
+    scored.update({
+        "partial_recall": 1.0 if scored["correct"] else 0.0,
+        "exact_set_match": bool(scored["correct"]),
+        "references": [expected],
+        "present": present,
+        "missing": [] if scored["correct"] else [expected],
+    })
+    return scored
+
+
+def record_rng(family, items, seed, aggregate="sum", distractors=None):
+    """A seed-stable generator: the same arguments always rebuild the same task.
+
+    The legacy key (no ``--distractors``) is unchanged, so an ``--items`` sweep
+    rebuilds exactly the records earlier runs used; the distractor count is
+    appended only when the distractor axis is active.
+    """
+    key = f"qcc-required-set:{family}:{items}:{aggregate}:{seed}"
+    if distractors is not None:
+        key += f":d{distractors}"
+    return random.Random(key)
+
+
+def item_names(rng, count):
+    """``count`` distinct item names (extends the pool past :data:`ITEM_NAMES`)."""
+    if count <= len(ITEM_NAMES):
+        return rng.sample(ITEM_NAMES, count)
+    names = list(ITEM_NAMES)
+    index = 0
+    while len(names) < count:
+        names.append(f"{ITEM_NAMES[index % len(ITEM_NAMES)]}{index // len(ITEM_NAMES) + 1}")
+        index += 1
+    return names
+
+
+def distinct_keys(rng, count):
+    """``count`` distinct ``trace-<hex>`` surfaces, at least one letter each.
+
+    The shared surface form is the point of the ``multikey`` family: every key
+    looks like every other key, so selection cannot be a lexical match on the
+    key name alone.
+    """
+    keys, seen = [], set()
+    while len(keys) < count:
+        suffix = "".join(rng.choice(_HEX) for _ in range(6))
+        key = "trace-" + suffix
+        # at least one letter keeps the key from looking like the answer's digits
+        if key not in seen and any(character.isalpha() for character in suffix):
+            seen.add(key)
+            keys.append(key)
+    return keys
+
+
+def distinct_values(rng, count, low=100000, high=999999):
+    """``count`` distinct six-digit values, the answer alphabet of every family."""
+    values, seen = [], set()
+    while len(values) < count:
+        value = rng.randint(low, high)
+        if value not in seen:
+            seen.add(value)
+            values.append(value)
+    return values
 
 
 def _render(intro, statements, question, filler_count, fractions, extra_words,
@@ -265,27 +450,35 @@ def assemble_prompt(intro, statements, question, target_tokens, tokenizer,
     return text, len(encode_ids(tokenizer, text)), statement_tokens
 
 
-def multikey_record(items, seed, target_tokens, tokenizer):
-    """``k`` keys of one surface form, one asked value, ``k - 1`` distractors."""
-    rng = record_rng("multikey", items, seed)
-    names = (rng.sample(ITEM_NAMES, items) if items <= len(ITEM_NAMES)
-             else [f"{name}{index}"
-                   for index, name in enumerate(ITEM_NAMES)][:items])
-    keys, seen_keys = [], set()
-    while len(keys) < items:
-        suffix = "".join(rng.choice(_HEX) for _ in range(6))
-        key = "trace-" + suffix
-        # at least one letter keeps the key from looking like the answer's digits
-        if key not in seen_keys and any(character.isalpha() for character in suffix):
-            seen_keys.add(key)
-            keys.append(key)
-    values, seen_values = [], set()
-    while len(values) < items:
-        value = rng.randint(100000, 999999)
-        if value not in seen_values:
-            seen_values.add(value)
-            values.append(value)
-    target_index = rng.randrange(items)
+def multikey_record(items, seed, target_tokens, tokenizer, distractors=None):
+    """Keys of one surface form, one asked value, the other keys competing.
+
+    Two shapes, both seeded and reproducible:
+
+    * ``distractors=None`` (the legacy ``--items`` shape): ``items`` keys in the
+      context, one of them asked, so ``items - 1`` keys compete with it.
+    * ``distractors=N``: one asked key plus ``N`` other keys of the same surface
+      form, so the context holds ``N + 1`` keys.  ``items`` is then the total key
+      count the caller wants recorded (``N + 1``); the question still asks for a
+      single value, and every other key is a competitor the selection has to
+      survive.
+
+    ``record["distractors"]`` stays the list of *values* of the competing keys
+    (what :func:`score_prediction` flags a distractor hit with);
+    ``record["distractor_count"]`` is how many competing keys there are.
+    """
+    if distractors is None:
+        key_count = items
+        distractor_count = max(0, items - 1)
+    else:
+        distractor_count = int(distractors)
+        key_count = distractor_count + 1
+        items = key_count
+    rng = record_rng("multikey", items, seed, distractors=distractors)
+    names = item_names(rng, key_count)
+    keys = distinct_keys(rng, key_count)
+    values = distinct_values(rng, key_count)
+    target_index = rng.randrange(key_count)
     statements = [f"One of the magic numbers for {key} is {value}."
                   for key, value in zip(keys, values)]
     intro = ("A list of records is given below. Each record names a key and the "
@@ -300,18 +493,54 @@ def multikey_record(items, seed, target_tokens, tokenizer):
         "statement_tokens": statement_tokens,
         "expected": str(values[target_index]),
         "distractors": [str(v) for i, v in enumerate(values) if i != target_index],
+        "distractor_count": distractor_count, "key_count": key_count,
         "keys": keys, "values": [str(v) for v in values],
         "target_key": keys[target_index], "target_index": target_index,
         "names": names,
     }
 
 
+def needles_record(items, seed, target_tokens, tokenizer):
+    """``k`` needles, each a distinct key with a distinct value; ask for all.
+
+    This is the capacity probe: the answer needs every one of the ``k``
+    statements, so ``required_set_tokens`` is a known quantity rather than a
+    guess, and no arithmetic is involved -- the model only has to reproduce the
+    values.  The question names all ``k`` keys (in a shuffled order, so the
+    order of the answer is not a cue), which also means the observation window
+    sees the keys that have to be looked up.
+    """
+    rng = record_rng("needles", items, seed)
+    keys = distinct_keys(rng, items)
+    values = distinct_values(rng, items)
+    order = list(range(items))
+    rng.shuffle(order)
+    statements = [f"One of the magic numbers for {key} is {value}."
+                  for key, value in zip(keys, values)]
+    intro = ("A list of records is given below. Each record names a key and the "
+             "magic number assigned to that key.")
+    asked = ", ".join(keys[index] for index in order)
+    question = (f"What are the magic numbers for all of these keys mentioned "
+                f"above: {asked}? Answer with all {items} numbers separated by "
+                "commas.")
+    prompt, n_tokens, statement_tokens = assemble_prompt(
+        intro, statements, question, target_tokens, tokenizer, rng)
+    references = [str(value) for value in values]
+    return {
+        "family": "needles", "items": items, "seed": seed,
+        "aggregate": None, "distractors": None, "distractor_count": None,
+        "key_count": items, "prompt": prompt, "prompt_tokens": n_tokens,
+        "statement_tokens": statement_tokens,
+        "expected": ", ".join(references), "references": references,
+        "keys": keys, "values": references,
+        "ask_order": [keys[index] for index in order], "ask_order_indices": order,
+    }
+
+
 def aggregate_record(items, seed, target_tokens, tokenizer, aggregate="sum"):
     """``m`` scattered items; ask for their sum or for a status count."""
     rng = record_rng("aggregate", items, seed, aggregate)
-    names = (rng.sample(ITEM_NAMES, items) if items <= len(ITEM_NAMES)
-             else [f"{name}{index}"
-                   for index, name in enumerate(ITEM_NAMES)][:items])
+    names = item_names(rng, items)
     if aggregate == "sum":
         values = [rng.randint(1, 9) for _ in range(items)]
         statuses = [rng.choice(STATUSES) for _ in range(items)]
@@ -349,18 +578,38 @@ def aggregate_record(items, seed, target_tokens, tokenizer, aggregate="sum"):
         "aggregate": aggregate, "prompt": prompt, "prompt_tokens": n_tokens,
         "statement_tokens": statement_tokens, "expected": expected,
         "distractors": distractors, "names": names,
+        "distractor_count": None, "key_count": None,
         "values": [str(v) for v in values], "statuses": list(statuses),
         "target_status": target_status if aggregate == "count" else None,
     }
 
 
-def build_record(family, items, seed, target_tokens, tokenizer, aggregate="sum"):
+def build_record(family, items, seed, target_tokens, tokenizer, aggregate="sum",
+                 distractors=None):
     """One task record of the requested family (deterministic in the seed)."""
     if family == "multikey":
-        return multikey_record(items, seed, target_tokens, tokenizer)
+        return multikey_record(items, seed, target_tokens, tokenizer, distractors)
+    if family == "needles":
+        return needles_record(items, seed, target_tokens, tokenizer)
     if family == "aggregate":
         return aggregate_record(items, seed, target_tokens, tokenizer, aggregate)
     raise ValueError(f"unknown family {family!r}")
+
+
+def decode_budget(family, items, requested=None):
+    """Greedy decode budget for one record.
+
+    ``--max-new`` wins when given.  Otherwise the default is 24 tokens for the
+    single-answer families and ``max(32, 8 x k)`` for ``needles``, because the
+    answer there is ``k`` values: a decode budget that cannot hold the whole
+    answer would turn ``exact_set_match`` into a measurement of the decode loop
+    rather than of the cache.
+    """
+    if requested is not None:
+        return int(requested)
+    if family == "needles":
+        return max(32, 8 * int(items))
+    return 24
 
 
 # --------------------------------------------------------------------------- #
@@ -472,11 +721,20 @@ def required_budget_from_matrix(accuracy_by_budget, full_accuracy, tolerance=0.0
     return qualifying[0] if qualifying else None
 
 
-def _nested_matrix(rows, budgets):
-    """Accuracy nested by family -> items -> budget (plus a ``full`` key)."""
+def _nested_matrix(rows, budgets, field="items"):
+    """Accuracy nested by family -> ``field`` -> budget (plus a ``full`` key).
+
+    ``field`` is ``"items"`` for the main matrix (``k`` keys, ``m`` items, ``k``
+    needles) and ``"distractors"`` for the competition axis (the number of other
+    keys sharing the asked key's surface form).  Rows with no value on that axis
+    are skipped.
+    """
     matrix = {}
     for row in rows:
-        cell = matrix.setdefault(row["family"], {}).setdefault(str(row["items"]), {})
+        key = row.get(field)
+        if key is None:
+            continue
+        cell = matrix.setdefault(row["family"], {}).setdefault(str(key), {})
         arm = "full" if row["arm"] == "full" else str(row["budget"])
         cell.setdefault(arm, []).append(float(bool(row["correct"])))
     out = {}
@@ -491,11 +749,14 @@ def _nested_matrix(rows, budgets):
     return out
 
 
-def _required_budgets(rows, budgets, tolerance):
-    """``{family: {items: smallest matching budget or None}}``."""
+def _required_budgets(rows, budgets, tolerance, field="items"):
+    """``{family: {field: smallest matching budget or None}}``."""
     cells = {}
     for row in rows:
-        cells.setdefault((row["family"], row["items"]), []).append(row)
+        key = row.get(field)
+        if key is None:
+            continue
+        cells.setdefault((row["family"], key), []).append(row)
     out = {}
     for (family, items), cell_rows in cells.items():
         per_budget, full_scores = {}, []
@@ -519,19 +780,197 @@ def _mean_field(rows, field):
     return round(sum(values) / len(values), 2) if values else None
 
 
+def _mean_bool(rows, field):
+    values = [float(bool(row[field])) for row in rows if row.get(field) is not None]
+    return round(sum(values) / len(values), 4) if values else None
+
+
+def _mean_float(rows, field, digits=4):
+    values = [float(row[field]) for row in rows if row.get(field) is not None]
+    return round(sum(values) / len(values), digits) if values else None
+
+
+def row_covers_required_set(row):
+    """Whether a bounded row's retained width covers its required set.
+
+    ``None`` for the Full-KV arm (which keeps every slot) and for rows without a
+    ``required_set_tokens``.  The comparison uses the *measured* ``kept_slots``
+    of the bounded arm rather than the nominal budget, so a budget the selection
+    could not fill (a prompt shorter than the budget) does not count as covering
+    anything.  A row that already carries the flag is trusted.
+    """
+    if row["arm"] == "full" or row.get("required_set_tokens") is None:
+        return None
+    flag = row.get("budget_covers_required_set")
+    if flag is not None:
+        return bool(flag)
+    return bool(row["required_set_tokens"] <= row["kept_slots"])
+
+
+def _coverage_side(rows):
+    """Row/cell counts and conditional means for one side of the split."""
+    return {
+        "rows": len(rows),
+        "cells": len({(row["family"], row["items"], row["length"], row["budget"])
+                      for row in rows}),
+        "mean_accuracy": _mean_bool(rows, "correct"),
+        "mean_partial_recall": _mean_float(rows, "partial_recall"),
+        "mean_kept_slots": _mean_field(rows, "kept_slots"),
+        "mean_required_set_tokens": _mean_field(rows, "required_set_tokens"),
+    }
+
+
+def _separation(covered, not_covered):
+    """``covered - not_covered`` for the two conditional means."""
+    def difference(left, right):
+        return None if left is None or right is None else round(left - right, 4)
+    return {
+        "accuracy": difference(covered["mean_accuracy"], not_covered["mean_accuracy"]),
+        "partial_recall": difference(covered["mean_partial_recall"],
+                                     not_covered["mean_partial_recall"]),
+    }
+
+
+def budget_coverage_block(rows):
+    """Accuracy conditional on the retained budget covering the required set.
+
+    This is prediction 2 in its operational form: every bounded row is split by
+    ``required_set_tokens <= kept_slots`` and the two conditional means are
+    reported with the row and cell counts, overall, per family, per cell
+    (``family -> items``) and per budget.  The block measures the cliff instead
+    of assuming it -- the two sides are whatever the sweep produced, and a
+    positive ``separation`` is evidence for the prediction while a near-zero one
+    is evidence against it.
+    """
+    bounded = [row for row in rows if row_covers_required_set(row) is not None]
+    covered = [row for row in bounded if row_covers_required_set(row)]
+    not_covered = [row for row in bounded if not row_covers_required_set(row)]
+    block = {
+        "rule": ("a bounded row's budget covers its required set when "
+                 "required_set_tokens <= kept_slots, where kept_slots is the "
+                 "measured retained width of the bounded arm (not the nominal "
+                 "budget) and required_set_tokens is the mean tokens per item "
+                 "statement times the number of items the answer needs"),
+        "prediction": ("prediction 2 of docs/MECHANISM.md: accuracy is high when "
+                       "the budget covers the required set and collapses when it "
+                       "does not; `separation` is the measured size of the cliff"),
+        "covered": _coverage_side(covered),
+        "not_covered": _coverage_side(not_covered),
+        "separation": _separation(_coverage_side(covered), _coverage_side(not_covered)),
+        "by_family": {},
+        "by_cell": {},
+        "by_budget": {},
+    }
+    for family in sorted({row["family"] for row in bounded}):
+        family_rows = [row for row in bounded if row["family"] == family]
+        side_covered = [row for row in family_rows if row_covers_required_set(row)]
+        side_missing = [row for row in family_rows if not row_covers_required_set(row)]
+        block["by_family"][family] = {
+            "covered": _coverage_side(side_covered),
+            "not_covered": _coverage_side(side_missing),
+            "separation": _separation(_coverage_side(side_covered),
+                                      _coverage_side(side_missing)),
+        }
+    for family in sorted({row["family"] for row in bounded}):
+        for items in sorted({row["items"] for row in bounded if row["family"] == family}):
+            cell_rows = [row for row in bounded
+                         if row["family"] == family and row["items"] == items]
+            side_covered = [row for row in cell_rows if row_covers_required_set(row)]
+            side_missing = [row for row in cell_rows if not row_covers_required_set(row)]
+            block["by_cell"].setdefault(family, {})[str(items)] = {
+                "covered": _coverage_side(side_covered),
+                "not_covered": _coverage_side(side_missing),
+                "separation": _separation(_coverage_side(side_covered),
+                                          _coverage_side(side_missing)),
+            }
+    for budget in sorted({int(row["budget"]) for row in bounded
+                          if row.get("budget") is not None}):
+        budget_rows = [row for row in bounded if int(row["budget"]) == budget]
+        side_covered = [row for row in budget_rows if row_covers_required_set(row)]
+        side_missing = [row for row in budget_rows if not row_covers_required_set(row)]
+        block["by_budget"][str(budget)] = {
+            "covered": _coverage_side(side_covered),
+            "not_covered": _coverage_side(side_missing),
+            "separation": _separation(_coverage_side(side_covered),
+                                      _coverage_side(side_missing)),
+        }
+    return block
+
+
+def full_kv_unsolved_block(rows):
+    """Cells the Full-KV arm itself scores zero on, so nothing can be matched.
+
+    ``required_budget`` is ``null`` for these cells by construction, and this
+    block says why: the model cannot do the task at full KV, so the cell is a
+    model failure and not a cache result.  Reporting them explicitly keeps the
+    summary from hiding "the model cannot add" behind a retention story.
+    """
+    cells = {}
+    for row in rows:
+        if row["arm"] != "full":
+            continue
+        cell = cells.setdefault((row["family"], row["items"]),
+                                {"scores": [], "seeds": set(), "lengths": set()})
+        cell["scores"].append(float(bool(row["correct"])))
+        cell["seeds"].add(row["seed"])
+        cell["lengths"].add(row["length"])
+    out, count = {}, 0
+    for (family, items), cell in sorted(cells.items()):
+        accuracy = (sum(cell["scores"]) / len(cell["scores"])) if cell["scores"] else 0.0
+        if accuracy > 0.0:
+            continue
+        out.setdefault(family, {})[str(items)] = {
+            "full_accuracy": round(accuracy, 4),
+            "required_budget": None,
+            "records": len(cell["scores"]),
+            "seeds": len(cell["seeds"]),
+            "lengths": sorted(cell["lengths"]),
+            "reason": ("Full-KV answered none of these records: the task, not the "
+                       "cache, is the bottleneck, so required_budget is null"),
+        }
+        count += 1
+    return {
+        "rule": ("cells whose Full-KV accuracy is 0; required_budget stays null "
+                 "for them and they must not be read as bounded-retention "
+                 "failures"),
+        "count": count,
+        "cells": out,
+    }
+
+
+def _pool_across_lengths(summary, lengths, field_name):
+    """A per-length ``{family: {key: budget}}`` pooled to the largest that held."""
+    pooled = {}
+    for family, by_key in summary["by_length"][str(lengths[0])][field_name].items():
+        pooled[family] = {}
+        for key in by_key:
+            values = [summary["by_length"][str(length)][field_name]
+                      .get(family, {}).get(key) for length in lengths]
+            pooled[family][key] = (None if any(v is None for v in values)
+                                   else max(values))
+    return pooled
+
+
 def summarize(rows, budgets, tolerance=0.0):
     """The accuracy matrix, the derived ``required_budget`` and the checks.
 
     ``accuracy[family][items][budget]`` (with ``"full"`` alongside the tested
-    budgets) is the summary matrix.  ``required_budget[family][items]`` is the
+    budgets) is the summary matrix; ``accuracy_by_distractors`` is the same
+    matrix over the competition axis.  ``required_budget[family][items]`` is the
     smallest tested budget that matches the Full-KV arm on that record set, or
-    ``None``.  With more than one tested length the pooled matrix sits at the
-    top level and ``by_length[str(L)]`` repeats it per length, because the
-    prediction-1 test is precisely "``required_budget`` must not grow with
-    ``L``".
+    ``None`` -- and stays ``None`` whenever the Full-KV arm scores zero, which
+    :func:`full_kv_unsolved_block` reports per cell.  With more than one tested
+    length the pooled matrix sits at the top level and ``by_length[str(L)]``
+    repeats it per length, because the prediction-1 test is precisely
+    "``required_budget`` must not grow with ``L``".
+
+    ``budget_covers_required_set`` is the operational form of prediction 2: the
+    conditional accuracy given ``required_set_tokens <= kept_slots`` with the
+    cell counts (see :func:`budget_coverage_block`).
     """
     lengths = sorted({row["length"] for row in rows})
     budgets = sorted(int(b) for b in budgets)
+    distractor_rows = [row for row in rows if row.get("distractors") is not None]
     summary = {
         "rows": len(rows),
         "lengths": lengths,
@@ -539,11 +978,16 @@ def summarize(rows, budgets, tolerance=0.0):
         "required_budget_rule": (
             "smallest tested budget whose mean accuracy on the record set is "
             "within `required_tol` of the Full-KV arm's mean accuracy and "
-            "strictly positive; null when Full-KV scores zero or no tested "
-            "budget reaches it"),
+            "strictly positive; null when Full-KV scores zero (see "
+            "`full_kv_unsolved`) or no tested budget reaches it"),
         "required_tol": tolerance,
         "accuracy": _nested_matrix(rows, budgets),
         "required_budget": _required_budgets(rows, budgets, tolerance),
+        "accuracy_by_distractors": _nested_matrix(distractor_rows, budgets,
+                                                  "distractors"),
+        "required_budget_by_distractors": _required_budgets(
+            distractor_rows, budgets, tolerance, "distractors"),
+        "full_kv_unsolved": full_kv_unsolved_block(rows),
         "by_length": {},
         "cells": {},
     }
@@ -554,21 +998,23 @@ def summarize(rows, budgets, tolerance=0.0):
         per_length = {
             "accuracy": _nested_matrix(subset, budgets),
             "required_budget": _required_budgets(subset, budgets, tolerance),
+            "accuracy_by_distractors": _nested_matrix(
+                [row for row in subset if row.get("distractors") is not None],
+                budgets, "distractors"),
+            "required_budget_by_distractors": _required_budgets(
+                [row for row in subset if row.get("distractors") is not None],
+                budgets, tolerance, "distractors"),
+            "full_kv_unsolved": full_kv_unsolved_block(subset),
         }
         summary["by_length"][str(length)] = per_length
         if len(lengths) > 1:
             summary["required_budget_by_length"][str(length)] = per_length["required_budget"]
     if len(lengths) > 1:
         # top level: the budget that matched at every tested length
-        pooled = {}
-        for family, by_items in summary["by_length"][str(lengths[0])]["required_budget"].items():
-            pooled[family] = {}
-            for items in by_items:
-                values = [summary["by_length"][str(length)]["required_budget"]
-                          .get(family, {}).get(items) for length in lengths]
-                pooled[family][items] = (None if any(v is None for v in values)
-                                         else max(values))
-        summary["required_budget"] = pooled
+        summary["required_budget"] = _pool_across_lengths(
+            summary, lengths, "required_budget")
+        summary["required_budget_by_distractors"] = _pool_across_lengths(
+            summary, lengths, "required_budget_by_distractors")
 
     # per (family, items): how many tokens the answer's required set occupies
     for family in sorted({row["family"] for row in rows}):
@@ -578,18 +1024,39 @@ def summarize(rows, budgets, tolerance=0.0):
             statement_tokens = _mean_field(cell_rows, "statement_tokens")
             spacing = _mean_field(cell_rows, "mean_item_spacing")
             bounded = [row for row in cell_rows if row["arm"] != "full"]
+            full_rows = [row for row in cell_rows if row["arm"] == "full"]
+            full_accuracy = _mean_bool(full_rows, "correct")
+            budgets_cell = {}
+            for budget in sorted({int(row["budget"]) for row in bounded
+                                  if row.get("budget") is not None}):
+                budget_rows = [row for row in bounded if int(row["budget"]) == budget]
+                covered = [row for row in budget_rows if row_covers_required_set(row)]
+                missing = [row for row in budget_rows if not row_covers_required_set(row)]
+                budgets_cell[str(budget)] = {
+                    "covered": _coverage_side(covered),
+                    "not_covered": _coverage_side(missing),
+                    "mean_kept_slots": _mean_field(budget_rows, "kept_slots"),
+                }
             summary["cells"].setdefault(family, {})[str(items)] = {
                 "seeds": len({row["seed"] for row in cell_rows}),
                 "records": len({(row["seed"], row["length"]) for row in cell_rows}),
+                "distractors": _mean_field(cell_rows, "distractors"),
                 "statement_tokens": statement_tokens,
+                "tokens_per_item": _mean_field(cell_rows, "tokens_per_item"),
                 "mean_item_spacing": spacing,
-                "required_set_tokens": (None if statement_tokens is None
-                                        else round(items * statement_tokens, 1)),
+                "required_set_tokens": _mean_field(cell_rows, "required_set_tokens"),
+                "required_set_tokens_rule": (
+                    "items x mean tokens per item statement (the tokens the item "
+                    "statements occupy); `statement_tokens` is the whole block"),
                 "mean_kept_slots_bounded": _mean_field(bounded, "kept_slots"),
-                "mean_kept_slots_full": _mean_field(
-                    [row for row in cell_rows if row["arm"] == "full"], "kept_slots"),
+                "mean_kept_slots_full": _mean_field(full_rows, "kept_slots"),
+                "full_kv_accuracy": full_accuracy,
+                "full_kv_unsolved": bool(full_accuracy is not None
+                                         and full_accuracy <= 0.0),
+                "budgets": budgets_cell,
             }
 
+    summary["budget_covers_required_set"] = budget_coverage_block(rows)
     summary["prediction_checks"] = _prediction_checks(rows, summary, budgets, lengths)
     return summary
 
@@ -598,11 +1065,12 @@ def _prediction_checks(rows, summary, budgets, lengths):
     """The two mechanism predictions, evaluated on whatever was swept.
 
     Prediction 1 is checked per ``(family, items)``: are the per-length required
-    budgets equal, and does the required budget grow with ``items``?
-    Prediction 2 is reported as the accuracy separation between cells whose
-    budget covers ``items x statement_tokens`` and cells where it does not; the
-    two means and the cell counts are reported instead of a pass/fail flag,
-    because the threshold is the experimenter's to choose.
+    budgets equal, and does the required budget grow with ``items`` (and with the
+    distractor count, the competition axis)?  Prediction 2 lives in
+    ``summary["budget_covers_required_set"]``; the ``cliff`` entry below keeps
+    the original nominal-budget view for continuity and repeats its two means.
+    The means and cell counts are reported instead of a pass/fail flag, because
+    the threshold is the experimenter's to choose.
     """
     checks = {}
     flat = []
@@ -616,17 +1084,26 @@ def _prediction_checks(rows, summary, budgets, lengths):
     checks["required_budget_flat_in_length"] = (all(flat) if flat else None)
     checks["required_budget_flat_cells"] = len(flat)
 
-    grows = []
-    for length in lengths:
-        per_length = summary["by_length"][str(length)]["required_budget"]
-        for family, by_items in per_length.items():
-            sequence = [(int(items), value) for items, value in by_items.items()
-                        if value is not None]
-            sequence.sort()
-            if len(sequence) > 1:
-                grows.append(all(b[1] >= a[1] for a, b in zip(sequence, sequence[1:])))
-    checks["required_budget_grows_with_items"] = (all(grows) if grows else None)
-    checks["required_budget_grows_cells"] = len(grows)
+    def grows_over(field_name):
+        cells = 0
+        verdicts = []
+        for length in lengths:
+            per_length = summary["by_length"][str(length)][field_name]
+            for family, by_items in per_length.items():
+                sequence = [(int(items), value) for items, value in by_items.items()
+                            if value is not None]
+                sequence.sort()
+                if len(sequence) > 1:
+                    cells += 1
+                    verdicts.append(all(b[1] >= a[1]
+                                        for a, b in zip(sequence, sequence[1:])))
+        return (all(verdicts) if verdicts else None), cells
+
+    checks["required_budget_grows_with_items"], checks["required_budget_grows_cells"] = \
+        grows_over("required_budget")
+    (checks["required_budget_grows_with_distractors"],
+     checks["required_budget_grows_with_distractors_cells"]) = \
+        grows_over("required_budget_by_distractors")
 
     above, below = [], []
     for row in rows:
@@ -637,6 +1114,7 @@ def _prediction_checks(rows, summary, budgets, lengths):
             above.append(value)
         else:
             below.append(value)
+    coverage = summary.get("budget_covers_required_set", {})
     checks["cliff"] = {
         "mean_accuracy_budget_covers_required_set": (round(sum(above) / len(above), 4)
                                                     if above else None),
@@ -644,6 +1122,9 @@ def _prediction_checks(rows, summary, budgets, lengths):
                                                    if below else None),
         "cells_above": len(above), "cells_below": len(below),
         "required_set_tokens_rule": "items x mean tokens per item statement",
+        "budget_comparison": "nominal budget, not the measured kept slots",
+        "measured_kept_slots_block": "budget_covers_required_set",
+        "measured_separation_accuracy": coverage.get("separation", {}).get("accuracy"),
     }
     return checks
 
@@ -656,9 +1137,16 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         description="Required-set sweep: items the answer depends on vs retained budget.")
     parser.add_argument("--family", nargs="+", default=["multikey", "aggregate"],
-                        choices=["multikey", "aggregate"])
+                        choices=["multikey", "aggregate", "needles"])
     parser.add_argument("--items", nargs="+", type=int, default=[1, 2, 4, 8, 16],
-                        help="k for multikey, m for aggregate")
+                        help="k for multikey (total keys in the legacy shape) and "
+                             "for needles (needles asked for), m for aggregate; "
+                             "ignored for multikey when --distractors is given")
+    parser.add_argument("--distractors", nargs="+", type=int, default=None,
+                        help="multikey competition axis: the number of other keys "
+                             "sharing the asked key's surface form; each count is "
+                             "swept and the cell label `items` becomes count + 1 "
+                             "(default: off, the legacy --items shape)")
     parser.add_argument("--seeds", type=int, default=3,
                         help="number of seeds (0..seeds-1)")
     parser.add_argument("--length", type=int, default=32768)
@@ -681,7 +1169,9 @@ def parse_args(argv=None):
     parser.add_argument("--scoring", default="last", choices=["last", "mean", "max"])
     parser.add_argument("--prefill-chunk", type=int, default=8192)
     parser.add_argument("--key-chunk", type=int, default=4096)
-    parser.add_argument("--max-new", type=int, default=24)
+    parser.add_argument("--max-new", type=int, default=None,
+                        help="greedy decode budget per arm (default: 24, or "
+                             "max(32, 8 x k) for needles so the whole answer fits)")
     parser.add_argument("--required-tol", type=float, default=0.0,
                         help="accuracy slack allowed when deriving required_budget")
     parser.add_argument("--model", default=os.environ.get("QCC_MODEL", "meta-llama/Llama-3.2-1B-Instruct"))
@@ -702,8 +1192,40 @@ def parse_args(argv=None):
     return parser.parse_args(argv)
 
 
+def build_plan(args, lengths):
+    """One entry per record to build: ``(family, items, distractors, seed, length)``.
+
+    ``multikey`` with ``--distractors`` sweeps the competition axis: the entry's
+    ``items`` is the total key count ``N + 1`` (which is the cell label the
+    summary groups by) and ``--items`` is not used for that family in this mode.
+    Every other family sweeps ``--items``.
+    """
+    plan = []
+    for length in lengths:
+        for family in args.family:
+            if family == "multikey" and args.distractors is not None:
+                for count in sorted({int(value) for value in args.distractors}):
+                    for seed in range(args.seeds):
+                        plan.append({"family": family, "items": count + 1,
+                                     "distractors": count, "seed": seed,
+                                     "length": length})
+            else:
+                for items in args.items:
+                    for seed in range(args.seeds):
+                        plan.append({"family": family, "items": int(items),
+                                     "distractors": None, "seed": seed,
+                                     "length": length})
+    return plan
+
+
 def main(argv=None):
     args = parse_args(argv)
+    if args.distractors is not None:
+        if any(int(value) < 1 for value in args.distractors):
+            raise SystemExit("--distractors counts must be >= 1")
+        if "multikey" not in args.family:
+            print("[plan] --distractors only affects family=multikey; ignored here",
+                  flush=True)
     if args.trust_remote_code:
         _ensure_remote_code_compat()
     from transformers import AutoTokenizer
@@ -723,18 +1245,31 @@ def main(argv=None):
     budgets = sorted(args.budgets)
     configs = {budget: retention_config(args, budget) for budget in budgets}
 
-    plan = [(family, items, seed, length)
-            for length in lengths
-            for family in args.family
-            for items in args.items
-            for seed in range(args.seeds)]
+    plan = build_plan(args, lengths)
+    if args.distractors is not None and "multikey" in args.family:
+        key_counts = sorted({entry["items"] for entry in plan
+                             if entry["family"] == "multikey"})
+        print(f"[plan] multikey competition axis: {len(key_counts)} key counts "
+              f"{key_counts} (--items is not used for multikey while --distractors "
+              "is given)", flush=True)
     print(f"[plan] {len(plan)} records x (1 full + {len(budgets)} budgets) arms  "
           f"lengths={lengths} items={args.items} budgets={budgets} "
+          f"distractors={args.distractors} "
           f"device={args.device} shared_prefill={args.shared_prefill}", flush=True)
 
     rows = []
-    for index, (family, items, seed, length) in enumerate(plan):
-        record = build_record(family, items, seed, length, tokenizer, args.aggregate)
+    for index, entry in enumerate(plan):
+        family, items = entry["family"], entry["items"]
+        seed, length = entry["seed"], entry["length"]
+        record = build_record(family, items, seed, length, tokenizer, args.aggregate,
+                              distractors=entry["distractors"])
+        max_new = decode_budget(family, items, args.max_new)
+        # ``record["statement_tokens"]`` is the whole item-statement block; the
+        # required set of every family is that block (every item for needles and
+        # aggregate, every competing key for multikey), i.e. items x tokens per
+        # item statement.  The per-item mean is what makes the product honest.
+        tokens_per_item = round(record["statement_tokens"] / max(1, items), 2)
+        required_set_tokens = round(items * tokens_per_item, 1)
         ids = torch.tensor([encode_ids(tokenizer, record["prompt"])],
                            dtype=torch.long, device=device)
         prompt_tokens = int(ids.shape[1])
@@ -777,26 +1312,36 @@ def main(argv=None):
                     kept = int(working.get_seq_length())
                 decode_start = time.time()
                 generated, _decode_s = greedy(model, working, logits[:, -1:].argmax(-1),
-                                              prompt_tokens, args.max_new, eos_ids,
+                                              prompt_tokens, max_new, eos_ids,
                                               kwargs_names)
                 decode_s = time.time() - decode_start
                 text = decode_ids(tokenizer, generated).strip()
-                scored = score_prediction(text, record["expected"],
-                                          record["distractors"])
+                scored = score_record(record, text)
                 row = {
                     "family": family, "items": items, "seed": seed,
                     "length": length, "aggregate": record["aggregate"],
+                    "distractors": record.get("distractor_count"),
+                    "key_count": record.get("key_count"),
                     "arm": arm, "budget": budget, "prompt_tokens": prompt_tokens,
                     "kept_slots": int(kept),
                     "prediction": text, "expected": record["expected"],
+                    "references": scored["references"],
                     "correct": scored["correct"], "parsed": scored["parsed"],
                     "partial": scored["partial"],
+                    "partial_recall": scored["partial_recall"],
+                    "exact_set_match": scored["exact_set_match"],
+                    "present": scored["present"], "missing": scored["missing"],
                     "distractor_hit": scored["distractor_hit"],
                     "candidates": scored["candidates"],
                     "generated_tokens": len(generated),
+                    "max_new": max_new,
                     "statement_tokens": record["statement_tokens"],
+                    "tokens_per_item": tokens_per_item,
                     "mean_item_spacing": mean_spacing,
-                    "required_set_tokens": round(items * record["statement_tokens"], 1),
+                    "required_set_tokens": required_set_tokens,
+                    "budget_covers_required_set": (
+                        None if arm == "full"
+                        else bool(required_set_tokens <= kept)),
                     "prefill_s": round(arm_prefill_s, 2),
                     "decode_s": round(decode_s, 2),
                     "peak_mib": peak_memory_mib(device),
@@ -806,9 +1351,12 @@ def main(argv=None):
                     "shared_prefill": bool(args.shared_prefill),
                 }
                 arm_rows.append(row)
-                print(f"[{index:>3d}/{len(plan)}] {family:<9} items={items:<2d} "
+                print(f"[{index:>3d}/{len(plan)}] {family:<9} items={items:<3d} "
                       f"L={prompt_tokens:>6d} seed={seed} {arm:<7} kept={kept:>6d} "
-                      f"correct={int(row['correct'])} pred={text[:24]!r}", flush=True)
+                      f"covered={str(row['budget_covers_required_set']):<5} "
+                      f"correct={int(row['correct'])} "
+                      f"recall={row['partial_recall']:.2f} pred={text[:24]!r}",
+                      flush=True)
                 if arm != "full" and not args.shared_prefill:
                     del working
                     if device.type == "cuda":
@@ -829,10 +1377,17 @@ def main(argv=None):
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(payload, indent=1))
-    print("\n" + json.dumps({k: v for k, v in summary.items()
-                             if k in ("accuracy", "required_budget",
-                                      "required_budget_by_length",
-                                      "prediction_checks")}, indent=1))
+    coverage = summary["budget_covers_required_set"]
+    printed = {
+        key: value for key, value in summary.items()
+        if key in ("accuracy", "required_budget", "required_budget_by_length",
+                   "required_budget_by_distractors", "full_kv_unsolved",
+                   "prediction_checks")
+    }
+    printed["budget_covers_required_set"] = {
+        key: coverage[key]
+        for key in ("covered", "not_covered", "separation", "by_family")}
+    print("\n" + json.dumps(printed, indent=1))
     print("wrote", out)
     return summary
 
