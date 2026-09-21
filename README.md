@@ -124,6 +124,7 @@ tests/                    CPU test suite (policy invariants, quantization, LongB
 |---|---|
 | [`docs/REPORT.md`](docs/REPORT.md) | the full measurement record, including sections on ragged batches, package/harness parity, LongBench and baselines, state growth, quantization, cross-family results, and what is not established |
 | [`docs/CLAIMS.md`](docs/CLAIMS.md) | claim → code path → artifact → command, with the open questions and the experiment that closes each |
+| [`docs/MECHANISM.md`](docs/MECHANISM.md) | why a fixed slot count can be enough, the NLL-vs-budget evidence, and three falsifiable predictions |
 | [`docs/REPRODUCING.md`](docs/REPRODUCING.md) | setup and the exact command behind every artifact |
 | [`docs/NOVELTY.md`](docs/NOVELTY.md) | the boundary against prior bounded-memory attention work |
 | [`docs/RELEASE.md`](docs/RELEASE.md) | the snapshot bundle and how to verify it |

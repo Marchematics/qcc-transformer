@@ -20,6 +20,8 @@ because the card was shared while they were taken.
 | A10 | Matched-budget baselines over the same 80 records: sliding window 0.167, sinks+recent 0.332, last-query 0.842, window-max 0.863, SnapKV-shaped window-mean 0.880, shipped 1.008; only the shipped configuration never fails a task outright | `artifacts/bounded-decode-frontier-baselines-b4096.json`, report 3.21 | `python benchmarks/analyze_campaign.py baselines artifacts/bounded-decode-frontier-baselines-b4096.json` |
 | A9 | LongBench harness with the official per-task metrics, validated against the official scorer | `benchmarks/longbench_metrics.py`, `tests/test_longbench_metrics.py` | `pytest -q tests/test_longbench_metrics.py` |
 
+| A11 | Language-model NLL under bounded retention is budget- and corpus-dependent, not destroyed: 1.06-1.15x Full-KV below 8K slots, 0.99-1.08x at 8-16K, and on a self-similar corpus slightly *better* at 8K (ppl 0.983x) | `artifacts/bounded-decode-frontier-lm-nll-32k-b{2048,4096,8192}.json`, `artifacts/lm_nll_pinned_b{1024,2048,4096,8192,16384}.json`, `docs/MECHANISM.md` | `python benchmarks/benchmark_bounded_decode_lm_nll.py` |
+
 ## B. Open, with the specific experiment that closes it
 
 | # | open question | why it matters | the run that closes it |
