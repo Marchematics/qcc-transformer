@@ -165,11 +165,13 @@ def main(argv=None):
             torch.cuda.reset_peak_memory_stats()
             torch.cuda.synchronize()
             started = time.time()
-            # the masked path is the one this codebase has verified at 128-262K on
-            # this stack: the maskless path is exact (see tests/test_prefill_accumulate)
-            # but lets the SDPA mask builder materialise a larger mask at these lengths
+            # maskless + fused kernel: Hugging Face then sets `is_causal`, which is
+            # exactly the mask a chunk needs when it is the last n positions of the
+            # cached keys, and the fused kernel keeps the prefill at a few hundred MiB
+            # instead of tens of GiB (report 3.34)
             cache, logits, captured = L.prefill_capture(model, tensor, args.obs,
-                                                        args.prefill_chunk)
+                                                        args.prefill_chunk,
+                                                        attention_mask=False, flash=True)
             torch.cuda.synchronize()
             prefill_s = time.time() - started
             peak_gib = round(torch.cuda.max_memory_allocated() / 2 ** 30, 2)
