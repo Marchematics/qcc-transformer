@@ -78,10 +78,27 @@ def multimodel(paths):
               f"worst task retention {worst:.4f}")
 
 
-def baselines(path):
-    data = json.load(open(path))
-    rows = data["results"]
-    model_path = (data.get("config") or {}).get("model") or data.get("model")
+def load_baseline_rows(paths):
+    """Rows of one or more baseline artifacts, pooled for a merged table.
+
+    ``--merge`` exists because the published-family baselines were measured in a
+    second run (they need a different prefill path); the merged table puts every
+    policy on the same 80 records with the Full-KV arm as the common reference.
+    """
+    rows, model_path = [], None
+    for path in paths:
+        data = json.load(open(path))
+        rows.extend(data["results"])
+        model_path = model_path or (data.get("config") or {}).get("model") \
+            or data.get("model")
+    return rows, model_path
+
+
+def baselines(path, rows=None, model_path=None):
+    if rows is None:
+        data = json.load(open(path))
+        rows = data["results"]
+        model_path = (data.get("config") or {}).get("model") or data.get("model")
     if model_path is None:                      # partial writes carry rows only
         model_path = json.load(open(rows[0]["source_json"]))["config"]["model"] \
             if "source_json" in rows[0] else DEFAULT_MODEL
@@ -105,7 +122,8 @@ def baselines(path):
                 base = official(reference["prediction"], reference["outputs"]) if reference else 0.0
                 if base > 0:
                     ratios.append(score / base)
-        slots = sum(row["kept_slots"] for row in selected) / len(selected)
+        slots = sum(row.get("kept_slots_mean") or row["kept_slots"]
+                    for row in selected) / len(selected)
         print(f"| {policy} | " + " | ".join(f"{per_task[task]:.3f}" for task in tasks) +
               f" | {len(ratios)} | {sum(ratios) / len(ratios):.4f} | {min(ratios):.3f} "
               f"| {slots:.0f} | {mib(state_bytes(model_path, slots))} MiB |")
@@ -144,9 +162,16 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("kind", choices=["multimodel", "baselines"])
     parser.add_argument("paths", nargs="+")
+    parser.add_argument("--merge", action="store_true",
+                        help="pool every policy in the given baseline artifacts "
+                             "into one table (one Full-KV reference for all of them)")
     args = parser.parse_args()
     if args.kind == "multimodel":
         multimodel(args.paths)
+    elif args.merge:
+        print("## " + " + ".join(args.paths))
+        rows, model_path = load_baseline_rows(args.paths)
+        baselines(args.paths[0], rows=rows, model_path=model_path)
     else:
         for path in args.paths:
             print(f"## {path}")

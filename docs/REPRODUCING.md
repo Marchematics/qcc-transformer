@@ -70,6 +70,38 @@ python benchmarks/benchmark_retention_multimodel.py --model <checkpoint> \
     --budget 4608 --lex-cap 0 --scoring mean --out artifacts/<name>.json
 ```
 
+## Head-to-head with the published eviction families
+
+The same runner implements the recent eviction families as selection rules, so one
+variable moves: which positions survive. `h2o` ranks by attention accumulated over
+every prefill query, `tova` by how often a key was a query's top-1, `quest` selects
+whole 16-token blocks by the observation window's best similarity, and
+`pyramid`/`pyramid_mild` spend a layer-dependent budget (1.5x to 0.5x and 1.25x to
+0.75x from the first layer to the last, mean preserved).
+
+```bash
+# the cheap families on all 80 records, merged with the stored baseline table
+python benchmarks/benchmark_bounded_decode_ruler.py --model <checkpoint> \
+    --ruler-jsonl <split> --tasks niah_single_1 niah_multikey_2 niah_multikey_3 vt \
+    --policies full quest pyramid --budgets 4096 --obs 64 --nsink 4 --pool 7 \
+    --dilate 9 --lex-cap 512 --hops 6 --key-chunk 1024 --max-new 128 \
+    --prefill-chunk 8192 --out artifacts/baselines-quest-pyramid.json
+
+# the accumulated-attention families need a second pass over the prompt's
+# attention, so they run on a balanced subset (--max-per-task spreads the subset
+# across each task's length range) with their own Full-KV and reference arms
+python benchmarks/benchmark_bounded_decode_ruler.py --model <checkpoint> \
+    --ruler-jsonl <split> --tasks niah_single_1 niah_multikey_2 niah_multikey_3 vt \
+    --policies full obs_last obs_mean lex_obs h2o tova --budgets 4096 --obs 64 \
+    --nsink 4 --pool 7 --dilate 9 --lex-cap 512 --hops 6 --key-chunk 1024 \
+    --max-new 128 --prefill-chunk 8192 --max-per-task 10 \
+    --out artifacts/baselines-accumulated.json
+
+python benchmarks/analyze_campaign.py baselines --merge \
+    artifacts/bounded-decode-frontier-baselines-b4096.json \
+    artifacts/baselines-quest-pyramid.json
+```
+
 ## Where the capacity of the policy comes from
 
 The selection sees only the last `observation_window` tokens of the prompt, and

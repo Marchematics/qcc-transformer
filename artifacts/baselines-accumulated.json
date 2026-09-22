@@ -1,0 +1,5732 @@
+{
+ "model": "/root/qcc/models/Llama-3.2-1B-Instruct",
+ "ruler": "/home/waas/ruler_a10_v1/ruler_subset.jsonl",
+ "config": {
+  "model": "/root/qcc/models/Llama-3.2-1B-Instruct",
+  "ruler_jsonl": "/home/waas/ruler_a10_v1/ruler_subset.jsonl",
+  "tasks": [
+   "niah_single_1",
+   "niah_multikey_2",
+   "niah_multikey_3",
+   "vt"
+  ],
+  "lengths": null,
+  "max_records": null,
+  "max_per_task": 10,
+  "policies": [
+   "full",
+   "obs_last",
+   "obs_mean",
+   "lex_obs",
+   "h2o",
+   "tova"
+  ],
+  "budgets": [
+   4096
+  ],
+  "obs": 64,
+  "nsink": 4,
+  "pool": 7,
+  "dilate": 9,
+  "lex_cap": 512,
+  "hops": 6,
+  "key_chunk": 1024,
+  "accumulate_stride": 1,
+  "max_new": 128,
+  "prefill_chunk": 8192,
+  "no_answer_prefix": false,
+  "out": "artifacts/baselines-accumulated.json"
+ },
+ "results": [
+  {
+   "row_id": 0,
+   "task": "niah_multikey_2",
+   "length": 16266,
+   "length_bucket": 16384,
+   "context_tokens": 11795,
+   "policy": "full",
+   "budget": null,
+   "kept_slots": 11795,
+   "prediction": "7549132.",
+   "generated": 5,
+   "outputs": [
+    "7549132"
+   ],
+   "answer_recall": 1.0,
+   "selection": null,
+   "decode_s": 0.0959,
+   "prefill_s": 11.242,
+   "peak_cuda_bytes": 6610400256
+  },
+  {
+   "row_id": 0,
+   "task": "niah_multikey_2",
+   "length": 16266,
+   "length_bucket": 16384,
+   "context_tokens": 11795,
+   "policy": "obs_last",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "7549132.",
+   "generated": 5,
+   "outputs": [
+    "7549132"
+   ],
+   "answer_recall": 1.0,
+   "selection": null,
+   "decode_s": 0.0675,
+   "prefill_s": 11.242,
+   "peak_cuda_bytes": 6610400256
+  },
+  {
+   "row_id": 0,
+   "task": "niah_multikey_2",
+   "length": 16266,
+   "length_bucket": 16384,
+   "context_tokens": 11795,
+   "policy": "obs_mean",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "7549132.",
+   "generated": 5,
+   "outputs": [
+    "7549132"
+   ],
+   "answer_recall": 1.0,
+   "selection": null,
+   "decode_s": 0.0675,
+   "prefill_s": 11.242,
+   "peak_cuda_bytes": 6610400256
+  },
+  {
+   "row_id": 0,
+   "task": "niah_multikey_2",
+   "length": 16266,
+   "length_bucket": 16384,
+   "context_tokens": 11795,
+   "policy": "lex_obs",
+   "budget": 4096,
+   "kept_slots": 4608,
+   "prediction": "7549132.",
+   "generated": 5,
+   "outputs": [
+    "7549132"
+   ],
+   "answer_recall": 1.0,
+   "selection": null,
+   "decode_s": 0.0676,
+   "prefill_s": 11.242,
+   "peak_cuda_bytes": 6610400256
+  },
+  {
+   "row_id": 0,
+   "task": "niah_multikey_2",
+   "length": 16266,
+   "length_bucket": 16384,
+   "context_tokens": 11795,
+   "policy": "h2o",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "8897330.",
+   "generated": 5,
+   "outputs": [
+    "7549132"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 0.0684,
+   "prefill_s": 11.242,
+   "peak_cuda_bytes": 6610400256
+  },
+  {
+   "row_id": 0,
+   "task": "niah_multikey_2",
+   "length": 16266,
+   "length_bucket": 16384,
+   "context_tokens": 11795,
+   "policy": "tova",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "7463483.",
+   "generated": 5,
+   "outputs": [
+    "7549132"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 0.0674,
+   "prefill_s": 11.242,
+   "peak_cuda_bytes": 6610400256
+  },
+  {
+   "row_id": 1,
+   "task": "niah_multikey_2",
+   "length": 16323,
+   "length_bucket": 16384,
+   "context_tokens": 11807,
+   "policy": "full",
+   "budget": null,
+   "kept_slots": 11807,
+   "prediction": "3539476.",
+   "generated": 6,
+   "outputs": [
+    "3539476"
+   ],
+   "answer_recall": 1.0,
+   "selection": null,
+   "decode_s": 0.082,
+   "prefill_s": 10.641,
+   "peak_cuda_bytes": 6610400256
+  },
+  {
+   "row_id": 1,
+   "task": "niah_multikey_2",
+   "length": 16323,
+   "length_bucket": 16384,
+   "context_tokens": 11807,
+   "policy": "obs_last",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "3539476.",
+   "generated": 6,
+   "outputs": [
+    "3539476"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 26,
+    "answer_token_keep_fraction": 0.203125,
+    "all_answer_unit_fraction": 0.203125
+   },
+   "decode_s": 0.0848,
+   "prefill_s": 10.641,
+   "peak_cuda_bytes": 6610400256
+  },
+  {
+   "row_id": 1,
+   "task": "niah_multikey_2",
+   "length": 16323,
+   "length_bucket": 16384,
+   "context_tokens": 11807,
+   "policy": "obs_mean",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "3539476.",
+   "generated": 6,
+   "outputs": [
+    "3539476"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 14,
+    "answer_token_keep_fraction": 0.109375,
+    "all_answer_unit_fraction": 0.109375
+   },
+   "decode_s": 0.0846,
+   "prefill_s": 10.641,
+   "peak_cuda_bytes": 6610400256
+  },
+  {
+   "row_id": 1,
+   "task": "niah_multikey_2",
+   "length": 16323,
+   "length_bucket": 16384,
+   "context_tokens": 11807,
+   "policy": "lex_obs",
+   "budget": 4096,
+   "kept_slots": 4608,
+   "prediction": "3539476.",
+   "generated": 6,
+   "outputs": [
+    "3539476"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 31,
+    "answer_token_keep_fraction": 0.2421875,
+    "all_answer_unit_fraction": 0.2421875
+   },
+   "decode_s": 0.0834,
+   "prefill_s": 10.641,
+   "peak_cuda_bytes": 6610400256
+  },
+  {
+   "row_id": 1,
+   "task": "niah_multikey_2",
+   "length": 16323,
+   "length_bucket": 16384,
+   "context_tokens": 11807,
+   "policy": "h2o",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "9857971.",
+   "generated": 6,
+   "outputs": [
+    "3539476"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 5,
+    "answer_token_keep_fraction": 0.0390625,
+    "all_answer_unit_fraction": 0.0390625
+   },
+   "decode_s": 0.0826,
+   "prefill_s": 10.641,
+   "peak_cuda_bytes": 6610400256
+  },
+  {
+   "row_id": 1,
+   "task": "niah_multikey_2",
+   "length": 16323,
+   "length_bucket": 16384,
+   "context_tokens": 11807,
+   "policy": "tova",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "7799702.",
+   "generated": 6,
+   "outputs": [
+    "3539476"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 16,
+    "answer_token_keep_fraction": 0.125,
+    "all_answer_unit_fraction": 0.125
+   },
+   "decode_s": 0.0813,
+   "prefill_s": 10.641,
+   "peak_cuda_bytes": 6610400256
+  },
+  {
+   "row_id": 2,
+   "task": "niah_multikey_2",
+   "length": 16341,
+   "length_bucket": 16384,
+   "context_tokens": 11834,
+   "policy": "full",
+   "budget": null,
+   "kept_slots": 11834,
+   "prediction": "4291815.",
+   "generated": 6,
+   "outputs": [
+    "4291815"
+   ],
+   "answer_recall": 1.0,
+   "selection": null,
+   "decode_s": 0.0844,
+   "prefill_s": 10.655,
+   "peak_cuda_bytes": 6610434048
+  },
+  {
+   "row_id": 2,
+   "task": "niah_multikey_2",
+   "length": 16341,
+   "length_bucket": 16384,
+   "context_tokens": 11834,
+   "policy": "obs_last",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "4291815.",
+   "generated": 6,
+   "outputs": [
+    "4291815"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 28,
+    "answer_token_keep_fraction": 0.21875,
+    "all_answer_unit_fraction": 0.21875
+   },
+   "decode_s": 0.084,
+   "prefill_s": 10.655,
+   "peak_cuda_bytes": 6610434048
+  },
+  {
+   "row_id": 2,
+   "task": "niah_multikey_2",
+   "length": 16341,
+   "length_bucket": 16384,
+   "context_tokens": 11834,
+   "policy": "obs_mean",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "4291815.",
+   "generated": 6,
+   "outputs": [
+    "4291815"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 26,
+    "answer_token_keep_fraction": 0.203125,
+    "all_answer_unit_fraction": 0.203125
+   },
+   "decode_s": 0.0846,
+   "prefill_s": 10.655,
+   "peak_cuda_bytes": 6610434048
+  },
+  {
+   "row_id": 2,
+   "task": "niah_multikey_2",
+   "length": 16341,
+   "length_bucket": 16384,
+   "context_tokens": 11834,
+   "policy": "lex_obs",
+   "budget": 4096,
+   "kept_slots": 4608,
+   "prediction": "4291815.",
+   "generated": 6,
+   "outputs": [
+    "4291815"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 33,
+    "answer_token_keep_fraction": 0.2578125,
+    "all_answer_unit_fraction": 0.2578125
+   },
+   "decode_s": 0.0831,
+   "prefill_s": 10.655,
+   "peak_cuda_bytes": 6610434048
+  },
+  {
+   "row_id": 2,
+   "task": "niah_multikey_2",
+   "length": 16341,
+   "length_bucket": 16384,
+   "context_tokens": 11834,
+   "policy": "h2o",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "185.\n\nThe final answer is: 185.",
+   "generated": 12,
+   "outputs": [
+    "4291815"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 13,
+    "answer_token_keep_fraction": 0.1015625,
+    "all_answer_unit_fraction": 0.1015625
+   },
+   "decode_s": 0.165,
+   "prefill_s": 10.655,
+   "peak_cuda_bytes": 6610434048
+  },
+  {
+   "row_id": 2,
+   "task": "niah_multikey_2",
+   "length": 16341,
+   "length_bucket": 16384,
+   "context_tokens": 11834,
+   "policy": "tova",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "4017821.",
+   "generated": 6,
+   "outputs": [
+    "4291815"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 22,
+    "answer_token_keep_fraction": 0.171875,
+    "all_answer_unit_fraction": 0.171875
+   },
+   "decode_s": 0.0827,
+   "prefill_s": 10.655,
+   "peak_cuda_bytes": 6610434048
+  },
+  {
+   "row_id": 3,
+   "task": "niah_multikey_2",
+   "length": 32222,
+   "length_bucket": 32768,
+   "context_tokens": 23382,
+   "policy": "full",
+   "budget": null,
+   "kept_slots": 23382,
+   "prediction": "7113484.",
+   "generated": 6,
+   "outputs": [
+    "9116227"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 0.0819,
+   "prefill_s": 35.218,
+   "peak_cuda_bytes": 7965033984
+  },
+  {
+   "row_id": 3,
+   "task": "niah_multikey_2",
+   "length": 32222,
+   "length_bucket": 32768,
+   "context_tokens": 23382,
+   "policy": "obs_last",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "7113484.",
+   "generated": 6,
+   "outputs": [
+    "9116227"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 2,
+    "answer_token_keep_fraction": 0.015625,
+    "all_answer_unit_fraction": 0.015625
+   },
+   "decode_s": 0.0804,
+   "prefill_s": 35.218,
+   "peak_cuda_bytes": 7965033984
+  },
+  {
+   "row_id": 3,
+   "task": "niah_multikey_2",
+   "length": 32222,
+   "length_bucket": 32768,
+   "context_tokens": 23382,
+   "policy": "obs_mean",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "7113487.",
+   "generated": 6,
+   "outputs": [
+    "9116227"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 0,
+    "answer_token_keep_fraction": 0.0,
+    "all_answer_unit_fraction": 0.0
+   },
+   "decode_s": 0.0834,
+   "prefill_s": 35.218,
+   "peak_cuda_bytes": 7965033984
+  },
+  {
+   "row_id": 3,
+   "task": "niah_multikey_2",
+   "length": 32222,
+   "length_bucket": 32768,
+   "context_tokens": 23382,
+   "policy": "lex_obs",
+   "budget": 4096,
+   "kept_slots": 4608,
+   "prediction": "7113484.",
+   "generated": 6,
+   "outputs": [
+    "9116227"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 2,
+    "answer_token_keep_fraction": 0.015625,
+    "all_answer_unit_fraction": 0.015625
+   },
+   "decode_s": 0.0812,
+   "prefill_s": 35.218,
+   "peak_cuda_bytes": 7965033984
+  },
+  {
+   "row_id": 3,
+   "task": "niah_multikey_2",
+   "length": 32222,
+   "length_bucket": 32768,
+   "context_tokens": 23382,
+   "policy": "h2o",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "4208319.",
+   "generated": 6,
+   "outputs": [
+    "9116227"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 11,
+    "answer_token_keep_fraction": 0.0859375,
+    "all_answer_unit_fraction": 0.0859375
+   },
+   "decode_s": 0.081,
+   "prefill_s": 35.218,
+   "peak_cuda_bytes": 7965033984
+  },
+  {
+   "row_id": 3,
+   "task": "niah_multikey_2",
+   "length": 32222,
+   "length_bucket": 32768,
+   "context_tokens": 23382,
+   "policy": "tova",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "7113487.",
+   "generated": 6,
+   "outputs": [
+    "9116227"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 15,
+    "answer_token_keep_fraction": 0.1171875,
+    "all_answer_unit_fraction": 0.1171875
+   },
+   "decode_s": 0.092,
+   "prefill_s": 35.218,
+   "peak_cuda_bytes": 7965033984
+  },
+  {
+   "row_id": 4,
+   "task": "niah_multikey_2",
+   "length": 32738,
+   "length_bucket": 32768,
+   "context_tokens": 23806,
+   "policy": "full",
+   "budget": null,
+   "kept_slots": 23806,
+   "prediction": "8498015.",
+   "generated": 6,
+   "outputs": [
+    "8498015"
+   ],
+   "answer_recall": 1.0,
+   "selection": null,
+   "decode_s": 0.0819,
+   "prefill_s": 36.131,
+   "peak_cuda_bytes": 7965476352
+  },
+  {
+   "row_id": 4,
+   "task": "niah_multikey_2",
+   "length": 32738,
+   "length_bucket": 32768,
+   "context_tokens": 23806,
+   "policy": "obs_last",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "1178660.",
+   "generated": 6,
+   "outputs": [
+    "8498015"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 4,
+    "answer_token_keep_fraction": 0.03125,
+    "all_answer_unit_fraction": 0.03125
+   },
+   "decode_s": 0.0811,
+   "prefill_s": 36.131,
+   "peak_cuda_bytes": 7965476352
+  },
+  {
+   "row_id": 4,
+   "task": "niah_multikey_2",
+   "length": 32738,
+   "length_bucket": 32768,
+   "context_tokens": 23806,
+   "policy": "obs_mean",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "8498015.",
+   "generated": 6,
+   "outputs": [
+    "8498015"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 1,
+    "answer_token_keep_fraction": 0.0078125,
+    "all_answer_unit_fraction": 0.0078125
+   },
+   "decode_s": 0.0809,
+   "prefill_s": 36.131,
+   "peak_cuda_bytes": 7965476352
+  },
+  {
+   "row_id": 4,
+   "task": "niah_multikey_2",
+   "length": 32738,
+   "length_bucket": 32768,
+   "context_tokens": 23806,
+   "policy": "lex_obs",
+   "budget": 4096,
+   "kept_slots": 4608,
+   "prediction": "8498015.",
+   "generated": 6,
+   "outputs": [
+    "8498015"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 6,
+    "answer_token_keep_fraction": 0.046875,
+    "all_answer_unit_fraction": 0.046875
+   },
+   "decode_s": 0.0804,
+   "prefill_s": 36.131,
+   "peak_cuda_bytes": 7965476352
+  },
+  {
+   "row_id": 4,
+   "task": "niah_multikey_2",
+   "length": 32738,
+   "length_bucket": 32768,
+   "context_tokens": 23806,
+   "policy": "h2o",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "1178660.",
+   "generated": 6,
+   "outputs": [
+    "8498015"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 45,
+    "answer_token_keep_fraction": 0.3515625,
+    "all_answer_unit_fraction": 0.3515625
+   },
+   "decode_s": 0.0806,
+   "prefill_s": 36.131,
+   "peak_cuda_bytes": 7965476352
+  },
+  {
+   "row_id": 4,
+   "task": "niah_multikey_2",
+   "length": 32738,
+   "length_bucket": 32768,
+   "context_tokens": 23806,
+   "policy": "tova",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "1178660.",
+   "generated": 6,
+   "outputs": [
+    "8498015"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 53,
+    "answer_token_keep_fraction": 0.4140625,
+    "all_answer_unit_fraction": 0.4140625
+   },
+   "decode_s": 0.0809,
+   "prefill_s": 36.131,
+   "peak_cuda_bytes": 7965476352
+  },
+  {
+   "row_id": 5,
+   "task": "niah_multikey_2",
+   "length": 64879,
+   "length_bucket": 65536,
+   "context_tokens": 47331,
+   "policy": "full",
+   "budget": null,
+   "kept_slots": 47331,
+   "prediction": "6622987.",
+   "generated": 5,
+   "outputs": [
+    "6622987"
+   ],
+   "answer_recall": 1.0,
+   "selection": null,
+   "decode_s": 0.0864,
+   "prefill_s": 161.475,
+   "peak_cuda_bytes": 8263541760
+  },
+  {
+   "row_id": 5,
+   "task": "niah_multikey_2",
+   "length": 64879,
+   "length_bucket": 65536,
+   "context_tokens": 47331,
+   "policy": "obs_last",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "6622987.",
+   "generated": 5,
+   "outputs": [
+    "6622987"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 1,
+    "answer_token_keep_fraction": 0.0078125,
+    "all_answer_unit_fraction": 0.0078125
+   },
+   "decode_s": 0.0893,
+   "prefill_s": 161.475,
+   "peak_cuda_bytes": 8263541760
+  },
+  {
+   "row_id": 5,
+   "task": "niah_multikey_2",
+   "length": 64879,
+   "length_bucket": 65536,
+   "context_tokens": 47331,
+   "policy": "obs_mean",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "6622987.",
+   "generated": 5,
+   "outputs": [
+    "6622987"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 1,
+    "answer_token_keep_fraction": 0.0078125,
+    "all_answer_unit_fraction": 0.0078125
+   },
+   "decode_s": 0.0827,
+   "prefill_s": 161.475,
+   "peak_cuda_bytes": 8263541760
+  },
+  {
+   "row_id": 5,
+   "task": "niah_multikey_2",
+   "length": 64879,
+   "length_bucket": 65536,
+   "context_tokens": 47331,
+   "policy": "lex_obs",
+   "budget": 4096,
+   "kept_slots": 4608,
+   "prediction": "6622987.",
+   "generated": 5,
+   "outputs": [
+    "6622987"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 1,
+    "answer_token_keep_fraction": 0.0078125,
+    "all_answer_unit_fraction": 0.0078125
+   },
+   "decode_s": 0.0735,
+   "prefill_s": 161.475,
+   "peak_cuda_bytes": 8263541760
+  },
+  {
+   "row_id": 5,
+   "task": "niah_multikey_2",
+   "length": 64879,
+   "length_bucket": 65536,
+   "context_tokens": 47331,
+   "policy": "h2o",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "398.",
+   "generated": 3,
+   "outputs": [
+    "6622987"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 0,
+    "answer_token_keep_fraction": 0.0,
+    "all_answer_unit_fraction": 0.0
+   },
+   "decode_s": 0.0948,
+   "prefill_s": 161.475,
+   "peak_cuda_bytes": 8263541760
+  },
+  {
+   "row_id": 5,
+   "task": "niah_multikey_2",
+   "length": 64879,
+   "length_bucket": 65536,
+   "context_tokens": 47331,
+   "policy": "tova",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "8749761.",
+   "generated": 5,
+   "outputs": [
+    "6622987"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 4,
+    "answer_token_keep_fraction": 0.03125,
+    "all_answer_unit_fraction": 0.03125
+   },
+   "decode_s": 0.074,
+   "prefill_s": 161.475,
+   "peak_cuda_bytes": 8263541760
+  },
+  {
+   "row_id": 6,
+   "task": "niah_multikey_2",
+   "length": 65479,
+   "length_bucket": 65536,
+   "context_tokens": 47683,
+   "policy": "full",
+   "budget": null,
+   "kept_slots": 47683,
+   "prediction": "2835364.",
+   "generated": 5,
+   "outputs": [
+    "2835364"
+   ],
+   "answer_recall": 1.0,
+   "selection": null,
+   "decode_s": 0.0826,
+   "prefill_s": 127.413,
+   "peak_cuda_bytes": 8302646272
+  },
+  {
+   "row_id": 6,
+   "task": "niah_multikey_2",
+   "length": 65479,
+   "length_bucket": 65536,
+   "context_tokens": 47683,
+   "policy": "obs_last",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "2835364.",
+   "generated": 5,
+   "outputs": [
+    "2835364"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 2,
+    "answer_token_keep_fraction": 0.015625,
+    "all_answer_unit_fraction": 0.015625
+   },
+   "decode_s": 0.0848,
+   "prefill_s": 127.413,
+   "peak_cuda_bytes": 8302646272
+  },
+  {
+   "row_id": 6,
+   "task": "niah_multikey_2",
+   "length": 65479,
+   "length_bucket": 65536,
+   "context_tokens": 47683,
+   "policy": "obs_mean",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "2836724.",
+   "generated": 5,
+   "outputs": [
+    "2835364"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 1,
+    "answer_token_keep_fraction": 0.0078125,
+    "all_answer_unit_fraction": 0.0078125
+   },
+   "decode_s": 0.0715,
+   "prefill_s": 127.413,
+   "peak_cuda_bytes": 8302646272
+  },
+  {
+   "row_id": 6,
+   "task": "niah_multikey_2",
+   "length": 65479,
+   "length_bucket": 65536,
+   "context_tokens": 47683,
+   "policy": "lex_obs",
+   "budget": 4096,
+   "kept_slots": 4608,
+   "prediction": "2835364.",
+   "generated": 5,
+   "outputs": [
+    "2835364"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 2,
+    "answer_token_keep_fraction": 0.015625,
+    "all_answer_unit_fraction": 0.015625
+   },
+   "decode_s": 0.0779,
+   "prefill_s": 127.413,
+   "peak_cuda_bytes": 8302646272
+  },
+  {
+   "row_id": 6,
+   "task": "niah_multikey_2",
+   "length": 65479,
+   "length_bucket": 65536,
+   "context_tokens": 47683,
+   "policy": "h2o",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "8088281.",
+   "generated": 5,
+   "outputs": [
+    "2835364"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 4,
+    "answer_token_keep_fraction": 0.03125,
+    "all_answer_unit_fraction": 0.03125
+   },
+   "decode_s": 0.0846,
+   "prefill_s": 127.413,
+   "peak_cuda_bytes": 8302646272
+  },
+  {
+   "row_id": 6,
+   "task": "niah_multikey_2",
+   "length": 65479,
+   "length_bucket": 65536,
+   "context_tokens": 47683,
+   "policy": "tova",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "3519671.",
+   "generated": 5,
+   "outputs": [
+    "2835364"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 8,
+    "answer_token_keep_fraction": 0.0625,
+    "all_answer_unit_fraction": 0.0625
+   },
+   "decode_s": 0.086,
+   "prefill_s": 127.413,
+   "peak_cuda_bytes": 8302646272
+  },
+  {
+   "row_id": 7,
+   "task": "niah_multikey_2",
+   "length": 7566,
+   "length_bucket": 8192,
+   "context_tokens": 5455,
+   "policy": "full",
+   "budget": null,
+   "kept_slots": 5455,
+   "prediction": "6569343.",
+   "generated": 6,
+   "outputs": [
+    "6569343"
+   ],
+   "answer_recall": 1.0,
+   "selection": null,
+   "decode_s": 0.0981,
+   "prefill_s": 2.973,
+   "peak_cuda_bytes": 5227984896
+  },
+  {
+   "row_id": 7,
+   "task": "niah_multikey_2",
+   "length": 7566,
+   "length_bucket": 8192,
+   "context_tokens": 5455,
+   "policy": "obs_last",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "6569343.",
+   "generated": 6,
+   "outputs": [
+    "6569343"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 68,
+    "answer_token_keep_fraction": 0.53125,
+    "all_answer_unit_fraction": 0.53125
+   },
+   "decode_s": 0.0936,
+   "prefill_s": 2.973,
+   "peak_cuda_bytes": 5227984896
+  },
+  {
+   "row_id": 7,
+   "task": "niah_multikey_2",
+   "length": 7566,
+   "length_bucket": 8192,
+   "context_tokens": 5455,
+   "policy": "obs_mean",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "6569343.",
+   "generated": 6,
+   "outputs": [
+    "6569343"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 127,
+    "answer_token_keep_fraction": 0.9921875,
+    "all_answer_unit_fraction": 0.9921875
+   },
+   "decode_s": 0.0931,
+   "prefill_s": 2.973,
+   "peak_cuda_bytes": 5227984896
+  },
+  {
+   "row_id": 7,
+   "task": "niah_multikey_2",
+   "length": 7566,
+   "length_bucket": 8192,
+   "context_tokens": 5455,
+   "policy": "lex_obs",
+   "budget": 4096,
+   "kept_slots": 4608,
+   "prediction": "6569343.",
+   "generated": 6,
+   "outputs": [
+    "6569343"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 85,
+    "answer_token_keep_fraction": 0.6640625,
+    "all_answer_unit_fraction": 0.6640625
+   },
+   "decode_s": 0.1252,
+   "prefill_s": 2.973,
+   "peak_cuda_bytes": 5227984896
+  },
+  {
+   "row_id": 7,
+   "task": "niah_multikey_2",
+   "length": 7566,
+   "length_bucket": 8192,
+   "context_tokens": 5455,
+   "policy": "h2o",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "6569343.",
+   "generated": 6,
+   "outputs": [
+    "6569343"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 127,
+    "answer_token_keep_fraction": 0.9921875,
+    "all_answer_unit_fraction": 0.9921875
+   },
+   "decode_s": 0.1189,
+   "prefill_s": 2.973,
+   "peak_cuda_bytes": 5227984896
+  },
+  {
+   "row_id": 7,
+   "task": "niah_multikey_2",
+   "length": 7566,
+   "length_bucket": 8192,
+   "context_tokens": 5455,
+   "policy": "tova",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "6569343.",
+   "generated": 6,
+   "outputs": [
+    "6569343"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 116,
+    "answer_token_keep_fraction": 0.90625,
+    "all_answer_unit_fraction": 0.90625
+   },
+   "decode_s": 0.085,
+   "prefill_s": 2.973,
+   "peak_cuda_bytes": 5227984896
+  },
+  {
+   "row_id": 8,
+   "task": "niah_multikey_2",
+   "length": 7565,
+   "length_bucket": 8192,
+   "context_tokens": 5429,
+   "policy": "full",
+   "budget": null,
+   "kept_slots": 5429,
+   "prediction": "6321714.",
+   "generated": 6,
+   "outputs": [
+    "6321714"
+   ],
+   "answer_recall": 1.0,
+   "selection": null,
+   "decode_s": 0.0871,
+   "prefill_s": 2.948,
+   "peak_cuda_bytes": 5214901760
+  },
+  {
+   "row_id": 8,
+   "task": "niah_multikey_2",
+   "length": 7565,
+   "length_bucket": 8192,
+   "context_tokens": 5429,
+   "policy": "obs_last",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "6321714.",
+   "generated": 6,
+   "outputs": [
+    "6321714"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 91,
+    "answer_token_keep_fraction": 0.7109375,
+    "all_answer_unit_fraction": 0.7109375
+   },
+   "decode_s": 0.1077,
+   "prefill_s": 2.948,
+   "peak_cuda_bytes": 5214901760
+  },
+  {
+   "row_id": 8,
+   "task": "niah_multikey_2",
+   "length": 7565,
+   "length_bucket": 8192,
+   "context_tokens": 5429,
+   "policy": "obs_mean",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "6321714.",
+   "generated": 6,
+   "outputs": [
+    "6321714"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 104,
+    "answer_token_keep_fraction": 0.8125,
+    "all_answer_unit_fraction": 0.8125
+   },
+   "decode_s": 0.0994,
+   "prefill_s": 2.948,
+   "peak_cuda_bytes": 5214901760
+  },
+  {
+   "row_id": 8,
+   "task": "niah_multikey_2",
+   "length": 7565,
+   "length_bucket": 8192,
+   "context_tokens": 5429,
+   "policy": "lex_obs",
+   "budget": 4096,
+   "kept_slots": 4608,
+   "prediction": "6321714.",
+   "generated": 6,
+   "outputs": [
+    "6321714"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 110,
+    "answer_token_keep_fraction": 0.859375,
+    "all_answer_unit_fraction": 0.859375
+   },
+   "decode_s": 0.0945,
+   "prefill_s": 2.948,
+   "peak_cuda_bytes": 5214901760
+  },
+  {
+   "row_id": 8,
+   "task": "niah_multikey_2",
+   "length": 7565,
+   "length_bucket": 8192,
+   "context_tokens": 5429,
+   "policy": "h2o",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "6321714.",
+   "generated": 6,
+   "outputs": [
+    "6321714"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 104,
+    "answer_token_keep_fraction": 0.8125,
+    "all_answer_unit_fraction": 0.8125
+   },
+   "decode_s": 0.1042,
+   "prefill_s": 2.948,
+   "peak_cuda_bytes": 5214901760
+  },
+  {
+   "row_id": 8,
+   "task": "niah_multikey_2",
+   "length": 7565,
+   "length_bucket": 8192,
+   "context_tokens": 5429,
+   "policy": "tova",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "6321714.",
+   "generated": 6,
+   "outputs": [
+    "6321714"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 94,
+    "answer_token_keep_fraction": 0.734375,
+    "all_answer_unit_fraction": 0.734375
+   },
+   "decode_s": 0.1024,
+   "prefill_s": 2.948,
+   "peak_cuda_bytes": 5214901760
+  },
+  {
+   "row_id": 9,
+   "task": "niah_multikey_2",
+   "length": 7596,
+   "length_bucket": 8192,
+   "context_tokens": 5420,
+   "policy": "full",
+   "budget": null,
+   "kept_slots": 5420,
+   "prediction": "5459205.",
+   "generated": 6,
+   "outputs": [
+    "5459205"
+   ],
+   "answer_recall": 1.0,
+   "selection": null,
+   "decode_s": 0.1162,
+   "prefill_s": 2.941,
+   "peak_cuda_bytes": 5210356736
+  },
+  {
+   "row_id": 9,
+   "task": "niah_multikey_2",
+   "length": 7596,
+   "length_bucket": 8192,
+   "context_tokens": 5420,
+   "policy": "obs_last",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "5459205.",
+   "generated": 6,
+   "outputs": [
+    "5459205"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 36,
+    "answer_token_keep_fraction": 0.28125,
+    "all_answer_unit_fraction": 0.28125
+   },
+   "decode_s": 0.103,
+   "prefill_s": 2.941,
+   "peak_cuda_bytes": 5210356736
+  },
+  {
+   "row_id": 9,
+   "task": "niah_multikey_2",
+   "length": 7596,
+   "length_bucket": 8192,
+   "context_tokens": 5420,
+   "policy": "obs_mean",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "5459205.",
+   "generated": 6,
+   "outputs": [
+    "5459205"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 75,
+    "answer_token_keep_fraction": 0.5859375,
+    "all_answer_unit_fraction": 0.5859375
+   },
+   "decode_s": 0.0963,
+   "prefill_s": 2.941,
+   "peak_cuda_bytes": 5210356736
+  },
+  {
+   "row_id": 9,
+   "task": "niah_multikey_2",
+   "length": 7596,
+   "length_bucket": 8192,
+   "context_tokens": 5420,
+   "policy": "lex_obs",
+   "budget": 4096,
+   "kept_slots": 4608,
+   "prediction": "5459205.",
+   "generated": 6,
+   "outputs": [
+    "5459205"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 55,
+    "answer_token_keep_fraction": 0.4296875,
+    "all_answer_unit_fraction": 0.4296875
+   },
+   "decode_s": 0.1024,
+   "prefill_s": 2.941,
+   "peak_cuda_bytes": 5210356736
+  },
+  {
+   "row_id": 9,
+   "task": "niah_multikey_2",
+   "length": 7596,
+   "length_bucket": 8192,
+   "context_tokens": 5420,
+   "policy": "h2o",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "5459205.",
+   "generated": 6,
+   "outputs": [
+    "5459205"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 75,
+    "answer_token_keep_fraction": 0.5859375,
+    "all_answer_unit_fraction": 0.5859375
+   },
+   "decode_s": 0.0961,
+   "prefill_s": 2.941,
+   "peak_cuda_bytes": 5210356736
+  },
+  {
+   "row_id": 9,
+   "task": "niah_multikey_2",
+   "length": 7596,
+   "length_bucket": 8192,
+   "context_tokens": 5420,
+   "policy": "tova",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "5459205.",
+   "generated": 6,
+   "outputs": [
+    "5459205"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 98,
+    "answer_token_keep_fraction": 0.765625,
+    "all_answer_unit_fraction": 0.765625
+   },
+   "decode_s": 0.0926,
+   "prefill_s": 2.941,
+   "peak_cuda_bytes": 5210356736
+  },
+  {
+   "row_id": 10,
+   "task": "niah_multikey_3",
+   "length": 16330,
+   "length_bucket": 16384,
+   "context_tokens": 11685,
+   "policy": "full",
+   "budget": null,
+   "kept_slots": 11685,
+   "prediction": "f9b81b81-b24d-4b46-bdba-f5f787343daf.\nOne of the special magic uuids for 6a247904-1b51-41bf-ba31-1953aae146f4 is: 98838c2e-0d4e-45e6-ac30-a0fc8b212bc9.\nOne of the special magic uuids for 1a2ce296-a9ed-48cd-b5dd-55dca9c97f9d is: 029ee449-64f0-4bb7",
+   "generated": 128,
+   "outputs": [
+    "f9b81b81-b24d-4b46-bdba-f5f787343daf"
+   ],
+   "answer_recall": 1.0,
+   "selection": null,
+   "decode_s": 2.0736,
+   "prefill_s": 10.518,
+   "peak_cuda_bytes": 6610280960
+  },
+  {
+   "row_id": 10,
+   "task": "niah_multikey_3",
+   "length": 16330,
+   "length_bucket": 16384,
+   "context_tokens": 11685,
+   "policy": "obs_last",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "f9b81b81-b24b-4f7f-8bfc-2a4d3f2c7f5a.\nOne of the special magic uuids for 6a247a1c-2b7d-477e-9af0-86ff63c8bdd8 is: 8a5981d-0b0b-4f7f-8bfc-2a4d3f2c7f5a.\nOne of the special magic uuids for 6a247a1c-2b7d-477e-9",
+   "generated": 128,
+   "outputs": [
+    "f9b81b81-b24d-4b46-bdba-f5f787343daf"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 5,
+    "answer_token_keep_fraction": 0.0390625,
+    "all_answer_unit_fraction": 0.0390625
+   },
+   "decode_s": 2.0847,
+   "prefill_s": 10.518,
+   "peak_cuda_bytes": 6610280960
+  },
+  {
+   "row_id": 10,
+   "task": "niah_multikey_3",
+   "length": 16330,
+   "length_bucket": 16384,
+   "context_tokens": 11685,
+   "policy": "obs_mean",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "f9b81b81-0a0a-4f5a-8bfc-2a6a5a5a5a5a.\nOne of the special magic uuids for 6a247904-1b51-41bf-ba31-1953aae146f4 is: 98838c8c-0e0e-4f5a-8bfc-2a6a5a5a5a5a.\nOne of the special magic uuids for 1a2ce296-a9ed-48cd-b5dd-55dca",
+   "generated": 128,
+   "outputs": [
+    "f9b81b81-b24d-4b46-bdba-f5f787343daf"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 15,
+    "answer_token_keep_fraction": 0.1171875,
+    "all_answer_unit_fraction": 0.1171875
+   },
+   "decode_s": 1.9477,
+   "prefill_s": 10.518,
+   "peak_cuda_bytes": 6610280960
+  },
+  {
+   "row_id": 10,
+   "task": "niah_multikey_3",
+   "length": 16330,
+   "length_bucket": 16384,
+   "context_tokens": 11685,
+   "policy": "lex_obs",
+   "budget": 4096,
+   "kept_slots": 4608,
+   "prediction": "f9b81b81-b24d-4b46-bdba-f5f787343daf.\nOne of the special magic uuids for 6a247a1d-2b7d-477e-9af0-86ff63c8bdd8 is: 8dec85b1-3a7d-4b46-bdba-f5f787343daf.\nOne of the special magic uuids for 8b8b8b8b-2b7d-477e-9af0-86ff63c8bdd8 is: 8dec85b1",
+   "generated": 128,
+   "outputs": [
+    "f9b81b81-b24d-4b46-bdba-f5f787343daf"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 12,
+    "answer_token_keep_fraction": 0.09375,
+    "all_answer_unit_fraction": 0.09375
+   },
+   "decode_s": 2.0419,
+   "prefill_s": 10.518,
+   "peak_cuda_bytes": 6610280960
+  },
+  {
+   "row_id": 10,
+   "task": "niah_multikey_3",
+   "length": 16330,
+   "length_bucket": 16384,
+   "context_tokens": 11685,
+   "policy": "h2o",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "f9b81b81-b24d-4b46-bdba-f5f787343daf.\nOne of the special magic uuids for 6a247904-1b51-41bf-ba31-1953aae146f4 is: 98838c2e-0d4e-45e6-ac30-a0fc8b212bc9.\nOne of the special magic uuids for 1a2ce296-a9ed-48cd-bce0-8c9c9d3c7f9d is: 029ee449-64f0-",
+   "generated": 128,
+   "outputs": [
+    "f9b81b81-b24d-4b46-bdba-f5f787343daf"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 22,
+    "answer_token_keep_fraction": 0.171875,
+    "all_answer_unit_fraction": 0.171875
+   },
+   "decode_s": 1.9004,
+   "prefill_s": 10.518,
+   "peak_cuda_bytes": 6610280960
+  },
+  {
+   "row_id": 10,
+   "task": "niah_multikey_3",
+   "length": 16330,
+   "length_bucket": 16384,
+   "context_tokens": 11685,
+   "policy": "tova",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "f9b81b1e-2b7d-4f7e-9af0-86ff63c8bdd8.",
+   "generated": 31,
+   "outputs": [
+    "f9b81b81-b24d-4b46-bdba-f5f787343daf"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 70,
+    "answer_token_keep_fraction": 0.546875,
+    "all_answer_unit_fraction": 0.546875
+   },
+   "decode_s": 0.4516,
+   "prefill_s": 10.518,
+   "peak_cuda_bytes": 6610280960
+  },
+  {
+   "row_id": 11,
+   "task": "niah_multikey_3",
+   "length": 16378,
+   "length_bucket": 16384,
+   "context_tokens": 11640,
+   "policy": "full",
+   "budget": null,
+   "kept_slots": 11640,
+   "prediction": "8f138beb-ed8f-4b1e-8558-28efa37e8a9e.",
+   "generated": 27,
+   "outputs": [
+    "8f138beb-ed8f-4b1e-8558-28efa37e8a9e"
+   ],
+   "answer_recall": 1.0,
+   "selection": null,
+   "decode_s": 0.4608,
+   "prefill_s": 10.465,
+   "peak_cuda_bytes": 6610229760
+  },
+  {
+   "row_id": 11,
+   "task": "niah_multikey_3",
+   "length": 16378,
+   "length_bucket": 16384,
+   "context_tokens": 11640,
+   "policy": "obs_last",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "8f138beb-ed8f-4b1e-8558-28efa37e8a9e.",
+   "generated": 27,
+   "outputs": [
+    "8f138beb-ed8f-4b1e-8558-28efa37e8a9e"
+   ],
+   "answer_recall": 1.0,
+   "selection": null,
+   "decode_s": 0.4416,
+   "prefill_s": 10.465,
+   "peak_cuda_bytes": 6610229760
+  },
+  {
+   "row_id": 11,
+   "task": "niah_multikey_3",
+   "length": 16378,
+   "length_bucket": 16384,
+   "context_tokens": 11640,
+   "policy": "obs_mean",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "8f138beb-ed8f-4b1e-8558-28efa37e8a9e.",
+   "generated": 27,
+   "outputs": [
+    "8f138beb-ed8f-4b1e-8558-28efa37e8a9e"
+   ],
+   "answer_recall": 1.0,
+   "selection": null,
+   "decode_s": 0.4384,
+   "prefill_s": 10.465,
+   "peak_cuda_bytes": 6610229760
+  },
+  {
+   "row_id": 11,
+   "task": "niah_multikey_3",
+   "length": 16378,
+   "length_bucket": 16384,
+   "context_tokens": 11640,
+   "policy": "lex_obs",
+   "budget": 4096,
+   "kept_slots": 4608,
+   "prediction": "8f138beb-ed8f-4b1e-8558-28efa37e8a9e.",
+   "generated": 27,
+   "outputs": [
+    "8f138beb-ed8f-4b1e-8558-28efa37e8a9e"
+   ],
+   "answer_recall": 1.0,
+   "selection": null,
+   "decode_s": 0.4371,
+   "prefill_s": 10.465,
+   "peak_cuda_bytes": 6610229760
+  },
+  {
+   "row_id": 11,
+   "task": "niah_multikey_3",
+   "length": 16378,
+   "length_bucket": 16384,
+   "context_tokens": 11640,
+   "policy": "h2o",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "8f138beb-ed8f-4b1e-8558-28efa37e8a9e.",
+   "generated": 27,
+   "outputs": [
+    "8f138beb-ed8f-4b1e-8558-28efa37e8a9e"
+   ],
+   "answer_recall": 1.0,
+   "selection": null,
+   "decode_s": 0.4336,
+   "prefill_s": 10.465,
+   "peak_cuda_bytes": 6610229760
+  },
+  {
+   "row_id": 11,
+   "task": "niah_multikey_3",
+   "length": 16378,
+   "length_bucket": 16384,
+   "context_tokens": 11640,
+   "policy": "tova",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "8f138beb-ed8f-4b1e-8558-28efa37e8a9e.",
+   "generated": 27,
+   "outputs": [
+    "8f138beb-ed8f-4b1e-8558-28efa37e8a9e"
+   ],
+   "answer_recall": 1.0,
+   "selection": null,
+   "decode_s": 0.4256,
+   "prefill_s": 10.465,
+   "peak_cuda_bytes": 6610229760
+  },
+  {
+   "row_id": 12,
+   "task": "niah_multikey_3",
+   "length": 14348,
+   "length_bucket": 16384,
+   "context_tokens": 10189,
+   "policy": "full",
+   "budget": null,
+   "kept_slots": 10189,
+   "prediction": "44ee8097-f8cf-4b81-a9c6-9fd748d30a7e.",
+   "generated": 27,
+   "outputs": [
+    "7e9a0715-6468-4807-a51d-bf8f8b2b2dcc"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 0.4075,
+   "prefill_s": 8.497,
+   "peak_cuda_bytes": 6608680960
+  },
+  {
+   "row_id": 12,
+   "task": "niah_multikey_3",
+   "length": 14348,
+   "length_bucket": 16384,
+   "context_tokens": 10189,
+   "policy": "obs_last",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "44ee8097-f8a4d50da-640e-4706-8305-9e9cabe91379.",
+   "generated": 31,
+   "outputs": [
+    "7e9a0715-6468-4807-a51d-bf8f8b2b2dcc"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 52,
+    "answer_token_keep_fraction": 0.40625,
+    "all_answer_unit_fraction": 0.40625
+   },
+   "decode_s": 0.4845,
+   "prefill_s": 8.497,
+   "peak_cuda_bytes": 6608680960
+  },
+  {
+   "row_id": 12,
+   "task": "niah_multikey_3",
+   "length": 14348,
+   "length_bucket": 16384,
+   "context_tokens": 10189,
+   "policy": "obs_mean",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "7e9a0715-6a0d-4e5f-8e5a-1c2d3f5f5f5f.\nOne of the special magic uuids for 138db564-377d-4a16-b42a-4ebf5b5b5b5a is: 7e9a0715-6a0d-4e5f-8e5a-1c2d3f5f5f5f.\nOne of the special magic uuids for 7caf012c-f694-4792-ac85",
+   "generated": 128,
+   "outputs": [
+    "7e9a0715-6468-4807-a51d-bf8f8b2b2dcc"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 36,
+    "answer_token_keep_fraction": 0.28125,
+    "all_answer_unit_fraction": 0.28125
+   },
+   "decode_s": 2.3698,
+   "prefill_s": 8.497,
+   "peak_cuda_bytes": 6608680960
+  },
+  {
+   "row_id": 12,
+   "task": "niah_multikey_3",
+   "length": 14348,
+   "length_bucket": 16384,
+   "context_tokens": 10189,
+   "policy": "lex_obs",
+   "budget": 4096,
+   "kept_slots": 4608,
+   "prediction": "44ee8097-f8ac-4b81-8d0a-9e9cabe91379.",
+   "generated": 27,
+   "outputs": [
+    "7e9a0715-6468-4807-a51d-bf8f8b2b2dcc"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 60,
+    "answer_token_keep_fraction": 0.46875,
+    "all_answer_unit_fraction": 0.46875
+   },
+   "decode_s": 0.3734,
+   "prefill_s": 8.497,
+   "peak_cuda_bytes": 6608680960
+  },
+  {
+   "row_id": 12,
+   "task": "niah_multikey_3",
+   "length": 14348,
+   "length_bucket": 16384,
+   "context_tokens": 10189,
+   "policy": "h2o",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "e02fc323-d4cf-4a0a-8f5a-1a4d0b5f5f5a.",
+   "generated": 32,
+   "outputs": [
+    "7e9a0715-6468-4807-a51d-bf8f8b2b2dcc"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 12,
+    "answer_token_keep_fraction": 0.09375,
+    "all_answer_unit_fraction": 0.09375
+   },
+   "decode_s": 0.6937,
+   "prefill_s": 8.497,
+   "peak_cuda_bytes": 6608680960
+  },
+  {
+   "row_id": 12,
+   "task": "niah_multikey_3",
+   "length": 14348,
+   "length_bucket": 16384,
+   "context_tokens": 10189,
+   "policy": "tova",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "7e9a1a1c-2c7d-4e5f-8bfc-2e5a5f5a6f5d.",
+   "generated": 38,
+   "outputs": [
+    "7e9a0715-6468-4807-a51d-bf8f8b2b2dcc"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 24,
+    "answer_token_keep_fraction": 0.1875,
+    "all_answer_unit_fraction": 0.1875
+   },
+   "decode_s": 0.6378,
+   "prefill_s": 8.497,
+   "peak_cuda_bytes": 6608680960
+  },
+  {
+   "row_id": 13,
+   "task": "niah_multikey_3",
+   "length": 32766,
+   "length_bucket": 32768,
+   "context_tokens": 23353,
+   "policy": "full",
+   "budget": null,
+   "kept_slots": 23353,
+   "prediction": "a01a8e04-d157-4536-974b-699ba31f70a8.",
+   "generated": 24,
+   "outputs": [
+    "a01a8e04-d157-4536-974b-699ba31f70a8"
+   ],
+   "answer_recall": 1.0,
+   "selection": null,
+   "decode_s": 1.1051,
+   "prefill_s": 35.068,
+   "peak_cuda_bytes": 7964999680
+  },
+  {
+   "row_id": 13,
+   "task": "niah_multikey_3",
+   "length": 32766,
+   "length_bucket": 32768,
+   "context_tokens": 23353,
+   "policy": "obs_last",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "a01a8e04-d157-453f-8b5f-8c4f5a3f5e6d.\nOne of the special magic uuids for 5eac5e3e-d531-4f5f-8b5f-8c4f5a3f5e6d is: 1c7a8e04-d157-453f-8b5f-8c4f5a3f5e6d.\nOne of the special magic uuids for 5eac5e3e-d531-4f5f",
+   "generated": 128,
+   "outputs": [
+    "a01a8e04-d157-4536-974b-699ba31f70a8"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 8,
+    "answer_token_keep_fraction": 0.0625,
+    "all_answer_unit_fraction": 0.0625
+   },
+   "decode_s": 1.852,
+   "prefill_s": 35.068,
+   "peak_cuda_bytes": 7964999680
+  },
+  {
+   "row_id": 13,
+   "task": "niah_multikey_3",
+   "length": 32766,
+   "length_bucket": 32768,
+   "context_tokens": 23353,
+   "policy": "obs_mean",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "1a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0",
+   "generated": 128,
+   "outputs": [
+    "a01a8e04-d157-4536-974b-699ba31f70a8"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 1,
+    "answer_token_keep_fraction": 0.0078125,
+    "all_answer_unit_fraction": 0.0078125
+   },
+   "decode_s": 2.8188,
+   "prefill_s": 35.068,
+   "peak_cuda_bytes": 7964999680
+  },
+  {
+   "row_id": 13,
+   "task": "niah_multikey_3",
+   "length": 32766,
+   "length_bucket": 32768,
+   "context_tokens": 23353,
+   "policy": "lex_obs",
+   "budget": 4096,
+   "kept_slots": 4608,
+   "prediction": "a01a8e04-d157-4536-974b-699ba31f70a8.",
+   "generated": 24,
+   "outputs": [
+    "a01a8e04-d157-4536-974b-699ba31f70a8"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 8,
+    "answer_token_keep_fraction": 0.0625,
+    "all_answer_unit_fraction": 0.0625
+   },
+   "decode_s": 1.2758,
+   "prefill_s": 35.068,
+   "peak_cuda_bytes": 7964999680
+  },
+  {
+   "row_id": 13,
+   "task": "niah_multikey_3",
+   "length": 32766,
+   "length_bucket": 32768,
+   "context_tokens": 23353,
+   "policy": "h2o",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "5eac5e3e-d530-45f4-b4ddf-8e6d97f6dc37e.",
+   "generated": 30,
+   "outputs": [
+    "a01a8e04-d157-4536-974b-699ba31f70a8"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 66,
+    "answer_token_keep_fraction": 0.515625,
+    "all_answer_unit_fraction": 0.515625
+   },
+   "decode_s": 1.3749,
+   "prefill_s": 35.068,
+   "peak_cuda_bytes": 7964999680
+  },
+  {
+   "row_id": 13,
+   "task": "niah_multikey_3",
+   "length": 32766,
+   "length_bucket": 32768,
+   "context_tokens": 23353,
+   "policy": "tova",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "5eac5e3e-4c7f-4e5f-8e5f-3e5f8a4f5f5e.\nOne of the special magic uuids for 5eac5e3e-4c7f-4e5f-8e5f-3e5f8a4f5f5e mentioned in the provided text is: 5eac5e3e-4c7f-4e5f-8e5f-3e5f8a4f5f5e.\nOne of the",
+   "generated": 128,
+   "outputs": [
+    "a01a8e04-d157-4536-974b-699ba31f70a8"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 48,
+    "answer_token_keep_fraction": 0.375,
+    "all_answer_unit_fraction": 0.375
+   },
+   "decode_s": 2.5357,
+   "prefill_s": 35.068,
+   "peak_cuda_bytes": 7964999680
+  },
+  {
+   "row_id": 14,
+   "task": "niah_multikey_3",
+   "length": 32616,
+   "length_bucket": 32768,
+   "context_tokens": 23382,
+   "policy": "full",
+   "budget": null,
+   "kept_slots": 23382,
+   "prediction": "9c30cbb-e75c-4a55-86a1-8986e74bc1e2.\nOne of the special magic uuids for 9c30cbb-e75c-4a55-86a1-8986e74bc1e2 mentioned in the provided text is: 9c30cbb-e75c-4a55-86a1-8986e74bc1e2.\nOne of the special magic uuids for 9c30cbb-e75c-4a55-86a1-8986e74bc1e",
+   "generated": 128,
+   "outputs": [
+    "ad4e6fab-6724-43c6-aa00-cb2ff64acaa9"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 2.0774,
+   "prefill_s": 35.253,
+   "peak_cuda_bytes": 7965033984
+  },
+  {
+   "row_id": 14,
+   "task": "niah_multikey_3",
+   "length": 32616,
+   "length_bucket": 32768,
+   "context_tokens": 23382,
+   "policy": "obs_last",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "0bdf5c7f-4c7f-4c7f-4c7f-4c7f-4c7f-4c7f-4c7f-4c7f-4c7f-4c7f-4c7f-4c7f-4c7f-4c7f-4c7f-4c7f-4c7f-4c7f-4c7f-4c7f-4c7f-4c7f-4c7f-4c7f",
+   "generated": 128,
+   "outputs": [
+    "ad4e6fab-6724-43c6-aa00-cb2ff64acaa9"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 2.0266,
+   "prefill_s": 35.253,
+   "peak_cuda_bytes": 7965033984
+  },
+  {
+   "row_id": 14,
+   "task": "niah_multikey_3",
+   "length": 32616,
+   "length_bucket": 32768,
+   "context_tokens": 23382,
+   "policy": "obs_mean",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "0b4e8a0a0-0a0a-4f0a-0a0a-0a0a-0a0a-0a0a-0a0a-0a0a-0a0a-0a0a-0a0a-0a0a-0a0a-0a0a-0a0a-0a0a-0a0a-0a0a-0a0a-0a0a-0a0a-0a0a-0a0a-0a",
+   "generated": 128,
+   "outputs": [
+    "ad4e6fab-6724-43c6-aa00-cb2ff64acaa9"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 2.0899,
+   "prefill_s": 35.253,
+   "peak_cuda_bytes": 7965033984
+  },
+  {
+   "row_id": 14,
+   "task": "niah_multikey_3",
+   "length": 32616,
+   "length_bucket": 32768,
+   "context_tokens": 23382,
+   "policy": "lex_obs",
+   "budget": 4096,
+   "kept_slots": 4608,
+   "prediction": "9da88584-ac23-402c-8ad9-5c656caaad50.",
+   "generated": 23,
+   "outputs": [
+    "ad4e6fab-6724-43c6-aa00-cb2ff64acaa9"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 0.348,
+   "prefill_s": 35.253,
+   "peak_cuda_bytes": 7965033984
+  },
+  {
+   "row_id": 14,
+   "task": "niah_multikey_3",
+   "length": 32616,
+   "length_bucket": 32768,
+   "context_tokens": 23382,
+   "policy": "h2o",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "9cd30cbb-e75c-4a55-86a1-8986e74bc1e2.",
+   "generated": 28,
+   "outputs": [
+    "ad4e6fab-6724-43c6-aa00-cb2ff64acaa9"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 0.4053,
+   "prefill_s": 35.253,
+   "peak_cuda_bytes": 7965033984
+  },
+  {
+   "row_id": 14,
+   "task": "niah_multikey_3",
+   "length": 32616,
+   "length_bucket": 32768,
+   "context_tokens": 23382,
+   "policy": "tova",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "9da88584-ac23-402c-8ad9-5c656caaad50.",
+   "generated": 23,
+   "outputs": [
+    "ad4e6fab-6724-43c6-aa00-cb2ff64acaa9"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 0.3342,
+   "prefill_s": 35.253,
+   "peak_cuda_bytes": 7965033984
+  },
+  {
+   "row_id": 15,
+   "task": "niah_multikey_3",
+   "length": 63493,
+   "length_bucket": 65536,
+   "context_tokens": 45447,
+   "policy": "full",
+   "budget": null,
+   "kept_slots": 45447,
+   "prediction": "2e1dc855-5eb5-48f9-8894-bbe9f3ba10f8.\nOne of the special magic uuids for 6e4ab025-aeae-4403-b458-f77de4033e16 is: f0c44f3e-59c4-414a-9026-596f3b3d2a15.\nOne of the special magic uuids for 61771a54-3450-4615-afcd-e77f101f3baa is: b35cb277-c940-491e-a",
+   "generated": 128,
+   "outputs": [
+    "435f0296-7e46-45fd-9300-882d9edba1b9"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 2.2339,
+   "prefill_s": 115.408,
+   "peak_cuda_bytes": 8261533184
+  },
+  {
+   "row_id": 15,
+   "task": "niah_multikey_3",
+   "length": 63493,
+   "length_bucket": 65536,
+   "context_tokens": 45447,
+   "policy": "obs_last",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "0a6b8a0a-0a6b8a0a-0a6b8a0a-0a6b8a0a-0a6b8a0a-0a6b8a0a-0a6b8a0a-0a6b8a0a-0a6b8a0a-0a6b8a0a-0a6b8a0a-0a6b8a0a-0a6b8a0a-0a6b8a0a-0",
+   "generated": 128,
+   "outputs": [
+    "435f0296-7e46-45fd-9300-882d9edba1b9"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 18,
+    "answer_token_keep_fraction": 0.140625,
+    "all_answer_unit_fraction": 0.140625
+   },
+   "decode_s": 2.2195,
+   "prefill_s": 115.408,
+   "peak_cuda_bytes": 8261533184
+  },
+  {
+   "row_id": 15,
+   "task": "niah_multikey_3",
+   "length": 63493,
+   "length_bucket": 65536,
+   "context_tokens": 45447,
+   "policy": "obs_mean",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "2e1dc855-5eb5-48f9-8894-bbe9f3ba10f8.\nOne of the special magic uuids for 2e1dc855-5eb5-48f9-8894-bbe9f3ba10f8 is: 2e1dc855-5eb5-48f9-8894-bbe9f3ba10f8.\nOne of the special magic uuids for 2e1dc855-5eb5-48f9-8894-bbe9f3ba10f8 is: 2",
+   "generated": 128,
+   "outputs": [
+    "435f0296-7e46-45fd-9300-882d9edba1b9"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 3,
+    "answer_token_keep_fraction": 0.0234375,
+    "all_answer_unit_fraction": 0.0234375
+   },
+   "decode_s": 2.1583,
+   "prefill_s": 115.408,
+   "peak_cuda_bytes": 8261533184
+  },
+  {
+   "row_id": 15,
+   "task": "niah_multikey_3",
+   "length": 63493,
+   "length_bucket": 65536,
+   "context_tokens": 45447,
+   "policy": "lex_obs",
+   "budget": 4096,
+   "kept_slots": 4608,
+   "prediction": "0a6b8f1a-0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+   "generated": 128,
+   "outputs": [
+    "435f0296-7e46-45fd-9300-882d9edba1b9"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 20,
+    "answer_token_keep_fraction": 0.15625,
+    "all_answer_unit_fraction": 0.15625
+   },
+   "decode_s": 1.9871,
+   "prefill_s": 115.408,
+   "peak_cuda_bytes": 8261533184
+  },
+  {
+   "row_id": 15,
+   "task": "niah_multikey_3",
+   "length": 63493,
+   "length_bucket": 65536,
+   "context_tokens": 45447,
+   "policy": "h2o",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "0e6b8e1f-4e4f-4e4f-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0",
+   "generated": 128,
+   "outputs": [
+    "435f0296-7e46-45fd-9300-882d9edba1b9"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 7,
+    "answer_token_keep_fraction": 0.0546875,
+    "all_answer_unit_fraction": 0.0546875
+   },
+   "decode_s": 1.9766,
+   "prefill_s": 115.408,
+   "peak_cuda_bytes": 8261533184
+  },
+  {
+   "row_id": 15,
+   "task": "niah_multikey_3",
+   "length": 63493,
+   "length_bucket": 65536,
+   "context_tokens": 45447,
+   "policy": "tova",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "7f139e3a-2f5f-4e5f-8bfc-1a0f5a0a5a0a.\nOne of the special magic uuids for 2e1dc855-5eb5-48f9-8894-bbe9f3ba10f8 mentioned in the provided text is: 7f139e3a-2f5f-4e5f-8bfc-1a0f5a0a5a0a.\nOne of the special magic uuids for 2e1dc855-5eb",
+   "generated": 128,
+   "outputs": [
+    "435f0296-7e46-45fd-9300-882d9edba1b9"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 6,
+    "answer_token_keep_fraction": 0.046875,
+    "all_answer_unit_fraction": 0.046875
+   },
+   "decode_s": 2.0206,
+   "prefill_s": 115.408,
+   "peak_cuda_bytes": 8261533184
+  },
+  {
+   "row_id": 16,
+   "task": "niah_multikey_3",
+   "length": 65520,
+   "length_bucket": 65536,
+   "context_tokens": 47012,
+   "policy": "full",
+   "budget": null,
+   "kept_slots": 47012,
+   "prediction": "89f773ef-2e82-4632-9869-77252d995488. This is a special magic uuid for a specific email address. The email address is: 89f773ef2e82@outlook.com.\nOne of the special magic uuids for 6c9a6e2d6-2c7b-4e5f-8a5f-2a6f5d6f5f5a is: 6c9a6e2d6-2c7b-4e5f-8a5f-2a6",
+   "generated": 128,
+   "outputs": [
+    "6eda5192-e281-41f4-b757-910cc6c28483"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 4.4232,
+   "prefill_s": 123.205,
+   "peak_cuda_bytes": 8263201280
+  },
+  {
+   "row_id": 16,
+   "task": "niah_multikey_3",
+   "length": 65520,
+   "length_bucket": 65536,
+   "context_tokens": 47012,
+   "policy": "obs_last",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "89f773ef-2e82-4632-9869-77252d995488. This is a special magic uuid for a specific email address. The email address is: 89f773ef2e82@domain.com.\nOne of the special magic uuids for 89f773ef-2e82-4632-9869-77252d995488 mentioned in the provided text is 89f773ef-2e82-4632-9869-77252d995488. This is a special magic uuid for a specific email address. The email address is: 89f773",
+   "generated": 128,
+   "outputs": [
+    "6eda5192-e281-41f4-b757-910cc6c28483"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 9,
+    "answer_token_keep_fraction": 0.0703125,
+    "all_answer_unit_fraction": 0.0703125
+   },
+   "decode_s": 2.4202,
+   "prefill_s": 123.205,
+   "peak_cuda_bytes": 8263201280
+  },
+  {
+   "row_id": 16,
+   "task": "niah_multikey_3",
+   "length": 65520,
+   "length_bucket": 65536,
+   "context_tokens": 47012,
+   "policy": "obs_mean",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "89f773ef-2e82-4632-9869-77252d995488. This is a special magic uuid for 89f773ef-2e82-4632-9869-77252d995488. The special magic uuid for 89f773ef-2e82-4632-9869-77252d995488 is 89f773ef-2e82-4632-9869-77252d995488. The special magic uuid for 89f773ef-2e82-4632-9869-77252d995488 is 89",
+   "generated": 128,
+   "outputs": [
+    "6eda5192-e281-41f4-b757-910cc6c28483"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 15,
+    "answer_token_keep_fraction": 0.1171875,
+    "all_answer_unit_fraction": 0.1171875
+   },
+   "decode_s": 2.1908,
+   "prefill_s": 123.205,
+   "peak_cuda_bytes": 8263201280
+  },
+  {
+   "row_id": 16,
+   "task": "niah_multikey_3",
+   "length": 65520,
+   "length_bucket": 65536,
+   "context_tokens": 47012,
+   "policy": "lex_obs",
+   "budget": 4096,
+   "kept_slots": 4608,
+   "prediction": "89f773ef-2e82-4632-9869-77252d995488. This is a special magic uuid for a specific email address. The email address is: 89f773ef2e82@domain.com.\nOne of the special magic uuids for 89f773ef-2e82-4632-9869-77252d995488 mentioned in the provided text is 89f773ef-2e82-4632-9869-77252d995488. This is a special magic uuid for a specific email address. The email address is: 89f773",
+   "generated": 128,
+   "outputs": [
+    "6eda5192-e281-41f4-b757-910cc6c28483"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 10,
+    "answer_token_keep_fraction": 0.078125,
+    "all_answer_unit_fraction": 0.078125
+   },
+   "decode_s": 2.1178,
+   "prefill_s": 123.205,
+   "peak_cuda_bytes": 8263201280
+  },
+  {
+   "row_id": 16,
+   "task": "niah_multikey_3",
+   "length": 65520,
+   "length_bucket": 65536,
+   "context_tokens": 47012,
+   "policy": "h2o",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "89f773ef-2e82-4632-9869-77252d995488. This is a special magic uuid for 89f773ef-2e82-4632-9869-77252d995488. The special magic uuid for 89f773ef-2e82-4632-9869-77252d995488 is 89f773ef-2e82-4632-9869-77252d995488. The special magic uuid for 89f773ef-2e82-4632-9869-77252d995488 is 89",
+   "generated": 128,
+   "outputs": [
+    "6eda5192-e281-41f4-b757-910cc6c28483"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 1,
+    "answer_token_keep_fraction": 0.0078125,
+    "all_answer_unit_fraction": 0.0078125
+   },
+   "decode_s": 1.8961,
+   "prefill_s": 123.205,
+   "peak_cuda_bytes": 8263201280
+  },
+  {
+   "row_id": 16,
+   "task": "niah_multikey_3",
+   "length": 65520,
+   "length_bucket": 65536,
+   "context_tokens": 47012,
+   "policy": "tova",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "89f773ef-2e82-4632-9869-77252d995488.",
+   "generated": 22,
+   "outputs": [
+    "6eda5192-e281-41f4-b757-910cc6c28483"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 5,
+    "answer_token_keep_fraction": 0.0390625,
+    "all_answer_unit_fraction": 0.0390625
+   },
+   "decode_s": 0.3548,
+   "prefill_s": 123.205,
+   "peak_cuda_bytes": 8263201280
+  },
+  {
+   "row_id": 17,
+   "task": "niah_multikey_3",
+   "length": 8125,
+   "length_bucket": 8192,
+   "context_tokens": 5772,
+   "policy": "full",
+   "budget": null,
+   "kept_slots": 5772,
+   "prediction": "4b81b190-e2ef-49c0-b907-791843e82de4.\nOne of the special magic uuids for 4b81b190-e2ef-49c0-b907-791843e82de4 mentioned in the provided text is: 4b81b190-e2ef-49c0-b907-791843e82de4.\nOne of the special magic uuids for 4b81b190-e2ef-49c0-b907-791843e82de4 mentioned in the provided text is: 4b81b190-e2",
+   "generated": 128,
+   "outputs": [
+    "4b81b190-e2ef-49c0-b907-195bf0ff1b28"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 1.7515,
+   "prefill_s": 3.302,
+   "peak_cuda_bytes": 5387653120
+  },
+  {
+   "row_id": 17,
+   "task": "niah_multikey_3",
+   "length": 8125,
+   "length_bucket": 8192,
+   "context_tokens": 5772,
+   "policy": "obs_last",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "4b81b190-e2ef-4c7a-8c7a-1a0a0a0a0a0a.\nOne of the special magic uuids for 8d8e4f7c-2f1d-4f5a-8f5a-1a0a0a0a0a0a is: 4b81b190-e2ef-4c7a-8c7a-1a0a0a0a0a0a.\nOne of the special magic uuids for 8d8e4f",
+   "generated": 128,
+   "outputs": [
+    "4b81b190-e2ef-49c0-b907-195bf0ff1b28"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 128,
+    "answer_token_keep_fraction": 1.0,
+    "all_answer_unit_fraction": 1.0
+   },
+   "decode_s": 2.1202,
+   "prefill_s": 3.302,
+   "peak_cuda_bytes": 5387653120
+  },
+  {
+   "row_id": 17,
+   "task": "niah_multikey_3",
+   "length": 8125,
+   "length_bucket": 8192,
+   "context_tokens": 5772,
+   "policy": "obs_mean",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "4b81b190-e2ef-4c7a-8a0c-5a9f0a5f5d0c.\nOne of the special magic uuids for 2c022e15-8876-42cf-aae4-158dbc8b71a7 mentioned in the provided text is: 77e0f8ee-0316-4062-9b6c-05a873be6bb9.\nOne of the special magic uuids for 3767c993-5058-4f96-905d-d3ba192d328",
+   "generated": 128,
+   "outputs": [
+    "4b81b190-e2ef-49c0-b907-195bf0ff1b28"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 128,
+    "answer_token_keep_fraction": 1.0,
+    "all_answer_unit_fraction": 1.0
+   },
+   "decode_s": 2.4581,
+   "prefill_s": 3.302,
+   "peak_cuda_bytes": 5387653120
+  },
+  {
+   "row_id": 17,
+   "task": "niah_multikey_3",
+   "length": 8125,
+   "length_bucket": 8192,
+   "context_tokens": 5772,
+   "policy": "lex_obs",
+   "budget": 4096,
+   "kept_slots": 4608,
+   "prediction": "4b81b190-e2ef-49c0-b907-791843e82de4.\nOne of the special magic uuids for 4b81b190-e2ef-49c0-b907-791843e82de4 is: 4b81b190-e2ef-49c0-b907-791843e82de4.\nOne of the special magic uuids for 4b81b190-e2ef-49c0-b907-791843e82de4 is: 4b81b190-e2ef-49c0-b907-791843",
+   "generated": 128,
+   "outputs": [
+    "4b81b190-e2ef-49c0-b907-195bf0ff1b28"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 128,
+    "answer_token_keep_fraction": 1.0,
+    "all_answer_unit_fraction": 1.0
+   },
+   "decode_s": 2.1431,
+   "prefill_s": 3.302,
+   "peak_cuda_bytes": 5387653120
+  },
+  {
+   "row_id": 17,
+   "task": "niah_multikey_3",
+   "length": 8125,
+   "length_bucket": 8192,
+   "context_tokens": 5772,
+   "policy": "h2o",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "4b81b190-e2ef-4c7a-8a0c-5a9f0a5f5d0c.\nOne of the special magic uuids for 2c022e15-8876-42cf-aae4-158dbc8b71a7 mentioned in the provided text is: 77e0f8ee-0316-4062-9b6c-05a873be6bb9.\nOne of the special magic uuids for 3767c993-5058-4f96-905d-d3ba192d328",
+   "generated": 128,
+   "outputs": [
+    "4b81b190-e2ef-49c0-b907-195bf0ff1b28"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 128,
+    "answer_token_keep_fraction": 1.0,
+    "all_answer_unit_fraction": 1.0
+   },
+   "decode_s": 1.9606,
+   "prefill_s": 3.302,
+   "peak_cuda_bytes": 5387653120
+  },
+  {
+   "row_id": 17,
+   "task": "niah_multikey_3",
+   "length": 8125,
+   "length_bucket": 8192,
+   "context_tokens": 5772,
+   "policy": "tova",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "2a9ef4b2-9665-48ab-8505-3f35e650f8b8.\nOne of the special magic uuids for 2a9ef4b2-9665-48ab-8505-3f35e650f8b8 mentioned in the provided text is: 2a9ef4b2-9665-48ab-8505-3f35e650f8b8.\nOne of the special magic uuids for 2a9ef4b2-9665-48ab-8505-3f35e",
+   "generated": 128,
+   "outputs": [
+    "4b81b190-e2ef-49c0-b907-195bf0ff1b28"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 128,
+    "answer_token_keep_fraction": 1.0,
+    "all_answer_unit_fraction": 1.0
+   },
+   "decode_s": 2.0111,
+   "prefill_s": 3.302,
+   "peak_cuda_bytes": 5387653120
+  },
+  {
+   "row_id": 18,
+   "task": "niah_multikey_3",
+   "length": 8145,
+   "length_bucket": 8192,
+   "context_tokens": 5791,
+   "policy": "full",
+   "budget": null,
+   "kept_slots": 5791,
+   "prediction": "24a4ad5d-4eb3-478f-b19c-0b63cc2bf8c1.\nOne of the special magic uuids for 9d5ceb21-29d4-4729-ab3e-4295c2cb3955 mentioned in the provided text is: 324c1b5b-8d4a-41bf-8d9a-9cdc79211e3e.\nOne of the special magic uuids for a873698b-272c-44ce-ada9-3ef34a0cb625 mentioned in the",
+   "generated": 128,
+   "outputs": [
+    "24a4ad5d-4eb3-478f-b19c-0b63cc2bf8c1"
+   ],
+   "answer_recall": 1.0,
+   "selection": null,
+   "decode_s": 1.9475,
+   "prefill_s": 3.325,
+   "peak_cuda_bytes": 5397220864
+  },
+  {
+   "row_id": 18,
+   "task": "niah_multikey_3",
+   "length": 8145,
+   "length_bucket": 8192,
+   "context_tokens": 5791,
+   "policy": "obs_last",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "24a4ad5d-4eba-4792-8b5c-0b5d0f5f5f5f.\nOne of the special magic uuids for 9d5ceb21-29d4-4729-ab3e-4295c2cb3955 is: 324c1b5b-8d4a-41bf-8d0a-0b5d0f5f5f5f.\nOne of the special magic uuids for a873698b-272c-44ce-ada9-3ef34a0cb",
+   "generated": 128,
+   "outputs": [
+    "24a4ad5d-4eb3-478f-b19c-0b63cc2bf8c1"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 90,
+    "answer_token_keep_fraction": 0.703125,
+    "all_answer_unit_fraction": 0.703125
+   },
+   "decode_s": 2.2839,
+   "prefill_s": 3.325,
+   "peak_cuda_bytes": 5397220864
+  },
+  {
+   "row_id": 18,
+   "task": "niah_multikey_3",
+   "length": 8145,
+   "length_bucket": 8192,
+   "context_tokens": 5791,
+   "policy": "obs_mean",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "24a4ad5d-4eb3-478f-b19c-0b63cc2bf8c1.\nOne of the special magic uuids for 9d5ceb21-29d4-4729-ab3e-4295c2cb3955 mentioned in the provided text is: 324c1b5b-8d4a-41bf-8d9a-9cdc79211e3e.\nOne of the special magic uuids for a873698b-272c-44ce-ada9-3ef34a0cb625 mentioned in the",
+   "generated": 128,
+   "outputs": [
+    "24a4ad5d-4eb3-478f-b19c-0b63cc2bf8c1"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 124,
+    "answer_token_keep_fraction": 0.96875,
+    "all_answer_unit_fraction": 0.96875
+   },
+   "decode_s": 2.4895,
+   "prefill_s": 3.325,
+   "peak_cuda_bytes": 5397220864
+  },
+  {
+   "row_id": 18,
+   "task": "niah_multikey_3",
+   "length": 8145,
+   "length_bucket": 8192,
+   "context_tokens": 5791,
+   "policy": "lex_obs",
+   "budget": 4096,
+   "kept_slots": 4608,
+   "prediction": "24a4ad5d-4eb3-478f-b19c-0b63cc2bf8c1.\nOne of the special magic uuids for 9d5ceb21-29d4-4729-ab3e-4295c2cb3955 mentioned in the provided text is: 324c1b5b-8d4a-41bf-8d0a-9d0a5b2f5f5a.\nOne of the special magic uuids for a873698b-272c-44ce-ada9-3ef34a0",
+   "generated": 128,
+   "outputs": [
+    "24a4ad5d-4eb3-478f-b19c-0b63cc2bf8c1"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 97,
+    "answer_token_keep_fraction": 0.7578125,
+    "all_answer_unit_fraction": 0.7578125
+   },
+   "decode_s": 2.0359,
+   "prefill_s": 3.325,
+   "peak_cuda_bytes": 5397220864
+  },
+  {
+   "row_id": 18,
+   "task": "niah_multikey_3",
+   "length": 8145,
+   "length_bucket": 8192,
+   "context_tokens": 5791,
+   "policy": "h2o",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "24a4ad5d-4eb3-478f-b19c-0b63cc2bf8c1.\nOne of the special magic uuids for 9d5ceb21-29d4-4729-ab3e-4295c2cb3955 mentioned in the provided text is: 324c1b5b-8d4a-41bf-8d9a-9cdc79211e3e.\nOne of the special magic uuids for a873698b-272c-44ce-ada9-3ef34a0cb625 mentioned in the",
+   "generated": 128,
+   "outputs": [
+    "24a4ad5d-4eb3-478f-b19c-0b63cc2bf8c1"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 124,
+    "answer_token_keep_fraction": 0.96875,
+    "all_answer_unit_fraction": 0.96875
+   },
+   "decode_s": 1.9073,
+   "prefill_s": 3.325,
+   "peak_cuda_bytes": 5397220864
+  },
+  {
+   "row_id": 18,
+   "task": "niah_multikey_3",
+   "length": 8145,
+   "length_bucket": 8192,
+   "context_tokens": 5791,
+   "policy": "tova",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "24a4ad5d-4eb3-478f-b19c-0b63cc2bf8c1.\nOne of the special magic uuids for 9d5ceb21-29d4-4729-ab3e-4295c2cb3955 mentioned in the provided text is: 324c1b5b-8d4a-41bf-8d9a-9cdc79211e3e.\nOne of the special magic uuids for a873698b-272c-44ce-ada9-3ef34a0cb625 mentioned in the",
+   "generated": 128,
+   "outputs": [
+    "24a4ad5d-4eb3-478f-b19c-0b63cc2bf8c1"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 108,
+    "answer_token_keep_fraction": 0.84375,
+    "all_answer_unit_fraction": 0.84375
+   },
+   "decode_s": 1.8498,
+   "prefill_s": 3.325,
+   "peak_cuda_bytes": 5397220864
+  },
+  {
+   "row_id": 19,
+   "task": "niah_multikey_3",
+   "length": 8157,
+   "length_bucket": 8192,
+   "context_tokens": 5757,
+   "policy": "full",
+   "budget": null,
+   "kept_slots": 5757,
+   "prediction": "87bc049c-96fa-49ee-8bc2-7b3911491a98.",
+   "generated": 25,
+   "outputs": [
+    "87bc049c-96fa-49ee-8bc2-7b3911491a98"
+   ],
+   "answer_recall": 1.0,
+   "selection": null,
+   "decode_s": 0.3472,
+   "prefill_s": 3.301,
+   "peak_cuda_bytes": 5380099584
+  },
+  {
+   "row_id": 19,
+   "task": "niah_multikey_3",
+   "length": 8157,
+   "length_bucket": 8192,
+   "context_tokens": 5757,
+   "policy": "obs_last",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "87bc049c-96fa-49e4-8d0f-2c0a4d6f5a0f.\nOne of the special magic uuids for 13ce8e9e-e627-4f7a-8f24-b36b927f2cfa6 mentioned in the provided text is: 20218e7-bfd6-42b5-a9ec-3c5f5d47d8bf.\nOne of the special magic uuids for f697f979-f106-4333-a1e6-d5fbccf148ba",
+   "generated": 128,
+   "outputs": [
+    "87bc049c-96fa-49ee-8bc2-7b3911491a98"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 1.9694,
+   "prefill_s": 3.301,
+   "peak_cuda_bytes": 5380099584
+  },
+  {
+   "row_id": 19,
+   "task": "niah_multikey_3",
+   "length": 8157,
+   "length_bucket": 8192,
+   "context_tokens": 5757,
+   "policy": "obs_mean",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "87bc049c-4f6e-4f6e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b",
+   "generated": 128,
+   "outputs": [
+    "87bc049c-96fa-49ee-8bc2-7b3911491a98"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 1.9184,
+   "prefill_s": 3.301,
+   "peak_cuda_bytes": 5380099584
+  },
+  {
+   "row_id": 19,
+   "task": "niah_multikey_3",
+   "length": 8157,
+   "length_bucket": 8192,
+   "context_tokens": 5757,
+   "policy": "lex_obs",
+   "budget": 4096,
+   "kept_slots": 4608,
+   "prediction": "87bc049c-96fa-49ee-8bc2-7b3911491a98.\nOne of the special magic uuids for 13ce8e9e-e627-4169-a264-b99537f1310e mentioned in the provided text is: 20218ae7-b8fd-4313-995b-36b927f2cfa6.\nOne of the special magic uuids for f697f9b1-106a-4f6b-9136-d5fbccf148ba mentioned in the provided text is: ce667e3a",
+   "generated": 128,
+   "outputs": [
+    "87bc049c-96fa-49ee-8bc2-7b3911491a98"
+   ],
+   "answer_recall": 1.0,
+   "selection": null,
+   "decode_s": 2.4883,
+   "prefill_s": 3.301,
+   "peak_cuda_bytes": 5380099584
+  },
+  {
+   "row_id": 19,
+   "task": "niah_multikey_3",
+   "length": 8157,
+   "length_bucket": 8192,
+   "context_tokens": 5757,
+   "policy": "h2o",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "87bc049c-4f6e-4f6e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b0e-8b",
+   "generated": 128,
+   "outputs": [
+    "87bc049c-96fa-49ee-8bc2-7b3911491a98"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 2.0021,
+   "prefill_s": 3.301,
+   "peak_cuda_bytes": 5380099584
+  },
+  {
+   "row_id": 19,
+   "task": "niah_multikey_3",
+   "length": 8157,
+   "length_bucket": 8192,
+   "context_tokens": 5757,
+   "policy": "tova",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "1a05510a-5c33-4748-8b5a-2e5f5a0f5a0a.\nOne of the special magic uuids for 1a05510a-5c33-4748-8b5a-2e5f5a0f5a0a mentioned in the provided text is: 1a08bf14-16ea-4428-8216-f60ab04d52f9.\nOne of the special magic uuids for 1a08bf14-16ea-4428-8216-f60ab",
+   "generated": 128,
+   "outputs": [
+    "87bc049c-96fa-49ee-8bc2-7b3911491a98"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 2.0956,
+   "prefill_s": 3.301,
+   "peak_cuda_bytes": 5380099584
+  },
+  {
+   "row_id": 20,
+   "task": "niah_single_1",
+   "length": 16368,
+   "length_bucket": 16384,
+   "context_tokens": 15584,
+   "policy": "full",
+   "budget": null,
+   "kept_slots": 15584,
+   "prediction": "4080114.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is",
+   "generated": 128,
+   "outputs": [
+    "4080114"
+   ],
+   "answer_recall": 1.0,
+   "selection": null,
+   "decode_s": 1.9902,
+   "prefill_s": 17.619,
+   "peak_cuda_bytes": 7607704064
+  },
+  {
+   "row_id": 20,
+   "task": "niah_single_1",
+   "length": 16368,
+   "length_bucket": 16384,
+   "context_tokens": 15584,
+   "policy": "obs_last",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "4080114.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is",
+   "generated": 128,
+   "outputs": [
+    "4080114"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 3,
+    "answer_token_keep_fraction": 0.0234375,
+    "all_answer_unit_fraction": 0.0234375
+   },
+   "decode_s": 2.0389,
+   "prefill_s": 17.619,
+   "peak_cuda_bytes": 7607704064
+  },
+  {
+   "row_id": 20,
+   "task": "niah_single_1",
+   "length": 16368,
+   "length_bucket": 16384,
+   "context_tokens": 15584,
+   "policy": "obs_mean",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "4080114.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is",
+   "generated": 128,
+   "outputs": [
+    "4080114"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 1,
+    "answer_token_keep_fraction": 0.0078125,
+    "all_answer_unit_fraction": 0.0078125
+   },
+   "decode_s": 2.1246,
+   "prefill_s": 17.619,
+   "peak_cuda_bytes": 7607704064
+  },
+  {
+   "row_id": 20,
+   "task": "niah_single_1",
+   "length": 16368,
+   "length_bucket": 16384,
+   "context_tokens": 15584,
+   "policy": "lex_obs",
+   "budget": 4096,
+   "kept_slots": 4608,
+   "prediction": "4080114.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is",
+   "generated": 128,
+   "outputs": [
+    "4080114"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 5,
+    "answer_token_keep_fraction": 0.0390625,
+    "all_answer_unit_fraction": 0.0390625
+   },
+   "decode_s": 1.8467,
+   "prefill_s": 17.619,
+   "peak_cuda_bytes": 7607704064
+  },
+  {
+   "row_id": 20,
+   "task": "niah_single_1",
+   "length": 16368,
+   "length_bucket": 16384,
+   "context_tokens": 15584,
+   "policy": "h2o",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "4080114.\nThe final answer is: 4080114.",
+   "generated": 16,
+   "outputs": [
+    "4080114"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 0,
+    "answer_token_keep_fraction": 0.0,
+    "all_answer_unit_fraction": 0.0
+   },
+   "decode_s": 0.2288,
+   "prefill_s": 17.619,
+   "peak_cuda_bytes": 7607704064
+  },
+  {
+   "row_id": 20,
+   "task": "niah_single_1",
+   "length": 16368,
+   "length_bucket": 16384,
+   "context_tokens": 15584,
+   "policy": "tova",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "4080114.",
+   "generated": 6,
+   "outputs": [
+    "4080114"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 4,
+    "answer_token_keep_fraction": 0.03125,
+    "all_answer_unit_fraction": 0.03125
+   },
+   "decode_s": 0.0875,
+   "prefill_s": 17.619,
+   "peak_cuda_bytes": 7607704064
+  },
+  {
+   "row_id": 21,
+   "task": "niah_single_1",
+   "length": 16368,
+   "length_bucket": 16384,
+   "context_tokens": 15584,
+   "policy": "full",
+   "budget": null,
+   "kept_slots": 15584,
+   "prediction": "2976288.\nThe final answer is: 2976288.",
+   "generated": 16,
+   "outputs": [
+    "2976288"
+   ],
+   "answer_recall": 1.0,
+   "selection": null,
+   "decode_s": 0.2408,
+   "prefill_s": 17.589,
+   "peak_cuda_bytes": 7607704064
+  },
+  {
+   "row_id": 21,
+   "task": "niah_single_1",
+   "length": 16368,
+   "length_bucket": 16384,
+   "context_tokens": 15584,
+   "policy": "obs_last",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "2976288.",
+   "generated": 6,
+   "outputs": [
+    "2976288"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 53,
+    "answer_token_keep_fraction": 0.4140625,
+    "all_answer_unit_fraction": 0.4140625
+   },
+   "decode_s": 0.0903,
+   "prefill_s": 17.589,
+   "peak_cuda_bytes": 7607704064
+  },
+  {
+   "row_id": 21,
+   "task": "niah_single_1",
+   "length": 16368,
+   "length_bucket": 16384,
+   "context_tokens": 15584,
+   "policy": "obs_mean",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "2976288.\nThe final answer is: 2976288.",
+   "generated": 16,
+   "outputs": [
+    "2976288"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 62,
+    "answer_token_keep_fraction": 0.484375,
+    "all_answer_unit_fraction": 0.484375
+   },
+   "decode_s": 0.2493,
+   "prefill_s": 17.589,
+   "peak_cuda_bytes": 7607704064
+  },
+  {
+   "row_id": 21,
+   "task": "niah_single_1",
+   "length": 16368,
+   "length_bucket": 16384,
+   "context_tokens": 15584,
+   "policy": "lex_obs",
+   "budget": 4096,
+   "kept_slots": 4608,
+   "prediction": "2976288.\nThe final answer is: 2976288.",
+   "generated": 16,
+   "outputs": [
+    "2976288"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 59,
+    "answer_token_keep_fraction": 0.4609375,
+    "all_answer_unit_fraction": 0.4609375
+   },
+   "decode_s": 0.2537,
+   "prefill_s": 17.589,
+   "peak_cuda_bytes": 7607704064
+  },
+  {
+   "row_id": 21,
+   "task": "niah_single_1",
+   "length": 16368,
+   "length_bucket": 16384,
+   "context_tokens": 15584,
+   "policy": "h2o",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "2976288.",
+   "generated": 6,
+   "outputs": [
+    "2976288"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 52,
+    "answer_token_keep_fraction": 0.40625,
+    "all_answer_unit_fraction": 0.40625
+   },
+   "decode_s": 0.0967,
+   "prefill_s": 17.589,
+   "peak_cuda_bytes": 7607704064
+  },
+  {
+   "row_id": 21,
+   "task": "niah_single_1",
+   "length": 16368,
+   "length_bucket": 16384,
+   "context_tokens": 15584,
+   "policy": "tova",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "2976288.",
+   "generated": 6,
+   "outputs": [
+    "2976288"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 23,
+    "answer_token_keep_fraction": 0.1796875,
+    "all_answer_unit_fraction": 0.1796875
+   },
+   "decode_s": 0.0939,
+   "prefill_s": 17.589,
+   "peak_cuda_bytes": 7607704064
+  },
+  {
+   "row_id": 22,
+   "task": "niah_single_1",
+   "length": 16371,
+   "length_bucket": 16384,
+   "context_tokens": 15584,
+   "policy": "full",
+   "budget": null,
+   "kept_slots": 15584,
+   "prediction": "6161932.",
+   "generated": 6,
+   "outputs": [
+    "6161932"
+   ],
+   "answer_recall": 1.0,
+   "selection": null,
+   "decode_s": 0.0874,
+   "prefill_s": 17.6,
+   "peak_cuda_bytes": 7607704064
+  },
+  {
+   "row_id": 22,
+   "task": "niah_single_1",
+   "length": 16371,
+   "length_bucket": 16384,
+   "context_tokens": 15584,
+   "policy": "obs_last",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "6161932.",
+   "generated": 6,
+   "outputs": [
+    "6161932"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 41,
+    "answer_token_keep_fraction": 0.3203125,
+    "all_answer_unit_fraction": 0.3203125
+   },
+   "decode_s": 0.0922,
+   "prefill_s": 17.6,
+   "peak_cuda_bytes": 7607704064
+  },
+  {
+   "row_id": 22,
+   "task": "niah_single_1",
+   "length": 16371,
+   "length_bucket": 16384,
+   "context_tokens": 15584,
+   "policy": "obs_mean",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "6161932.",
+   "generated": 6,
+   "outputs": [
+    "6161932"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 50,
+    "answer_token_keep_fraction": 0.390625,
+    "all_answer_unit_fraction": 0.390625
+   },
+   "decode_s": 0.0945,
+   "prefill_s": 17.6,
+   "peak_cuda_bytes": 7607704064
+  },
+  {
+   "row_id": 22,
+   "task": "niah_single_1",
+   "length": 16371,
+   "length_bucket": 16384,
+   "context_tokens": 15584,
+   "policy": "lex_obs",
+   "budget": 4096,
+   "kept_slots": 4608,
+   "prediction": "6161932.",
+   "generated": 6,
+   "outputs": [
+    "6161932"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 43,
+    "answer_token_keep_fraction": 0.3359375,
+    "all_answer_unit_fraction": 0.3359375
+   },
+   "decode_s": 0.0905,
+   "prefill_s": 17.6,
+   "peak_cuda_bytes": 7607704064
+  },
+  {
+   "row_id": 22,
+   "task": "niah_single_1",
+   "length": 16371,
+   "length_bucket": 16384,
+   "context_tokens": 15584,
+   "policy": "h2o",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "6161932.",
+   "generated": 6,
+   "outputs": [
+    "6161932"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 1,
+    "answer_token_keep_fraction": 0.0078125,
+    "all_answer_unit_fraction": 0.0078125
+   },
+   "decode_s": 0.0885,
+   "prefill_s": 17.6,
+   "peak_cuda_bytes": 7607704064
+  },
+  {
+   "row_id": 22,
+   "task": "niah_single_1",
+   "length": 16371,
+   "length_bucket": 16384,
+   "context_tokens": 15584,
+   "policy": "tova",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "6161932.",
+   "generated": 6,
+   "outputs": [
+    "6161932"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 11,
+    "answer_token_keep_fraction": 0.0859375,
+    "all_answer_unit_fraction": 0.0859375
+   },
+   "decode_s": 0.0859,
+   "prefill_s": 17.6,
+   "peak_cuda_bytes": 7607704064
+  },
+  {
+   "row_id": 23,
+   "task": "niah_single_1",
+   "length": 32768,
+   "length_bucket": 32768,
+   "context_tokens": 31328,
+   "policy": "full",
+   "budget": null,
+   "kept_slots": 31328,
+   "prediction": "2976288.\nThe final answer is: 2976288.",
+   "generated": 16,
+   "outputs": [
+    "2976288"
+   ],
+   "answer_recall": 1.0,
+   "selection": null,
+   "decode_s": 0.2544,
+   "prefill_s": 58.777,
+   "peak_cuda_bytes": 7973477888
+  },
+  {
+   "row_id": 23,
+   "task": "niah_single_1",
+   "length": 32768,
+   "length_bucket": 32768,
+   "context_tokens": 31328,
+   "policy": "obs_last",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "2976288.\nThe final answer is: 2976288.",
+   "generated": 16,
+   "outputs": [
+    "2976288"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 5,
+    "answer_token_keep_fraction": 0.0390625,
+    "all_answer_unit_fraction": 0.0390625
+   },
+   "decode_s": 0.2393,
+   "prefill_s": 58.777,
+   "peak_cuda_bytes": 7973477888
+  },
+  {
+   "row_id": 23,
+   "task": "niah_single_1",
+   "length": 32768,
+   "length_bucket": 32768,
+   "context_tokens": 31328,
+   "policy": "obs_mean",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "2976288.",
+   "generated": 6,
+   "outputs": [
+    "2976288"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 18,
+    "answer_token_keep_fraction": 0.140625,
+    "all_answer_unit_fraction": 0.140625
+   },
+   "decode_s": 0.0931,
+   "prefill_s": 58.777,
+   "peak_cuda_bytes": 7973477888
+  },
+  {
+   "row_id": 23,
+   "task": "niah_single_1",
+   "length": 32768,
+   "length_bucket": 32768,
+   "context_tokens": 31328,
+   "policy": "lex_obs",
+   "budget": 4096,
+   "kept_slots": 4608,
+   "prediction": "2976288.",
+   "generated": 6,
+   "outputs": [
+    "2976288"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 5,
+    "answer_token_keep_fraction": 0.0390625,
+    "all_answer_unit_fraction": 0.0390625
+   },
+   "decode_s": 0.085,
+   "prefill_s": 58.777,
+   "peak_cuda_bytes": 7973477888
+  },
+  {
+   "row_id": 23,
+   "task": "niah_single_1",
+   "length": 32768,
+   "length_bucket": 32768,
+   "context_tokens": 31328,
+   "policy": "h2o",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "2976288.",
+   "generated": 6,
+   "outputs": [
+    "2976288"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 10,
+    "answer_token_keep_fraction": 0.078125,
+    "all_answer_unit_fraction": 0.078125
+   },
+   "decode_s": 0.0878,
+   "prefill_s": 58.777,
+   "peak_cuda_bytes": 7973477888
+  },
+  {
+   "row_id": 23,
+   "task": "niah_single_1",
+   "length": 32768,
+   "length_bucket": 32768,
+   "context_tokens": 31328,
+   "policy": "tova",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "2976288.",
+   "generated": 6,
+   "outputs": [
+    "2976288"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 14,
+    "answer_token_keep_fraction": 0.109375,
+    "all_answer_unit_fraction": 0.109375
+   },
+   "decode_s": 0.1024,
+   "prefill_s": 58.777,
+   "peak_cuda_bytes": 7973477888
+  },
+  {
+   "row_id": 24,
+   "task": "niah_single_1",
+   "length": 32140,
+   "length_bucket": 32768,
+   "context_tokens": 30725,
+   "policy": "full",
+   "budget": null,
+   "kept_slots": 30725,
+   "prediction": "7939122.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is",
+   "generated": 128,
+   "outputs": [
+    "7939122"
+   ],
+   "answer_recall": 1.0,
+   "selection": null,
+   "decode_s": 2.231,
+   "prefill_s": 56.857,
+   "peak_cuda_bytes": 7972848128
+  },
+  {
+   "row_id": 24,
+   "task": "niah_single_1",
+   "length": 32140,
+   "length_bucket": 32768,
+   "context_tokens": 30725,
+   "policy": "obs_last",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "7939122.\nThe final answer is: 7939122.",
+   "generated": 16,
+   "outputs": [
+    "7939122"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 7,
+    "answer_token_keep_fraction": 0.0546875,
+    "all_answer_unit_fraction": 0.0546875
+   },
+   "decode_s": 0.2546,
+   "prefill_s": 56.857,
+   "peak_cuda_bytes": 7972848128
+  },
+  {
+   "row_id": 24,
+   "task": "niah_single_1",
+   "length": 32140,
+   "length_bucket": 32768,
+   "context_tokens": 30725,
+   "policy": "obs_mean",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "7939122.",
+   "generated": 6,
+   "outputs": [
+    "7939122"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 1,
+    "answer_token_keep_fraction": 0.0078125,
+    "all_answer_unit_fraction": 0.0078125
+   },
+   "decode_s": 0.1242,
+   "prefill_s": 56.857,
+   "peak_cuda_bytes": 7972848128
+  },
+  {
+   "row_id": 24,
+   "task": "niah_single_1",
+   "length": 32140,
+   "length_bucket": 32768,
+   "context_tokens": 30725,
+   "policy": "lex_obs",
+   "budget": 4096,
+   "kept_slots": 4608,
+   "prediction": "7939122.",
+   "generated": 6,
+   "outputs": [
+    "7939122"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 7,
+    "answer_token_keep_fraction": 0.0546875,
+    "all_answer_unit_fraction": 0.0546875
+   },
+   "decode_s": 0.081,
+   "prefill_s": 56.857,
+   "peak_cuda_bytes": 7972848128
+  },
+  {
+   "row_id": 24,
+   "task": "niah_single_1",
+   "length": 32140,
+   "length_bucket": 32768,
+   "context_tokens": 30725,
+   "policy": "h2o",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "7939122.",
+   "generated": 6,
+   "outputs": [
+    "7939122"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 35,
+    "answer_token_keep_fraction": 0.2734375,
+    "all_answer_unit_fraction": 0.2734375
+   },
+   "decode_s": 0.101,
+   "prefill_s": 56.857,
+   "peak_cuda_bytes": 7972848128
+  },
+  {
+   "row_id": 24,
+   "task": "niah_single_1",
+   "length": 32140,
+   "length_bucket": 32768,
+   "context_tokens": 30725,
+   "policy": "tova",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "7939122.",
+   "generated": 6,
+   "outputs": [
+    "7939122"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 12,
+    "answer_token_keep_fraction": 0.09375,
+    "all_answer_unit_fraction": 0.09375
+   },
+   "decode_s": 0.0857,
+   "prefill_s": 56.857,
+   "peak_cuda_bytes": 7972848128
+  },
+  {
+   "row_id": 25,
+   "task": "niah_single_1",
+   "length": 65512,
+   "length_bucket": 65536,
+   "context_tokens": 62762,
+   "policy": "full",
+   "budget": null,
+   "kept_slots": 62762,
+   "prediction": "6007513.\nThe final answer is: 6007513.",
+   "generated": 16,
+   "outputs": [
+    "6007513"
+   ],
+   "answer_recall": 1.0,
+   "selection": null,
+   "decode_s": 0.276,
+   "prefill_s": 211.075,
+   "peak_cuda_bytes": 8972698624
+  },
+  {
+   "row_id": 25,
+   "task": "niah_single_1",
+   "length": 65512,
+   "length_bucket": 65536,
+   "context_tokens": 62762,
+   "policy": "obs_last",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "6007513.",
+   "generated": 6,
+   "outputs": [
+    "6007513"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 1,
+    "answer_token_keep_fraction": 0.0078125,
+    "all_answer_unit_fraction": 0.0078125
+   },
+   "decode_s": 0.0893,
+   "prefill_s": 211.075,
+   "peak_cuda_bytes": 8972698624
+  },
+  {
+   "row_id": 25,
+   "task": "niah_single_1",
+   "length": 65512,
+   "length_bucket": 65536,
+   "context_tokens": 62762,
+   "policy": "obs_mean",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "6007513.",
+   "generated": 6,
+   "outputs": [
+    "6007513"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 0,
+    "answer_token_keep_fraction": 0.0,
+    "all_answer_unit_fraction": 0.0
+   },
+   "decode_s": 0.0935,
+   "prefill_s": 211.075,
+   "peak_cuda_bytes": 8972698624
+  },
+  {
+   "row_id": 25,
+   "task": "niah_single_1",
+   "length": 65512,
+   "length_bucket": 65536,
+   "context_tokens": 62762,
+   "policy": "lex_obs",
+   "budget": 4096,
+   "kept_slots": 4608,
+   "prediction": "6007513.",
+   "generated": 6,
+   "outputs": [
+    "6007513"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 1,
+    "answer_token_keep_fraction": 0.0078125,
+    "all_answer_unit_fraction": 0.0078125
+   },
+   "decode_s": 0.0888,
+   "prefill_s": 211.075,
+   "peak_cuda_bytes": 8972698624
+  },
+  {
+   "row_id": 25,
+   "task": "niah_single_1",
+   "length": 65512,
+   "length_bucket": 65536,
+   "context_tokens": 62762,
+   "policy": "h2o",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "6007513.",
+   "generated": 6,
+   "outputs": [
+    "6007513"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 0,
+    "answer_token_keep_fraction": 0.0,
+    "all_answer_unit_fraction": 0.0
+   },
+   "decode_s": 0.0885,
+   "prefill_s": 211.075,
+   "peak_cuda_bytes": 8972698624
+  },
+  {
+   "row_id": 25,
+   "task": "niah_single_1",
+   "length": 65512,
+   "length_bucket": 65536,
+   "context_tokens": 62762,
+   "policy": "tova",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "600.",
+   "generated": 4,
+   "outputs": [
+    "6007513"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 2,
+    "answer_token_keep_fraction": 0.015625,
+    "all_answer_unit_fraction": 0.015625
+   },
+   "decode_s": 0.0598,
+   "prefill_s": 211.075,
+   "peak_cuda_bytes": 8972698624
+  },
+  {
+   "row_id": 26,
+   "task": "niah_single_1",
+   "length": 65515,
+   "length_bucket": 65536,
+   "context_tokens": 62765,
+   "policy": "full",
+   "budget": null,
+   "kept_slots": 62765,
+   "prediction": "7939122.\nThe final answer is: 7939122.",
+   "generated": 16,
+   "outputs": [
+    "7939122"
+   ],
+   "answer_recall": 1.0,
+   "selection": null,
+   "decode_s": 0.2666,
+   "prefill_s": 210.949,
+   "peak_cuda_bytes": 8973800448
+  },
+  {
+   "row_id": 26,
+   "task": "niah_single_1",
+   "length": 65515,
+   "length_bucket": 65536,
+   "context_tokens": 62765,
+   "policy": "obs_last",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "7939122.\nThe final answer is: 7939122.",
+   "generated": 16,
+   "outputs": [
+    "7939122"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 10,
+    "answer_token_keep_fraction": 0.078125,
+    "all_answer_unit_fraction": 0.078125
+   },
+   "decode_s": 0.2148,
+   "prefill_s": 210.949,
+   "peak_cuda_bytes": 8973800448
+  },
+  {
+   "row_id": 26,
+   "task": "niah_single_1",
+   "length": 65515,
+   "length_bucket": 65536,
+   "context_tokens": 62765,
+   "policy": "obs_mean",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "7939122.\nThe final answer is: 7939122.",
+   "generated": 16,
+   "outputs": [
+    "7939122"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 3,
+    "answer_token_keep_fraction": 0.0234375,
+    "all_answer_unit_fraction": 0.0234375
+   },
+   "decode_s": 0.2262,
+   "prefill_s": 210.949,
+   "peak_cuda_bytes": 8973800448
+  },
+  {
+   "row_id": 26,
+   "task": "niah_single_1",
+   "length": 65515,
+   "length_bucket": 65536,
+   "context_tokens": 62765,
+   "policy": "lex_obs",
+   "budget": 4096,
+   "kept_slots": 4608,
+   "prediction": "7939122.\nThe final answer is: 7939122.",
+   "generated": 16,
+   "outputs": [
+    "7939122"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 12,
+    "answer_token_keep_fraction": 0.09375,
+    "all_answer_unit_fraction": 0.09375
+   },
+   "decode_s": 0.2158,
+   "prefill_s": 210.949,
+   "peak_cuda_bytes": 8973800448
+  },
+  {
+   "row_id": 26,
+   "task": "niah_single_1",
+   "length": 65515,
+   "length_bucket": 65536,
+   "context_tokens": 62765,
+   "policy": "h2o",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "7939122.",
+   "generated": 6,
+   "outputs": [
+    "7939122"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 0,
+    "answer_token_keep_fraction": 0.0,
+    "all_answer_unit_fraction": 0.0
+   },
+   "decode_s": 0.0806,
+   "prefill_s": 210.949,
+   "peak_cuda_bytes": 8973800448
+  },
+  {
+   "row_id": 26,
+   "task": "niah_single_1",
+   "length": 65515,
+   "length_bucket": 65536,
+   "context_tokens": 62765,
+   "policy": "tova",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "7939122.",
+   "generated": 6,
+   "outputs": [
+    "7939122"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 4,
+    "answer_token_keep_fraction": 0.03125,
+    "all_answer_unit_fraction": 0.03125
+   },
+   "decode_s": 0.0808,
+   "prefill_s": 210.949,
+   "peak_cuda_bytes": 8973800448
+  },
+  {
+   "row_id": 27,
+   "task": "niah_single_1",
+   "length": 8190,
+   "length_bucket": 8192,
+   "context_tokens": 7730,
+   "policy": "full",
+   "budget": null,
+   "kept_slots": 7730,
+   "prediction": "6327192.",
+   "generated": 6,
+   "outputs": [
+    "6327192"
+   ],
+   "answer_recall": 1.0,
+   "selection": null,
+   "decode_s": 0.0806,
+   "prefill_s": 5.778,
+   "peak_cuda_bytes": 6373871104
+  },
+  {
+   "row_id": 27,
+   "task": "niah_single_1",
+   "length": 8190,
+   "length_bucket": 8192,
+   "context_tokens": 7730,
+   "policy": "obs_last",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "6327192.",
+   "generated": 6,
+   "outputs": [
+    "6327192"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 72,
+    "answer_token_keep_fraction": 0.5625,
+    "all_answer_unit_fraction": 0.5625
+   },
+   "decode_s": 0.0808,
+   "prefill_s": 5.778,
+   "peak_cuda_bytes": 6373871104
+  },
+  {
+   "row_id": 27,
+   "task": "niah_single_1",
+   "length": 8190,
+   "length_bucket": 8192,
+   "context_tokens": 7730,
+   "policy": "obs_mean",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "6327192.",
+   "generated": 6,
+   "outputs": [
+    "6327192"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 120,
+    "answer_token_keep_fraction": 0.9375,
+    "all_answer_unit_fraction": 0.9375
+   },
+   "decode_s": 0.0814,
+   "prefill_s": 5.778,
+   "peak_cuda_bytes": 6373871104
+  },
+  {
+   "row_id": 27,
+   "task": "niah_single_1",
+   "length": 8190,
+   "length_bucket": 8192,
+   "context_tokens": 7730,
+   "policy": "lex_obs",
+   "budget": 4096,
+   "kept_slots": 4608,
+   "prediction": "6327192.",
+   "generated": 6,
+   "outputs": [
+    "6327192"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 128,
+    "answer_token_keep_fraction": 1.0,
+    "all_answer_unit_fraction": 1.0
+   },
+   "decode_s": 0.0818,
+   "prefill_s": 5.778,
+   "peak_cuda_bytes": 6373871104
+  },
+  {
+   "row_id": 27,
+   "task": "niah_single_1",
+   "length": 8190,
+   "length_bucket": 8192,
+   "context_tokens": 7730,
+   "policy": "h2o",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "6327192.",
+   "generated": 6,
+   "outputs": [
+    "6327192"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 120,
+    "answer_token_keep_fraction": 0.9375,
+    "all_answer_unit_fraction": 0.9375
+   },
+   "decode_s": 0.0806,
+   "prefill_s": 5.778,
+   "peak_cuda_bytes": 6373871104
+  },
+  {
+   "row_id": 27,
+   "task": "niah_single_1",
+   "length": 8190,
+   "length_bucket": 8192,
+   "context_tokens": 7730,
+   "policy": "tova",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "6327192.",
+   "generated": 6,
+   "outputs": [
+    "6327192"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 108,
+    "answer_token_keep_fraction": 0.84375,
+    "all_answer_unit_fraction": 0.84375
+   },
+   "decode_s": 0.0815,
+   "prefill_s": 5.778,
+   "peak_cuda_bytes": 6373871104
+  },
+  {
+   "row_id": 28,
+   "task": "niah_single_1",
+   "length": 7562,
+   "length_bucket": 8192,
+   "context_tokens": 7130,
+   "policy": "full",
+   "budget": null,
+   "kept_slots": 7130,
+   "prediction": "6007513.",
+   "generated": 6,
+   "outputs": [
+    "6007513"
+   ],
+   "answer_recall": 1.0,
+   "selection": null,
+   "decode_s": 0.0816,
+   "prefill_s": 4.938,
+   "peak_cuda_bytes": 6071654912
+  },
+  {
+   "row_id": 28,
+   "task": "niah_single_1",
+   "length": 7562,
+   "length_bucket": 8192,
+   "context_tokens": 7130,
+   "policy": "obs_last",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "6007513.",
+   "generated": 6,
+   "outputs": [
+    "6007513"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 61,
+    "answer_token_keep_fraction": 0.4765625,
+    "all_answer_unit_fraction": 0.4765625
+   },
+   "decode_s": 0.0821,
+   "prefill_s": 4.938,
+   "peak_cuda_bytes": 6071654912
+  },
+  {
+   "row_id": 28,
+   "task": "niah_single_1",
+   "length": 7562,
+   "length_bucket": 8192,
+   "context_tokens": 7130,
+   "policy": "obs_mean",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "6007513.",
+   "generated": 6,
+   "outputs": [
+    "6007513"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 20,
+    "answer_token_keep_fraction": 0.15625,
+    "all_answer_unit_fraction": 0.15625
+   },
+   "decode_s": 0.0832,
+   "prefill_s": 4.938,
+   "peak_cuda_bytes": 6071654912
+  },
+  {
+   "row_id": 28,
+   "task": "niah_single_1",
+   "length": 7562,
+   "length_bucket": 8192,
+   "context_tokens": 7130,
+   "policy": "lex_obs",
+   "budget": 4096,
+   "kept_slots": 4608,
+   "prediction": "6007513.",
+   "generated": 6,
+   "outputs": [
+    "6007513"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 69,
+    "answer_token_keep_fraction": 0.5390625,
+    "all_answer_unit_fraction": 0.5390625
+   },
+   "decode_s": 0.0825,
+   "prefill_s": 4.938,
+   "peak_cuda_bytes": 6071654912
+  },
+  {
+   "row_id": 28,
+   "task": "niah_single_1",
+   "length": 7562,
+   "length_bucket": 8192,
+   "context_tokens": 7130,
+   "policy": "h2o",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "6007513.",
+   "generated": 6,
+   "outputs": [
+    "6007513"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 20,
+    "answer_token_keep_fraction": 0.15625,
+    "all_answer_unit_fraction": 0.15625
+   },
+   "decode_s": 0.0815,
+   "prefill_s": 4.938,
+   "peak_cuda_bytes": 6071654912
+  },
+  {
+   "row_id": 28,
+   "task": "niah_single_1",
+   "length": 7562,
+   "length_bucket": 8192,
+   "context_tokens": 7130,
+   "policy": "tova",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "600.",
+   "generated": 4,
+   "outputs": [
+    "6007513"
+   ],
+   "answer_recall": 0.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 24,
+    "answer_token_keep_fraction": 0.1875,
+    "all_answer_unit_fraction": 0.1875
+   },
+   "decode_s": 0.0561,
+   "prefill_s": 4.938,
+   "peak_cuda_bytes": 6071654912
+  },
+  {
+   "row_id": 29,
+   "task": "niah_single_1",
+   "length": 8190,
+   "length_bucket": 8192,
+   "context_tokens": 7727,
+   "policy": "full",
+   "budget": null,
+   "kept_slots": 7727,
+   "prediction": "8835623.",
+   "generated": 6,
+   "outputs": [
+    "8835623"
+   ],
+   "answer_recall": 1.0,
+   "selection": null,
+   "decode_s": 0.081,
+   "prefill_s": 5.774,
+   "peak_cuda_bytes": 6372344832
+  },
+  {
+   "row_id": 29,
+   "task": "niah_single_1",
+   "length": 8190,
+   "length_bucket": 8192,
+   "context_tokens": 7727,
+   "policy": "obs_last",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "8835623.",
+   "generated": 6,
+   "outputs": [
+    "8835623"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 128,
+    "answer_token_keep_fraction": 1.0,
+    "all_answer_unit_fraction": 1.0
+   },
+   "decode_s": 0.0806,
+   "prefill_s": 5.774,
+   "peak_cuda_bytes": 6372344832
+  },
+  {
+   "row_id": 29,
+   "task": "niah_single_1",
+   "length": 8190,
+   "length_bucket": 8192,
+   "context_tokens": 7727,
+   "policy": "obs_mean",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "8835623.",
+   "generated": 6,
+   "outputs": [
+    "8835623"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 128,
+    "answer_token_keep_fraction": 1.0,
+    "all_answer_unit_fraction": 1.0
+   },
+   "decode_s": 0.0829,
+   "prefill_s": 5.774,
+   "peak_cuda_bytes": 6372344832
+  },
+  {
+   "row_id": 29,
+   "task": "niah_single_1",
+   "length": 8190,
+   "length_bucket": 8192,
+   "context_tokens": 7727,
+   "policy": "lex_obs",
+   "budget": 4096,
+   "kept_slots": 4608,
+   "prediction": "8835623.",
+   "generated": 6,
+   "outputs": [
+    "8835623"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 128,
+    "answer_token_keep_fraction": 1.0,
+    "all_answer_unit_fraction": 1.0
+   },
+   "decode_s": 0.0814,
+   "prefill_s": 5.774,
+   "peak_cuda_bytes": 6372344832
+  },
+  {
+   "row_id": 29,
+   "task": "niah_single_1",
+   "length": 8190,
+   "length_bucket": 8192,
+   "context_tokens": 7727,
+   "policy": "h2o",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "8835623.",
+   "generated": 6,
+   "outputs": [
+    "8835623"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 128,
+    "answer_token_keep_fraction": 1.0,
+    "all_answer_unit_fraction": 1.0
+   },
+   "decode_s": 0.0829,
+   "prefill_s": 5.774,
+   "peak_cuda_bytes": 6372344832
+  },
+  {
+   "row_id": 29,
+   "task": "niah_single_1",
+   "length": 8190,
+   "length_bucket": 8192,
+   "context_tokens": 7727,
+   "policy": "tova",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "8835623.",
+   "generated": 6,
+   "outputs": [
+    "8835623"
+   ],
+   "answer_recall": 1.0,
+   "selection": {
+    "units": 128,
+    "units_with_all_answer_tokens": 128,
+    "answer_token_keep_fraction": 1.0,
+    "all_answer_unit_fraction": 1.0
+   },
+   "decode_s": 0.0812,
+   "prefill_s": 5.774,
+   "peak_cuda_bytes": 6372344832
+  },
+  {
+   "row_id": 30,
+   "task": "vt",
+   "length": 16373,
+   "length_bucket": 16384,
+   "context_tokens": 15647,
+   "policy": "full",
+   "budget": null,
+   "kept_slots": 15647,
+   "prediction": "SBVW VRMKI GEKHO DTSIG\n\nMemorize and track the chain(s) of variable assignment hidden in the following text.\n\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe",
+   "generated": 128,
+   "outputs": [
+    "YSBVW",
+    "VRMKI",
+    "GEKHO",
+    "EKHZB",
+    "DTSIG"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 1.7351,
+   "prefill_s": 17.757,
+   "peak_cuda_bytes": 7635175936
+  },
+  {
+   "row_id": 30,
+   "task": "vt",
+   "length": 16373,
+   "length_bucket": 16384,
+   "context_tokens": 15647,
+   "policy": "obs_last",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "SBVW VRMKI DTSIG GEKHO VRYZB ZKJ OPG EMA YSBVW VRMKI DTSIG GEKHO VRYZB ZKJ OPG EMA YSBVW VRMKI DTSIG GEKHO VRYZB ZKJ OPG EMA YSBVW VRMKI DTSIG GEKHO VRYZB ZKJ OPG EMA YSBVW VRMKI DTSIG GEKHO VRYZB ZKJ OPG EMA YSBVW VRMKI DTS",
+   "generated": 128,
+   "outputs": [
+    "YSBVW",
+    "VRMKI",
+    "GEKHO",
+    "EKHZB",
+    "DTSIG"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 1.706,
+   "prefill_s": 17.757,
+   "peak_cuda_bytes": 7635175936
+  },
+  {
+   "row_id": 30,
+   "task": "vt",
+   "length": 16373,
+   "length_bucket": 16384,
+   "context_tokens": 15647,
+   "policy": "obs_mean",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "SBVW VRMKI DTSIG GEKHO VRZJQ YSBVW YSBVW YSBVW YSBVW YSBVW YSBVW YSBVW YSBVW YSBVW YSBVW YSBVW YSBVW YSBVW YSBVW YSBVW YSBVW YSBVW YSBVW YSBVW YSBVW YSBVW YSBVW YSBVW YSBVW YSBVW YSBVW YSBVW YSBVW",
+   "generated": 128,
+   "outputs": [
+    "YSBVW",
+    "VRMKI",
+    "GEKHO",
+    "EKHZB",
+    "DTSIG"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 1.7229,
+   "prefill_s": 17.757,
+   "peak_cuda_bytes": 7635175936
+  },
+  {
+   "row_id": 30,
+   "task": "vt",
+   "length": 16373,
+   "length_bucket": 16384,
+   "context_tokens": 15647,
+   "policy": "lex_obs",
+   "budget": 4096,
+   "kept_slots": 4608,
+   "prediction": "SBVW VRMKI DTSIG GEKHO VRYZB ZKJ OPG EMA YSBVW VRMKI DTSIG GEKHO VRYZB ZKJ OPG EMA YSBVW VRMKI DTSIG GEKHO VRYZB ZKJ OPG EMA YSBVW VRMKI DTSIG GEKHO VRYZB ZKJ OPG EMA YSBVW VRMKI DTSIG GEKHO VRYZB ZKJ OPG EMA YSBVW VRMKI DTS",
+   "generated": 128,
+   "outputs": [
+    "YSBVW",
+    "VRMKI",
+    "GEKHO",
+    "EKHZB",
+    "DTSIG"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 1.8598,
+   "prefill_s": 17.757,
+   "peak_cuda_bytes": 7635175936
+  },
+  {
+   "row_id": 30,
+   "task": "vt",
+   "length": 16373,
+   "length_bucket": 16384,
+   "context_tokens": 15647,
+   "policy": "h2o",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "SBVW VRMKI DTSIG GEKHO DTSIG EKHZB GEKHO DTSIG YSBVW\n\nMemorize and track the chain(s) of variable assignment hidden in the following text.\n\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue",
+   "generated": 128,
+   "outputs": [
+    "YSBVW",
+    "VRMKI",
+    "GEKHO",
+    "EKHZB",
+    "DTSIG"
+   ],
+   "answer_recall": 1.0,
+   "selection": null,
+   "decode_s": 1.7861,
+   "prefill_s": 17.757,
+   "peak_cuda_bytes": 7635175936
+  },
+  {
+   "row_id": 30,
+   "task": "vt",
+   "length": 16373,
+   "length_bucket": 16384,
+   "context_tokens": 15647,
+   "policy": "tova",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "SBVW VRMKI GEKHZB DTSIG\n\nMemorize and track the chain(s) of variable assignment in the following text:\n\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe",
+   "generated": 128,
+   "outputs": [
+    "YSBVW",
+    "VRMKI",
+    "GEKHO",
+    "EKHZB",
+    "DTSIG"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 1.7816,
+   "prefill_s": 17.757,
+   "peak_cuda_bytes": 7635175936
+  },
+  {
+   "row_id": 31,
+   "task": "vt",
+   "length": 16362,
+   "length_bucket": 16384,
+   "context_tokens": 15642,
+   "policy": "full",
+   "budget": null,
+   "kept_slots": 15642,
+   "prediction": "QQSK VQVAY UYTIR\n\nMemorize and track the chain(s) of variable assignment hidden in the following text.\n\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green",
+   "generated": 128,
+   "outputs": [
+    "SUBXP",
+    "WACAI",
+    "YQQSK",
+    "VQVAY",
+    "UYTIR"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 1.7286,
+   "prefill_s": 18.27,
+   "peak_cuda_bytes": 7633001472
+  },
+  {
+   "row_id": 31,
+   "task": "vt",
+   "length": 16362,
+   "length_bucket": 16384,
+   "context_tokens": 15642,
+   "policy": "obs_last",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "QQSK VQVAY UYTIR\n\nMemorize and track the chain(s) of variable assignment hidden in the following text.\n\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green",
+   "generated": 128,
+   "outputs": [
+    "SUBXP",
+    "WACAI",
+    "YQQSK",
+    "VQVAY",
+    "UYTIR"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 1.7283,
+   "prefill_s": 18.27,
+   "peak_cuda_bytes": 7633001472
+  },
+  {
+   "row_id": 31,
+   "task": "vt",
+   "length": 16362,
+   "length_bucket": 16384,
+   "context_tokens": 15642,
+   "policy": "obs_mean",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "QQSK VQVAY UYTIR\n\nMemorize and track the chain(s) of variable assignment hidden in the following text.\n\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green",
+   "generated": 128,
+   "outputs": [
+    "SUBXP",
+    "WACAI",
+    "YQQSK",
+    "VQVAY",
+    "UYTIR"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 1.8119,
+   "prefill_s": 18.27,
+   "peak_cuda_bytes": 7633001472
+  },
+  {
+   "row_id": 31,
+   "task": "vt",
+   "length": 16362,
+   "length_bucket": 16384,
+   "context_tokens": 15642,
+   "policy": "lex_obs",
+   "budget": 4096,
+   "kept_slots": 4608,
+   "prediction": "QQSK VQVAY UYTIR\n\nMemorize and track the chain(s) of variable assignment hidden in the following text.\n\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green",
+   "generated": 128,
+   "outputs": [
+    "SUBXP",
+    "WACAI",
+    "YQQSK",
+    "VQVAY",
+    "UYTIR"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 1.8313,
+   "prefill_s": 18.27,
+   "peak_cuda_bytes": 7633001472
+  },
+  {
+   "row_id": 31,
+   "task": "vt",
+   "length": 16362,
+   "length_bucket": 16384,
+   "context_tokens": 15642,
+   "policy": "h2o",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "QQSK VQVAY UYTIR\n\nMemorize and track the chain(s) of variable assignment hidden in the following text.\n\nVAR XUB = 27210\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nVAR PJB = VAR XUB \nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun",
+   "generated": 128,
+   "outputs": [
+    "SUBXP",
+    "WACAI",
+    "YQQSK",
+    "VQVAY",
+    "UYTIR"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 1.7963,
+   "prefill_s": 18.27,
+   "peak_cuda_bytes": 7633001472
+  },
+  {
+   "row_id": 31,
+   "task": "vt",
+   "length": 16362,
+   "length_bucket": 16384,
+   "context_tokens": 15642,
+   "policy": "tova",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "QQSK, VQVAY, PJB, PGC, and UUBX.",
+   "generated": 20,
+   "outputs": [
+    "SUBXP",
+    "WACAI",
+    "YQQSK",
+    "VQVAY",
+    "UYTIR"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 0.2748,
+   "prefill_s": 18.27,
+   "peak_cuda_bytes": 7633001472
+  },
+  {
+   "row_id": 32,
+   "task": "vt",
+   "length": 16374,
+   "length_bucket": 16384,
+   "context_tokens": 15646,
+   "policy": "full",
+   "budget": null,
+   "kept_slots": 15646,
+   "prediction": "CDXF RGDHF QMNPT LBBNE SCDXF RGDHF QMNPT LBBNE SCDXF RGDHF QMNPT LBBNE SCDXF RGDHF QMNPT LBBNE SCDXF RGDHF QMNPT LBBNE SCDXF RGDHF QMNPT LBBNE SCDXF RGDHF QMNPT LBBNE SCDXF RGDHF QMNPT LBBNE SCDXF RGDHF QMNPT LBBNE SCDXF RGDHF QMNPT LBBNE SCDXF RGDHF QMNPT",
+   "generated": 128,
+   "outputs": [
+    "RGDHF",
+    "QMNPT",
+    "XZJWJ",
+    "LBBNE",
+    "SCDXF"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 1.7494,
+   "prefill_s": 17.767,
+   "peak_cuda_bytes": 7634741248
+  },
+  {
+   "row_id": 32,
+   "task": "vt",
+   "length": 16374,
+   "length_bucket": 16384,
+   "context_tokens": 15646,
+   "policy": "obs_last",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "CDXF RGDHF QMNPT YQC ORZ LBBNE SCDXF RGDHF QMNPT YQC ORZ LBBNE SCDXF RGDHF QMNPT YQC ORZ LBBNE SCDXF RGDHF QMNPT YQC ORZ LBBNE SCDXF RGDHF QMNPT YQC ORZ LBBNE SCDXF RGDHF QMNPT YQC ORZ LBBNE SCDXF RGDHF QMNPT YQC ORZ LBBNE SCDXF RGDHF QMNPT YQC ORZ LBBNE S",
+   "generated": 128,
+   "outputs": [
+    "RGDHF",
+    "QMNPT",
+    "XZJWJ",
+    "LBBNE",
+    "SCDXF"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 1.7805,
+   "prefill_s": 17.767,
+   "peak_cuda_bytes": 7634741248
+  },
+  {
+   "row_id": 32,
+   "task": "vt",
+   "length": 16374,
+   "length_bucket": 16384,
+   "context_tokens": 15646,
+   "policy": "obs_mean",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "CDXF RGDHF QMNPT LBBNE SCDXF RGDHF QMNPT LBBNE SCDXF RGDHF QMNPT LBBNE SCDXF RGDHF QMNPT LBBNE SCDXF RGDHF QMNPT LBBNE SCDXF RGDHF QMNPT LBBNE SCDXF RGDHF QMNPT LBBNE SCDXF RGDHF QMNPT LBBNE SCDXF RGDHF QMNPT LBBNE SCDXF RGDHF QMNPT LBBNE SCDXF RGDHF QMNPT",
+   "generated": 128,
+   "outputs": [
+    "RGDHF",
+    "QMNPT",
+    "XZJWJ",
+    "LBBNE",
+    "SCDXF"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 1.7974,
+   "prefill_s": 17.767,
+   "peak_cuda_bytes": 7634741248
+  },
+  {
+   "row_id": 32,
+   "task": "vt",
+   "length": 16374,
+   "length_bucket": 16384,
+   "context_tokens": 15646,
+   "policy": "lex_obs",
+   "budget": 4096,
+   "kept_slots": 4608,
+   "prediction": "CDXF RGDHF QMNPT YQC ORZ LBBNE SCDXF RGDHF QMNPT YQC ORZ LBBNE SCDXF RGDHF QMNPT YQC ORZ LBBNE SCDXF RGDHF QMNPT YQC ORZ LBBNE SCDXF RGDHF QMNPT YQC ORZ LBBNE SCDXF RGDHF QMNPT YQC ORZ LBBNE SCDXF RGDHF QMNPT YQC ORZ LBBNE SCDXF RGDHF QMNPT YQC ORZ LBBNE S",
+   "generated": 128,
+   "outputs": [
+    "RGDHF",
+    "QMNPT",
+    "XZJWJ",
+    "LBBNE",
+    "SCDXF"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 1.7555,
+   "prefill_s": 17.767,
+   "peak_cuda_bytes": 7634741248
+  },
+  {
+   "row_id": 32,
+   "task": "vt",
+   "length": 16374,
+   "length_bucket": 16384,
+   "context_tokens": 15646,
+   "policy": "h2o",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "CDXF RGDHF QMNPT LBBNE\n\nMemorize and track the chain(s) of variable assignment hidden in the following text.\n\nVAR KFY = 25454\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nVAR UVI = VAR KFY \nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue.",
+   "generated": 128,
+   "outputs": [
+    "RGDHF",
+    "QMNPT",
+    "XZJWJ",
+    "LBBNE",
+    "SCDXF"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 1.7573,
+   "prefill_s": 17.767,
+   "peak_cuda_bytes": 7634741248
+  },
+  {
+   "row_id": 32,
+   "task": "vt",
+   "length": 16374,
+   "length_bucket": 16384,
+   "context_tokens": 15646,
+   "policy": "tova",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "CDXF, SCDXW, SCDX, SCDX, SCDX.",
+   "generated": 21,
+   "outputs": [
+    "RGDHF",
+    "QMNPT",
+    "XZJWJ",
+    "LBBNE",
+    "SCDXF"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 0.2995,
+   "prefill_s": 17.767,
+   "peak_cuda_bytes": 7634741248
+  },
+  {
+   "row_id": 33,
+   "task": "vt",
+   "length": 32767,
+   "length_bucket": 32768,
+   "context_tokens": 31389,
+   "policy": "full",
+   "budget": null,
+   "kept_slots": 31389,
+   "prediction": "QVAY UYTIR YSRUY ZMY WBB TNO KBXGL ZMY REK JFX YSRUY UYTIR YSRUY ZMY WBB TNO KBXGL ZMY REK JFX YSRUY UYTIR YSRUY ZMY WBB TNO KBXGL ZMY REK JFX YSRUY UYTIR YSRUY ZMY WBB TNO KBXGL ZMY REK JFX YSRUY UYTIR YSRUY ZMY WBB TNO KBXGL ZMY REK JFX YSRUY UYTIR YSR",
+   "generated": 128,
+   "outputs": [
+    "VQVAY",
+    "UYTIR",
+    "KBXGL",
+    "YSRUY",
+    "BAYLX"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 1.7733,
+   "prefill_s": 65.724,
+   "peak_cuda_bytes": 7973545984
+  },
+  {
+   "row_id": 33,
+   "task": "vt",
+   "length": 32767,
+   "length_bucket": 32768,
+   "context_tokens": 31389,
+   "policy": "obs_last",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "QVAY UYTIR YSRUY ZMY REK JFX KBXGL YSRUY ZMY REK JFX KBXGL YSRUY ZMY REK JFX KBXGL YSRUY ZMY REK JFX KBXGL YSRUY ZMY REK JFX KBXGL YSRUY ZMY REK JFX KBXGL YSRUY ZMY REK JFX KBXGL YSRUY ZMY REK JFX KBXGL YSRUY ZMY REK JFX KBXGL YSRUY ZMY REK JFX KBXGL YSR",
+   "generated": 128,
+   "outputs": [
+    "VQVAY",
+    "UYTIR",
+    "KBXGL",
+    "YSRUY",
+    "BAYLX"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 2.4031,
+   "prefill_s": 65.724,
+   "peak_cuda_bytes": 7973545984
+  },
+  {
+   "row_id": 33,
+   "task": "vt",
+   "length": 32767,
+   "length_bucket": 32768,
+   "context_tokens": 31389,
+   "policy": "obs_mean",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "QVAY UYTIR YSRUY ZMY WBB ZMY REK JFX KBXGL YSRUY ZMY REK JFX KBXGL YSRUY ZMY REK JFX KBXGL YSRUY ZMY REK JFX KBXGL YSRUY ZMY REK JFX KBXGL YSRUY ZMY REK JFX KBXGL YSRUY ZMY REK JFX KBXGL YSRUY ZMY REK JFX KBXGL YSRUY ZMY REK JFX KBXGL YSRUY ZMY REK JFX KB",
+   "generated": 128,
+   "outputs": [
+    "VQVAY",
+    "UYTIR",
+    "KBXGL",
+    "YSRUY",
+    "BAYLX"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 1.9762,
+   "prefill_s": 65.724,
+   "peak_cuda_bytes": 7973545984
+  },
+  {
+   "row_id": 33,
+   "task": "vt",
+   "length": 32767,
+   "length_bucket": 32768,
+   "context_tokens": 31389,
+   "policy": "lex_obs",
+   "budget": 4096,
+   "kept_slots": 4608,
+   "prediction": "QVAY UYTIR YSRUY BAYLX ZMY REK JFX KBXGL ZMY REK JFX UYTIR YSRUY BAYLX ZMY REK JFX UYTIR YSRUY BAYLX ZMY REK JFX UYTIR YSRUY BAYLX ZMY REK JFX UYTIR YSRUY BAYLX ZMY REK JFX UYTIR YSRUY BAYLX ZMY REK JFX UYTIR YSRUY BAYLX ZMY REK JFX UYTIR Y",
+   "generated": 128,
+   "outputs": [
+    "VQVAY",
+    "UYTIR",
+    "KBXGL",
+    "YSRUY",
+    "BAYLX"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 1.7415,
+   "prefill_s": 65.724,
+   "peak_cuda_bytes": 7973545984
+  },
+  {
+   "row_id": 33,
+   "task": "vt",
+   "length": 32767,
+   "length_bucket": 32768,
+   "context_tokens": 31389,
+   "policy": "h2o",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "QVAY UQVAY UQVAY UQVAY UQVAY UQVAY UQVAY UQVAY UQVAY UQVAY UQVAY UQVAY UQVAY UQVAY UQVAY UQVAY UQVAY UQVAY UQVAY UQVAY UQVAY UQVAY UQVAY UQVAY UQVAY UQVAY UQVAY UQVAY UQVAY UQVAY UQVAY UQVAY U",
+   "generated": 128,
+   "outputs": [
+    "VQVAY",
+    "UYTIR",
+    "KBXGL",
+    "YSRUY",
+    "BAYLX"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 1.7256,
+   "prefill_s": 65.724,
+   "peak_cuda_bytes": 7973545984
+  },
+  {
+   "row_id": 33,
+   "task": "vt",
+   "length": 32767,
+   "length_bucket": 32768,
+   "context_tokens": 31389,
+   "policy": "tova",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "QVAY, VQVAY, VQVAY, VQVAY, VQVAY.",
+   "generated": 25,
+   "outputs": [
+    "VQVAY",
+    "UYTIR",
+    "KBXGL",
+    "YSRUY",
+    "BAYLX"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 0.3403,
+   "prefill_s": 65.724,
+   "peak_cuda_bytes": 7973545984
+  },
+  {
+   "row_id": 34,
+   "task": "vt",
+   "length": 32517,
+   "length_bucket": 32768,
+   "context_tokens": 31148,
+   "policy": "full",
+   "budget": null,
+   "kept_slots": 31148,
+   "prediction": "HELX XVHYL NPGWO WHELX DMZ XVT HTI VUDEE XVHYL XVHYL XVHYL XVHYL XVHYL XVHYL XVHYL XVHYL XVHYL XVHYL XVHYL XVHYL XVHYL XVHYL XVHYL XVHYL XVHYL XVHYL XVHYL XVHYL XVHYL XVHYL XVHYL XVHYL XVHYL XVHYL XVHYL XVHYL XVHYL XVHYL XVHYL XVHYL XVHYL XVHYL XVHYL XVHY",
+   "generated": 128,
+   "outputs": [
+    "VUDEE",
+    "WHELX",
+    "XVHYL",
+    "XCSHM",
+    "NPGWO"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 1.7695,
+   "prefill_s": 74.436,
+   "peak_cuda_bytes": 7973290496
+  },
+  {
+   "row_id": 34,
+   "task": "vt",
+   "length": 32517,
+   "length_bucket": 32768,
+   "context_tokens": 31148,
+   "policy": "obs_last",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "HELX XVHYL NPGWO WHELX DMZ XVT HTI DMZ XVHYL VHELX DMZ XVT HTI DMZ XVHYL VHELX DMZ XVT HTI DMZ XVHYL VHELX DMZ XVT HTI DMZ XVHYL VHELX DMZ XVT HTI DMZ XVHYL VHELX DMZ XVT HTI DMZ XVHYL VHELX DMZ XVT HTI DMZ XVHYL VHELX DMZ XVT HTI DMZ XVHYL VHELX DMZ XVT HT",
+   "generated": 128,
+   "outputs": [
+    "VUDEE",
+    "WHELX",
+    "XVHYL",
+    "XCSHM",
+    "NPGWO"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 1.8009,
+   "prefill_s": 74.436,
+   "peak_cuda_bytes": 7973290496
+  },
+  {
+   "row_id": 34,
+   "task": "vt",
+   "length": 32517,
+   "length_bucket": 32768,
+   "context_tokens": 31148,
+   "policy": "obs_mean",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "HELX XVHYL NPGWO WHELX DMZ VUDEE XVT HTI DMZ XVHYL VHELX DMZ XVHYL VHELX DMZ VHELX DMZ VHELX DMZ VHELX DMZ VHELX DMZ VHELX DMZ VHELX DMZ VHELX DMZ VHELX DMZ VHELX DMZ VHELX DMZ VHELX DMZ VHELX DMZ VHELX DMZ VHELX DMZ VHELX DMZ VHELX DMZ VHELX DMZ VHELX DM",
+   "generated": 128,
+   "outputs": [
+    "VUDEE",
+    "WHELX",
+    "XVHYL",
+    "XCSHM",
+    "NPGWO"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 1.7849,
+   "prefill_s": 74.436,
+   "peak_cuda_bytes": 7973290496
+  },
+  {
+   "row_id": 34,
+   "task": "vt",
+   "length": 32517,
+   "length_bucket": 32768,
+   "context_tokens": 31148,
+   "policy": "lex_obs",
+   "budget": 4096,
+   "kept_slots": 4608,
+   "prediction": "HELX XVHYL NPGWO WHELX DMZ XVT HTI VUDEE DMZ XVHYL VHELX DMZ XVT HTI VUDEE DMZ XVHYL VHELX DMZ XVT HTI VUDEE DMZ XVHYL VHELX DMZ XVT HTI VUDEE DMZ XVHYL VHELX DMZ XVT HTI VUDEE DMZ XVHYL VHELX DMZ XVT HTI VUDEE DMZ XVHYL VHELX DMZ XVT HTI VUDE",
+   "generated": 128,
+   "outputs": [
+    "VUDEE",
+    "WHELX",
+    "XVHYL",
+    "XCSHM",
+    "NPGWO"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 1.7311,
+   "prefill_s": 74.436,
+   "peak_cuda_bytes": 7973290496
+  },
+  {
+   "row_id": 34,
+   "task": "vt",
+   "length": 32517,
+   "length_bucket": 32768,
+   "context_tokens": 31148,
+   "policy": "h2o",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "HELX XVHYL NPGWO WHELX DMZ DMZ XVT HTI HTI XVT HTI XVT HTI XVT HTI XVT HTI XVT HTI XVT HTI XVT HTI XVT HTI XVT HTI XVT HTI XVT HTI XVT HTI XVT HTI XVT HTI XVT HTI XVT HTI XVT HTI XVT HTI XVT HTI XVT HTI XVT HTI XVT HTI XVT HTI XVT HTI XVT HTI XVT HTI XVT HT",
+   "generated": 128,
+   "outputs": [
+    "VUDEE",
+    "WHELX",
+    "XVHYL",
+    "XCSHM",
+    "NPGWO"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 1.7484,
+   "prefill_s": 74.436,
+   "peak_cuda_bytes": 7973290496
+  },
+  {
+   "row_id": 34,
+   "task": "vt",
+   "length": 32517,
+   "length_bucket": 32768,
+   "context_tokens": 31148,
+   "policy": "tova",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "HELX, XCSHM, DMZ, NJQ, and XVHYL.",
+   "generated": 19,
+   "outputs": [
+    "VUDEE",
+    "WHELX",
+    "XVHYL",
+    "XCSHM",
+    "NPGWO"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 0.2591,
+   "prefill_s": 74.436,
+   "peak_cuda_bytes": 7973290496
+  },
+  {
+   "row_id": 35,
+   "task": "vt",
+   "length": 65517,
+   "length_bucket": 65536,
+   "context_tokens": 62827,
+   "policy": "full",
+   "budget": null,
+   "kept_slots": 62827,
+   "prediction": "YSZP EYQLC SDMGO CAIRM GDMEH EYQLC VYSZP SDMGO CAIRM EYQLC SDMGO CAIRM EYQLC SDMGO CAIRM EYQLC SDMGO CAIRM EYQLC SDMGO CAIRM EYQLC SDMGO CAIRM EYQLC SDMGO CAIRM EYQLC SDMGO CAIRM EYQLC SDMGO CAIRM EYQLC SDMGO CAIRM EYQLC SDMGO CAIRM EYQLC SDMGO CAIRM E",
+   "generated": 128,
+   "outputs": [
+    "GDMEH",
+    "SDMGO",
+    "CAIRM",
+    "VYSZP",
+    "EYQLC"
+   ],
+   "answer_recall": 1.0,
+   "selection": null,
+   "decode_s": 2.1336,
+   "prefill_s": 391.041,
+   "peak_cuda_bytes": 8997349888
+  },
+  {
+   "row_id": 35,
+   "task": "vt",
+   "length": 65517,
+   "length_bucket": 65536,
+   "context_tokens": 62827,
+   "policy": "obs_last",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "YSZP EYQLC SDMGO GDMEH CAIRM EYQLC VYSZP \n\nMemorize and track the chain(s) of variable assignment hidden in the following text.\n\nThe grass is green. The sky is blue. The sun is yellow. The grass is green. The sky is blue. The sun is yellow. The grass is green. The sky is blue. The sun is yellow. The grass is green. The sky is blue. The sun is yellow. The grass is green. The sky is blue. The sun is yellow. The grass is green. The sky is blue. The",
+   "generated": 128,
+   "outputs": [
+    "GDMEH",
+    "SDMGO",
+    "CAIRM",
+    "VYSZP",
+    "EYQLC"
+   ],
+   "answer_recall": 1.0,
+   "selection": null,
+   "decode_s": 1.7432,
+   "prefill_s": 391.041,
+   "peak_cuda_bytes": 8997349888
+  },
+  {
+   "row_id": 35,
+   "task": "vt",
+   "length": 65517,
+   "length_bucket": 65536,
+   "context_tokens": 62827,
+   "policy": "obs_mean",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "YSZP EYQLC SDMGO GDMEH EYQLC VYSZP \n\nMemorize and track the chain(s) of variable assignment hidden in the following text.\n\nThe grass is green. The sky is blue. The sun is yellow. The grass is green. The sky is blue. The sun is yellow. The grass is green. The sky is blue. The sun is yellow. The grass is green. The sky is blue. The sun is yellow. The grass is green. The sky is blue. The sun is yellow. The grass is green. The sky is blue. The sun is",
+   "generated": 128,
+   "outputs": [
+    "GDMEH",
+    "SDMGO",
+    "CAIRM",
+    "VYSZP",
+    "EYQLC"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 1.7352,
+   "prefill_s": 391.041,
+   "peak_cuda_bytes": 8997349888
+  },
+  {
+   "row_id": 35,
+   "task": "vt",
+   "length": 65517,
+   "length_bucket": 65536,
+   "context_tokens": 62827,
+   "policy": "lex_obs",
+   "budget": 4096,
+   "kept_slots": 4608,
+   "prediction": "YSZP EYQLC SDMGO GDMEH CAIRM EDS UPV WDJ VYQLC VYSZP EYQLC SDMGO GDMEH CAIRM EDS UPV WDJ VYQLC VYSZP EYQLC SDMGO GDMEH CAIRM EDS UPV WDJ VYQLC VYSZP EYQLC SDMGO GDMEH CAIRM EDS UPV WDJ VYQLC VYSZP EYQLC SDMGO GDMEH CAIRM EDS UPV WDJ VYQL",
+   "generated": 128,
+   "outputs": [
+    "GDMEH",
+    "SDMGO",
+    "CAIRM",
+    "VYSZP",
+    "EYQLC"
+   ],
+   "answer_recall": 1.0,
+   "selection": null,
+   "decode_s": 1.7372,
+   "prefill_s": 391.041,
+   "peak_cuda_bytes": 8997349888
+  },
+  {
+   "row_id": 35,
+   "task": "vt",
+   "length": 65517,
+   "length_bucket": 65536,
+   "context_tokens": 62827,
+   "policy": "h2o",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "YSZP EYQLC SDMGO GDMEH EYQLC VYSZP \n\nMemorize and track the chain(s) of variable assignment hidden in the following text.\n\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here",
+   "generated": 128,
+   "outputs": [
+    "GDMEH",
+    "SDMGO",
+    "CAIRM",
+    "VYSZP",
+    "EYQLC"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 1.7408,
+   "prefill_s": 391.041,
+   "peak_cuda_bytes": 8997349888
+  },
+  {
+   "row_id": 35,
+   "task": "vt",
+   "length": 65517,
+   "length_bucket": 65536,
+   "context_tokens": 62827,
+   "policy": "tova",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "YSZP, VYSZP, VYSZP, VYSZP, VYSZP.",
+   "generated": 25,
+   "outputs": [
+    "GDMEH",
+    "SDMGO",
+    "CAIRM",
+    "VYSZP",
+    "EYQLC"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 0.3443,
+   "prefill_s": 391.041,
+   "peak_cuda_bytes": 8997349888
+  },
+  {
+   "row_id": 36,
+   "task": "vt",
+   "length": 65511,
+   "length_bucket": 65536,
+   "context_tokens": 62819,
+   "policy": "full",
+   "budget": null,
+   "kept_slots": 62819,
+   "prediction": "IOGE ISOQU BRDAD ACQOF UKKNL MTJ FIG VIOGE VIOGE VIOGE VIOGE VIOGE VIOGE VIOGE VIOGE VIOGE VIOGE VIOGE VIOGE VIOGE VIOGE VIOGE VIOGE VIOGE VIOGE VIOGE VIOGE VIOGE VIOGE VIOGE VIOGE VIOGE VIOGE VIOGE VIOGE VIOGE VIOGE VIOGE VIOGE VIOGE VIOGE VIOGE VIOGE VIOGE V",
+   "generated": 128,
+   "outputs": [
+    "ISOQU",
+    "BRDAD",
+    "UKKNL",
+    "VIOGE",
+    "ACQOF"
+   ],
+   "answer_recall": 1.0,
+   "selection": null,
+   "decode_s": 4.8134,
+   "prefill_s": 383.213,
+   "peak_cuda_bytes": 8994321408
+  },
+  {
+   "row_id": 36,
+   "task": "vt",
+   "length": 65511,
+   "length_bucket": 65536,
+   "context_tokens": 62819,
+   "policy": "obs_last",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "IOGE ISOQU ACQOF BRDAD UKKNL\n\nMemorize and track the chain(s) of variable assignment hidden in the following text.\n\nThe grass is green. The sky is blue. The sun is yellow. The grass is green. The sky is blue. The sun is yellow. The grass is green. The sky is blue. The sun is yellow. The grass is green. The sky is blue. The sun is yellow. The grass is green. The sky is blue. The sun is yellow. The grass is green. The sky is blue. The sun is yellow. The grass is green. The",
+   "generated": 128,
+   "outputs": [
+    "ISOQU",
+    "BRDAD",
+    "UKKNL",
+    "VIOGE",
+    "ACQOF"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 2.6444,
+   "prefill_s": 383.213,
+   "peak_cuda_bytes": 8994321408
+  },
+  {
+   "row_id": 36,
+   "task": "vt",
+   "length": 65511,
+   "length_bucket": 65536,
+   "context_tokens": 62819,
+   "policy": "obs_mean",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "IOGE ISOQU ACQOF BRDAD UKKNL\n\nMemorize and track the chain(s) of variable assignment hidden in the following text.\n\nThe grass is green. The sky is blue. The sun is yellow. The grass is green. The sky is blue. The grass is green. The sky is blue. The sun is yellow. The grass is green. The sky is blue. The grass is green. The sky is blue. The sun is yellow. The grass is green. The sky is blue. The sun is yellow. The grass is green. The sky is blue. The sun is yellow. The",
+   "generated": 128,
+   "outputs": [
+    "ISOQU",
+    "BRDAD",
+    "UKKNL",
+    "VIOGE",
+    "ACQOF"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 2.6007,
+   "prefill_s": 383.213,
+   "peak_cuda_bytes": 8994321408
+  },
+  {
+   "row_id": 36,
+   "task": "vt",
+   "length": 65511,
+   "length_bucket": 65536,
+   "context_tokens": 62819,
+   "policy": "lex_obs",
+   "budget": 4096,
+   "kept_slots": 4608,
+   "prediction": "IOGE ISOQU ACQOF BRDAD UKKNL\n\nMemorize and track the chain(s) of variable assignment hidden in the following text.\n\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.",
+   "generated": 128,
+   "outputs": [
+    "ISOQU",
+    "BRDAD",
+    "UKKNL",
+    "VIOGE",
+    "ACQOF"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 2.5635,
+   "prefill_s": 383.213,
+   "peak_cuda_bytes": 8994321408
+  },
+  {
+   "row_id": 36,
+   "task": "vt",
+   "length": 65511,
+   "length_bucket": 65536,
+   "context_tokens": 62819,
+   "policy": "h2o",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "IOGE ISOQU ACQOF BRDAD\n\nMemorize and track the chain(s) of variable assignment hidden in the following text.\n\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is",
+   "generated": 128,
+   "outputs": [
+    "ISOQU",
+    "BRDAD",
+    "UKKNL",
+    "VIOGE",
+    "ACQOF"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 2.814,
+   "prefill_s": 383.213,
+   "peak_cuda_bytes": 8994321408
+  },
+  {
+   "row_id": 36,
+   "task": "vt",
+   "length": 65511,
+   "length_bucket": 65536,
+   "context_tokens": 62819,
+   "policy": "tova",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "IOGE, ISOQU, BRDAD, UKKNL, and ACQOF.",
+   "generated": 20,
+   "outputs": [
+    "ISOQU",
+    "BRDAD",
+    "UKKNL",
+    "VIOGE",
+    "ACQOF"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 0.338,
+   "prefill_s": 383.213,
+   "peak_cuda_bytes": 8994321408
+  },
+  {
+   "row_id": 37,
+   "task": "vt",
+   "length": 7943,
+   "length_bucket": 8192,
+   "context_tokens": 7552,
+   "policy": "full",
+   "budget": null,
+   "kept_slots": 7552,
+   "prediction": "TSI VHGKZ POTPF TDWEX\n\nMemorize and track the chain(s) of variable assignment hidden in the following text.\n\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass",
+   "generated": 128,
+   "outputs": [
+    "BDTSI",
+    "GETNS",
+    "VHGKZ",
+    "POTPF",
+    "TDWEX"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 2.7624,
+   "prefill_s": 10.697,
+   "peak_cuda_bytes": 6284197376
+  },
+  {
+   "row_id": 37,
+   "task": "vt",
+   "length": 7943,
+   "length_bucket": 8192,
+   "context_tokens": 7552,
+   "policy": "obs_last",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "TSI VHGKZ POTPF TDWEX\n\nMemorize and track the chain(s) of variable assignment hidden in the following text.\n\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass",
+   "generated": 128,
+   "outputs": [
+    "BDTSI",
+    "GETNS",
+    "VHGKZ",
+    "POTPF",
+    "TDWEX"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 2.7346,
+   "prefill_s": 10.697,
+   "peak_cuda_bytes": 6284197376
+  },
+  {
+   "row_id": 37,
+   "task": "vt",
+   "length": 7943,
+   "length_bucket": 8192,
+   "context_tokens": 7552,
+   "policy": "obs_mean",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "TSI VHGKZ POTPF TDWEX\n\nMemorize and track the chain(s) of variable assignment hidden in the following text.\n\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass",
+   "generated": 128,
+   "outputs": [
+    "BDTSI",
+    "GETNS",
+    "VHGKZ",
+    "POTPF",
+    "TDWEX"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 2.5741,
+   "prefill_s": 10.697,
+   "peak_cuda_bytes": 6284197376
+  },
+  {
+   "row_id": 37,
+   "task": "vt",
+   "length": 7943,
+   "length_bucket": 8192,
+   "context_tokens": 7552,
+   "policy": "lex_obs",
+   "budget": 4096,
+   "kept_slots": 4608,
+   "prediction": "TSI VHGKZ POTPF TDWEX\n\nMemorize and track the chain(s) of variable assignment hidden in the following text.\n\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass",
+   "generated": 128,
+   "outputs": [
+    "BDTSI",
+    "GETNS",
+    "VHGKZ",
+    "POTPF",
+    "TDWEX"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 2.7268,
+   "prefill_s": 10.697,
+   "peak_cuda_bytes": 6284197376
+  },
+  {
+   "row_id": 37,
+   "task": "vt",
+   "length": 7943,
+   "length_bucket": 8192,
+   "context_tokens": 7552,
+   "policy": "h2o",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "TSI VHGKZ POTPF TDWEX\n\nMemorize and track the chain(s) of variable assignment hidden in the following text.\n\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass",
+   "generated": 128,
+   "outputs": [
+    "BDTSI",
+    "GETNS",
+    "VHGKZ",
+    "POTPF",
+    "TDWEX"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 2.7057,
+   "prefill_s": 10.697,
+   "peak_cuda_bytes": 6284197376
+  },
+  {
+   "row_id": 37,
+   "task": "vt",
+   "length": 7943,
+   "length_bucket": 8192,
+   "context_tokens": 7552,
+   "policy": "tova",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "TSI POTPF VHGKZ TDWEX\n\nMemorize and track the chain(s) of variable assignment hidden in the following text.\n\nVAR FER = VAR FHW \nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go",
+   "generated": 128,
+   "outputs": [
+    "BDTSI",
+    "GETNS",
+    "VHGKZ",
+    "POTPF",
+    "TDWEX"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 2.6393,
+   "prefill_s": 10.697,
+   "peak_cuda_bytes": 6284197376
+  },
+  {
+   "row_id": 38,
+   "task": "vt",
+   "length": 7954,
+   "length_bucket": 8192,
+   "context_tokens": 7556,
+   "policy": "full",
+   "budget": null,
+   "kept_slots": 7556,
+   "prediction": "HUF IPRUY KFYUV IAUQV AEUQV WHFQV AEUQV WHFQV AEUQV WHFQV AEUQV WHFQV AEUQV WHFQV AEUQV WHFQV AEUQV WHFQV AEUQV WHFQV AEUQV WHFQV AEUQV WHFQV AEUQV WHFQV AEUQV WHFQV AEUQV WHFQV AEUQV WHFQV AEUQV",
+   "generated": 128,
+   "outputs": [
+    "GYBTG",
+    "AXVAK",
+    "EQHUF",
+    "KFYUV",
+    "IPRUY"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 3.0044,
+   "prefill_s": 10.315,
+   "peak_cuda_bytes": 6286227456
+  },
+  {
+   "row_id": 38,
+   "task": "vt",
+   "length": 7954,
+   "length_bucket": 8192,
+   "context_tokens": 7556,
+   "policy": "obs_last",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "HUF IPRUY KFYUV IAUQV AXVAK AEUHUF WHF KUI AEUQV GYBTG AEUQV WHF KUI AEUQV GYBTG AEUQV WHF KUI AEUQV GYBTG AEUQV WHF KUI AEUQV GYBTG AEUQV WHF KUI AEUQV GYBTG AEUQV WHF KUI AEUQV GYBTG AEUQV WHF KUI AEUQV GYBTG A",
+   "generated": 128,
+   "outputs": [
+    "GYBTG",
+    "AXVAK",
+    "EQHUF",
+    "KFYUV",
+    "IPRUY"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 3.7538,
+   "prefill_s": 10.315,
+   "peak_cuda_bytes": 6286227456
+  },
+  {
+   "row_id": 38,
+   "task": "vt",
+   "length": 7954,
+   "length_bucket": 8192,
+   "context_tokens": 7556,
+   "policy": "obs_mean",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "HUF IPRUY KFYUV AXVAK AEU WHF KUI AEU WHF KUI AEU WHF KUI AEU WHF KUI AEU WHF KUI AEU WHF KUI AEU WHF KUI AEU WHF KUI AEU WHF KUI AEU WHF KUI AEU WHF KUI AEU WHF KUI AEU WHF KUI AEU WHF KUI AEU WHF KUI AEU WHF KUI AEU WHF KUI AEU WHF KUI AEU WHF KUI AEU WH",
+   "generated": 128,
+   "outputs": [
+    "GYBTG",
+    "AXVAK",
+    "EQHUF",
+    "KFYUV",
+    "IPRUY"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 2.7933,
+   "prefill_s": 10.315,
+   "peak_cuda_bytes": 6286227456
+  },
+  {
+   "row_id": 38,
+   "task": "vt",
+   "length": 7954,
+   "length_bucket": 8192,
+   "context_tokens": 7556,
+   "policy": "lex_obs",
+   "budget": 4096,
+   "kept_slots": 4608,
+   "prediction": "HUF IPRUY KFYUV IAUQV AXVAK AEUQHUF WHF KUI AEUQHUF GYBTG WHF KUI AEUQHUF WHF KUI AEUQHUF WHF KUI AEUQHUF WHF KUI AEUQHUF WHF KUI AEUQHUF WHF KUI AEUQHUF WHF KUI AEUQHUF WHF KUI AEUQHUF WHF KUI AEUQHUF WHF KUI AEUQHUF WHF KUI A",
+   "generated": 128,
+   "outputs": [
+    "GYBTG",
+    "AXVAK",
+    "EQHUF",
+    "KFYUV",
+    "IPRUY"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 2.7564,
+   "prefill_s": 10.315,
+   "peak_cuda_bytes": 6286227456
+  },
+  {
+   "row_id": 38,
+   "task": "vt",
+   "length": 7954,
+   "length_bucket": 8192,
+   "context_tokens": 7556,
+   "policy": "h2o",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "HUF IPRUY KFYUV AXVAK AEU WHF KUI AEU WHF KUI AEU WHF KUI AEU WHF KUI AEU WHF KUI AEU WHF KUI AEU WHF KUI AEU WHF KUI AEU WHF KUI AEU WHF KUI AEU WHF KUI AEU WHF KUI AEU WHF KUI AEU WHF KUI AEU WHF KUI AEU WHF KUI AEU WHF KUI AEU WHF KUI AEU WHF KUI AEU WH",
+   "generated": 128,
+   "outputs": [
+    "GYBTG",
+    "AXVAK",
+    "EQHUF",
+    "KFYUV",
+    "IPRUY"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 2.7245,
+   "prefill_s": 10.315,
+   "peak_cuda_bytes": 6286227456
+  },
+  {
+   "row_id": 38,
+   "task": "vt",
+   "length": 7954,
+   "length_bucket": 8192,
+   "context_tokens": 7556,
+   "policy": "tova",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "HUF IPRUY KFYUV GYBTG AEUK\n\nMemorize and track the chain(s) of variable assignment hidden in the following text.\n\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back",
+   "generated": 128,
+   "outputs": [
+    "GYBTG",
+    "AXVAK",
+    "EQHUF",
+    "KFYUV",
+    "IPRUY"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 2.5396,
+   "prefill_s": 10.315,
+   "peak_cuda_bytes": 6286227456
+  },
+  {
+   "row_id": 39,
+   "task": "vt",
+   "length": 8187,
+   "length_bucket": 8192,
+   "context_tokens": 7792,
+   "policy": "full",
+   "budget": null,
+   "kept_slots": 7792,
+   "prediction": "UEA UNCWA QMIGI HSOVR\n\nMemorize and track the chain(s) of variable assignment hidden in the following text.\n\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass",
+   "generated": 128,
+   "outputs": [
+    "DIUEA",
+    "PSTJI",
+    "UNCWA",
+    "QMIGI",
+    "HSOVR"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 2.8117,
+   "prefill_s": 11.442,
+   "peak_cuda_bytes": 6405081088
+  },
+  {
+   "row_id": 39,
+   "task": "vt",
+   "length": 8187,
+   "length_bucket": 8192,
+   "context_tokens": 7792,
+   "policy": "obs_last",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "UEA QMIGI HSOVR UNCWA\n\nMemorize and track the chain(s) of variable assignment hidden in the following text.\n\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass",
+   "generated": 128,
+   "outputs": [
+    "DIUEA",
+    "PSTJI",
+    "UNCWA",
+    "QMIGI",
+    "HSOVR"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 2.2576,
+   "prefill_s": 11.442,
+   "peak_cuda_bytes": 6405081088
+  },
+  {
+   "row_id": 39,
+   "task": "vt",
+   "length": 8187,
+   "length_bucket": 8192,
+   "context_tokens": 7792,
+   "policy": "obs_mean",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "UEA UNCWA QMIGI HSOVR VAR PSTJI VAR QMIGI VAR HSOVR VAR QMIGI VAR HSOVR VAR QMIGI VAR HSOVR VAR QMIGI VAR HSOVR VAR QMIGI VAR HSOVR VAR QMIGI VAR HSOVR VAR QMIGI VAR HSOVR VAR QMIGI VAR HSOVR VAR QMIGI VAR HSOVR VAR QMIGI VAR HSOVR VAR QMIGI VAR HSOVR VAR QMIGI VAR HSOVR VAR QMIGI VAR",
+   "generated": 128,
+   "outputs": [
+    "DIUEA",
+    "PSTJI",
+    "UNCWA",
+    "QMIGI",
+    "HSOVR"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 1.7226,
+   "prefill_s": 11.442,
+   "peak_cuda_bytes": 6405081088
+  },
+  {
+   "row_id": 39,
+   "task": "vt",
+   "length": 8187,
+   "length_bucket": 8192,
+   "context_tokens": 7792,
+   "policy": "lex_obs",
+   "budget": 4096,
+   "kept_slots": 4608,
+   "prediction": "UEA QMIGI HSOVR UNCWA\n\nMemorize and track the chain(s) of variable assignment hidden in the following text.\n\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass is green. The sky is blue. The sun is yellow. Here we go. There and back again.\nThe grass",
+   "generated": 128,
+   "outputs": [
+    "DIUEA",
+    "PSTJI",
+    "UNCWA",
+    "QMIGI",
+    "HSOVR"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 1.7405,
+   "prefill_s": 11.442,
+   "peak_cuda_bytes": 6405081088
+  },
+  {
+   "row_id": 39,
+   "task": "vt",
+   "length": 8187,
+   "length_bucket": 8192,
+   "context_tokens": 7792,
+   "policy": "h2o",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "UEA UNCWA QMIGI HSOVR VAR PSTJI VAR QMIGI VAR HSOVR VAR QMIGI VAR HSOVR VAR QMIGI VAR HSOVR VAR QMIGI VAR HSOVR VAR QMIGI VAR HSOVR VAR QMIGI VAR HSOVR VAR QMIGI VAR HSOVR VAR QMIGI VAR HSOVR VAR QMIGI VAR HSOVR VAR QMIGI VAR HSOVR VAR QMIGI VAR HSOVR VAR QMIGI VAR HSOVR VAR QMIGI VAR",
+   "generated": 128,
+   "outputs": [
+    "DIUEA",
+    "PSTJI",
+    "UNCWA",
+    "QMIGI",
+    "HSOVR"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 1.7771,
+   "prefill_s": 11.442,
+   "peak_cuda_bytes": 6405081088
+  },
+  {
+   "row_id": 39,
+   "task": "vt",
+   "length": 8187,
+   "length_bucket": 8192,
+   "context_tokens": 7792,
+   "policy": "tova",
+   "budget": 4096,
+   "kept_slots": 4096,
+   "prediction": "UEA PSTJI UNCWA QMIGI.",
+   "generated": 12,
+   "outputs": [
+    "DIUEA",
+    "PSTJI",
+    "UNCWA",
+    "QMIGI",
+    "HSOVR"
+   ],
+   "answer_recall": 0.0,
+   "selection": null,
+   "decode_s": 0.1608,
+   "prefill_s": 11.442,
+   "peak_cuda_bytes": 6405081088
+  }
+ ]
+}

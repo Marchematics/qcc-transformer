@@ -1501,6 +1501,87 @@ long-document summarisation task in the suite, has prompts short enough (median
 1,702 tokens) to be at parity at 4,608 slots and therefore cannot act as a second
 control.
 
+### 3.29 The published eviction families on the same records
+
+Section 3.21 compared the shipped configuration against policies built from the
+same primitives. This section adds the families that *are* the recent literature,
+implemented as scoring rules inside the same framework so that one variable moves:
+which positions survive. Every policy sees the same 80 RULER records, the same
+4,096-slot budget (4,608 for the shipped configuration), the same 4 attention
+sinks, the same 25% recent window, the same 64-token observation window, the same
+7-token block pooling and 9-token dilation, and decodes greedily for 128 tokens
+(`artifacts/baselines-quest-pyramid.json` merged with the stored baseline run by
+`analyze_campaign.py baselines --merge`).
+
+| policy (family) | multikey_2 | multikey_3 | single_1 | vt | aggregate | worst | slots | state |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| **shipped: final-query ranking + pattern anchors** | 0.950 | 0.450 | 1.000 | 0.660 | **1.0083** | **0.500** | 4,608 | 144.0 MiB |
+| window mean, SnapKV-shaped | 0.800 | 0.200 | 1.000 | 0.640 | 0.8804 | 0.000 | 4,096 | 128.0 MiB |
+| window max | 0.750 | 0.150 | 1.000 | 0.650 | 0.8627 | 0.000 | 4,096 | 128.0 MiB |
+| final query only | 0.800 | 0.050 | 1.000 | 0.640 | 0.8424 | 0.000 | 4,096 | 128.0 MiB |
+| Quest-shaped: whole-block selection | 0.800 | 0.100 | 1.000 | 0.590 | 0.8316 | 0.000 | 4,090 | 127.8 MiB |
+| PyramidKV-shaped: layer schedule 1.5x to 0.5x | 0.700 | 0.100 | 1.000 | 0.650 | 0.8289 | 0.000 | 6,089* | 190.3 MiB* |
+| PyramidKV-shaped: layer schedule 1.25x to 0.75x | 0.750 | 0.200 | 1.000 | 0.650 | 0.8686 | 0.000 | 4,096 | 128.0 MiB |
+| sinks + recent (StreamingLLM) | 0.250 | 0.250 | 0.300 | 0.270 | 0.3319 | 0.000 | 4,096 | 128.0 MiB |
+| sliding window only | 0.050 | 0.000 | 0.300 | 0.120 | 0.1667 | 0.000 | 4,096 | 128.0 MiB |
+
+`*` the layer-scheduled policy keeps a different width per layer, and a cache
+reports one length: 6,089 is its widest layer. Its mean width is 4,096 by
+construction, so it holds more state than the shipped configuration at the widest
+layer and about the same on average, and still lands 0.18 aggregate below it.
+
+Read as a paired comparison on the same records, the shipped configuration is
+never the loser: against the window mean it is better on 11 records, worse on 1
+and tied on 68; against the Quest-shaped block policy 16/1/63; against the
+layer-scheduled policy 15/2/63; against sinks+recent 49/6/25. Every published
+family fails at least one task outright (worst-task retention 0.000), while the
+shipped configuration's worst task is 0.500.
+
+**The accumulated-attention families on a length-spread subset.** H2O and TOVA rank
+by attention *accumulated over the whole prefill*, which this harness can report
+from the same forward pass that builds the cache (one extra pass over the prompt's
+attention). That is expensive at 64K, so they run on a balanced subset — ten records
+per task, spread across each task's length range — together with their own Full-KV
+and reference arms (`artifacts/baselines-accumulated.json`, 40 records):
+
+| policy | multikey_2 | multikey_3 | single_1 | vt | retention | worst | slots |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| **shipped: final-query ranking + pattern anchors** | 0.900 | 0.500 | 1.000 | 0.740 | **1.0431** | **0.800** | 4,608 |
+| window mean, SnapKV-shaped | 0.800 | 0.200 | 1.000 | 0.700 | 0.9049 | 0.000 | 4,096 |
+| final query only | 0.800 | 0.100 | 1.000 | 0.700 | 0.8789 | 0.000 | 4,096 |
+| H2O: accumulated attention mass | 0.300 | 0.300 | 1.000 | 0.600 | 0.7471 | 0.000 | 4,096 |
+| TOVA: top-1 key counts | 0.300 | 0.200 | 0.800 | 0.420 | 0.5833 | 0.000 | 4,096 |
+| full (reference) | 0.900 | 0.500 | 1.000 | 0.680 | - | - | 32 KiB/token |
+
+The accumulated-mass families are the weakest of the published group on this
+workload, and the reason is visible in the per-task columns: ranking by total mass
+concentrates the retained slots on sink-like and high-frequency tokens, which is
+exactly what a single low-mass needle is not. Paired against the shipped
+configuration, H2O is better on 2 records, worse on 14 and tied on 24; TOVA is
+better on 0, worse on 18 and tied on 22. Both fail at least one task outright
+(worst-task retention 0.000) where the shipped configuration's worst task is 0.800.
+
+**Why the ordering comes out this way is the point of the mechanism sections.**
+The two tasks that separate the field are the multi-key ones, and they are
+separated by whether the policy can see what the question names: final-query
+ranking plus the lexical anchors recovers 0.950 and 0.450 there, while every
+policy ranking by attention *mass* — the window mean, the window max, accumulated
+attention — sits at 0.30-0.90 and 0.10-0.50, because the mass on one needle is
+tiny next to the mass on sink-like and high-frequency tokens. Block granularity
+(Quest-shaped) costs the `vt` task 0.07, because whole 16-token blocks spend state
+on neighbours that carry no answer.
+
+**Scope of the comparison.** Each published family is implemented as its selection
+rule inside this harness, not as its own kernel or end-to-end pipeline: the
+Quest-shaped policy selects blocks with the observation window's queries at
+compile time, the layer-scheduled policy's ratio is a hyperparameter of the paper
+and is run at two settings (1.5x/0.5x and 1.25x/0.75x, the milder one landing
+between the aggressive schedule and the uniform budget), and the pooling/dilation
+applies to every policy alike. No per-method tuning beyond the published choices was done, the model is one
+1B checkpoint, and the record set is the 80-record RULER split used throughout
+(40 records for the two accumulated-attention families, which need a second pass
+over the prompt's attention and are reported against their own reference arms).
+
 ## 4. What this establishes, and what it does not
 
 Establishes (every number produced by the shipped `compile_bounded_cache`, see

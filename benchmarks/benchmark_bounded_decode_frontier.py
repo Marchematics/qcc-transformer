@@ -187,6 +187,126 @@ def prefill_capture(model, ids, obs, chunk):
 
 
 @torch.no_grad()
+def prefill_accumulate(model, ids, obs, chunk, key_chunk=1024, query_stride=1):
+    """Exact chunked prefill that also accumulates per-key attention statistics.
+
+    Returns ``(cache, last_logits, tails, mass, top1)``, where ``tails`` is the
+    observation-window capture of :func:`prefill_capture`, ``mass[layer]`` is the
+    total attention each key received from **every** prefill query
+    (``(kv_heads, L)``, the H2O statistic) and ``top1[layer]`` counts how often a
+    key was the argmax key of a query (the TOVA statistic).  Both come out of the
+    same forward pass that builds the cache: the query states are the chunk's own
+    attention inputs and the keys are read from the cache the forward has just
+    written, so neither needs a second pass over the prompt.
+
+    Attention is evaluated in blocks of ``chunk`` queries by ``key_chunk`` keys in
+    fp32 and reduced immediately, so peak memory is ``O(chunk * key_chunk)`` per
+    layer instead of ``O(L^2)``.  ``query_stride`` accumulates from every n-th
+    query instead of all of them: both statistics are means over queries, so a
+    stride estimates the same quantity at a fraction of the cost (the sweep that
+    uses it reports the stride it ran with, and the stride-1 check is in
+    ``tests/test_prefill_accumulate.py``).
+    """
+    tails: dict[int, torch.Tensor] = {}
+    hidden_chunk: dict[int, torch.Tensor] = {}
+    handles = []
+    for i, layer in enumerate(model.model.layers):
+        def make(idx):
+            def hook(module, args, kwargs, output):
+                h = args[0] if args else kwargs.get("hidden_states")
+                h = h.detach()
+                prev = tails.get(idx)
+                tails[idx] = h if prev is None else torch.cat([prev, h], dim=1)[:, -obs:, :]
+                hidden_chunk[idx] = h
+            return hook
+        handles.append(layer.self_attn.register_forward_hook(make(i), with_kwargs=True))
+
+    num_heads = model.config.num_attention_heads
+    kv_heads = model.config.num_key_value_heads
+    group = num_heads // kv_heads
+    head_dim = model.model.layers[0].self_attn.head_dim
+    L = ids.shape[1]
+    device = ids.device
+    mass = [torch.zeros(kv_heads, L, device=device) for _ in model.model.layers]
+    top1 = [torch.zeros(kv_heads, L, device=device) for _ in model.model.layers]
+    cache = DynamicCache()
+    last_logits = None
+    try:
+        for start in range(0, L, chunk):
+            end = min(L, start + chunk)
+            seg = ids[:, start:end]
+            positions = torch.arange(start, end, device=device)
+            mask = torch.ones(1, end, device=device, dtype=torch.long)
+            o = model(seg, **model_kwargs(model, past_key_values=cache, attention_mask=mask,
+                                          position_ids=positions.unsqueeze(0),
+                                          cache_position=positions, use_cache=True))
+            last_logits = o.logits[:, -1:]
+            # the strided query positions are reused by every layer of this chunk,
+            # so they must not mutate the full position vector `positions`
+            q_positions = positions[::query_stride] if query_stride > 1 else positions
+            for layer_idx, layer in enumerate(model.model.layers):
+                hidden = hidden_chunk[layer_idx]
+                n = hidden.shape[1]
+                attn = layer.self_attn
+                q = attn.q_proj(hidden[0]).view(n, num_heads, head_dim).transpose(0, 1)
+                if query_stride > 1:
+                    q = q[:, ::query_stride, :].contiguous()
+                cos, sin = model.model.rotary_emb(hidden, positions.unsqueeze(0))
+                cos, sin = cos[0].unsqueeze(0), sin[0].unsqueeze(0)
+                if query_stride > 1:
+                    cos = cos[:, ::query_stride, :]
+                    sin = sin[:, ::query_stride, :]
+                q = apply_rope(q, cos, sin)
+                n = q.shape[1]
+                q = q.reshape(kv_heads, group, n, head_dim).float()
+                keys = cache.layers[layer_idx].keys[0]
+                key_pos = torch.arange(end, device=device)
+                running_max = torch.full((kv_heads, group, n), float("-inf"), device=device)
+                running_idx = torch.zeros(kv_heads, group, n, device=device, dtype=torch.long)
+                # online softmax denominator: `denom` is sum(exp(s - running_max)),
+                # so pass 2 can normalise without a second maximum pass
+                denom = torch.zeros(kv_heads, group, n, device=device)
+                for ks in range(0, end, key_chunk):
+                    ke = min(end, ks + key_chunk)
+                    sc = torch.einsum("hgod,hld->hgol", q, keys[:, ks:ke].float()) * attn.scaling
+                    valid = key_pos[ks:ke][None, :] <= q_positions[:, None]
+                    sc = sc.masked_fill(~valid[None, None, :, :], float("-inf"))
+                    block_max, block_arg = sc.max(dim=-1)
+                    new_max = torch.maximum(running_max, block_max)
+                    safe = torch.where(torch.isfinite(new_max), new_max,
+                                       torch.zeros_like(new_max))
+                    denom = (denom * torch.exp(running_max - safe)
+                             + torch.exp(sc - safe.unsqueeze(-1)).sum(dim=-1))
+                    better = block_max > running_max
+                    running_max = torch.where(better, block_max, running_max)
+                    running_idx = torch.where(better, block_arg + ks, running_idx)
+                # pass 2: the actual mass, one denominator for the whole prefix
+                final_max = torch.where(torch.isfinite(running_max), running_max,
+                                        torch.zeros_like(running_max))
+                norm = torch.where(denom > 0, denom, torch.ones_like(denom))
+                for ks in range(0, end, key_chunk):
+                    ke = min(end, ks + key_chunk)
+                    sc = torch.einsum("hgod,hld->hgol", q, keys[:, ks:ke].float()) * attn.scaling
+                    valid = key_pos[ks:ke][None, :] <= q_positions[:, None]
+                    sc = sc.masked_fill(~valid[None, None, :, :], float("-inf"))
+                    mass[layer_idx][:, ks:ke] += (
+                        torch.exp(sc - final_max.unsqueeze(-1)) / norm.unsqueeze(-1)
+                    ).sum(dim=(1, 2))
+                live = running_max > float("-inf")
+                if bool(live.any()):
+                    counts = torch.zeros(kv_heads, L, device=device)
+                    for head in range(kv_heads):
+                        counts[head].scatter_add_(
+                            0, running_idx[head].clamp(0, L - 1).reshape(-1),
+                            live[head].reshape(-1).float())
+                    top1[layer_idx] += counts
+    finally:
+        for h in handles:
+            h.remove()
+    return cache, last_logits, tails, mass, top1
+
+
+@torch.no_grad()
 def obs_scores(model, captured, cache, L, obs, mode, key_chunk=4096):
     """Per (layer, kv-head) key importance from the observation-window queries.
 
@@ -550,6 +670,60 @@ def build_idxs(policy, scores, cache, record, budget, nsink, nrecent, L, pool, d
                             chosen.append(p)
                 rows.append(sorted(chosen[:target]))
             out.append(torch.tensor(rows, device=device, dtype=torch.long))
+        return out
+    if policy == "quest":
+        # Quest (ICML 2024) selects whole key blocks by the largest query-key
+        # similarity inside them.  At compile time the queries available are the
+        # observation window, so the block score is the window's best similarity
+        # (the same signal `obs_last`/`obs_max` rank with) but the *retained unit*
+        # is the block: tokens are kept in blocks of `block` so a partial block is
+        # never split.  Sinks and the recent window are forced as everywhere else.
+        block = 16
+        out = []
+        for sc in scores:
+            kv_heads, length = sc.shape
+            nb = (length + block - 1) // block
+            padded = sc
+            if nb * block > length:
+                padded = torch.cat([sc, torch.full((kv_heads, nb * block - length,),
+                                                   float("-inf"), device=sc.device)], dim=-1)
+            block_scores = padded.view(kv_heads, nb, block).amax(dim=-1)
+            forced = set(range(min(nsink, L))) | set(range(max(0, L - nrecent), L))
+            forced_blocks = {p // block for p in forced}
+            rows = []
+            for head in range(kv_heads):
+                order = torch.argsort(block_scores[head], descending=True).tolist()
+                chosen = set(forced_blocks)
+                for b in order:
+                    if len(chosen) * block >= budget:
+                        break
+                    chosen.add(b)
+                keep = sorted({p for b in chosen for p in range(b * block,
+                                                                 min(L, (b + 1) * block))})
+                if len(keep) > budget:
+                    keep = sorted(set(keep[:budget]) | forced)
+                rows.append(keep)
+            out.append(torch.tensor(rows, device=device, dtype=torch.long))
+        return out
+    if policy in ("pyramid", "pyramid_mild"):
+        # PyramidKV (2024) spends a *layer-dependent* budget instead of a uniform
+        # one: lower layers keep more, upper layers fewer, with the schedule
+        # normalised so the mean width equals the uniform budget.  Two linear
+        # schedules are run because the paper's own ratio is a hyperparameter:
+        # `pyramid` 1.5x -> 0.5x at the first/last layer, `pyramid_mild`
+        # 1.25x -> 0.75x.
+        top, bottom = ((1.5, 0.5) if policy == "pyramid" else (1.25, 0.75))
+        n_layers = len(scores)
+        if n_layers == 1:
+            weights = torch.ones(1, device=device)
+        else:
+            weights = torch.linspace(top, bottom, n_layers, device=device)
+        targets = (budget * weights / weights.mean()).round().long()
+        floor = min(L, nsink + nrecent)
+        targets = targets.clamp(min=floor, max=L).tolist()
+        out = []
+        for sc, target in zip(scores, targets):
+            out.append(topk_indices(sc, int(target), nsink, nrecent, L, pool, dilate))
         return out
     if policy == "oracle_needle":
         keep = set(record.needle_positions)

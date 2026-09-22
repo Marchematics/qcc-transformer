@@ -92,7 +92,16 @@ def run_record(model, rec, args, eos_ids, row_id):
     torch.cuda.reset_peak_memory_stats()
     torch.cuda.synchronize()
     t0 = time.time()
-    cache, last_logits, captured = L.prefill_capture(model, ids, args.obs, args.prefill_chunk)
+    accumulated = [p for p in args.policies if p in ("h2o", "tova")]
+    if accumulated:
+        # H2O and TOVA rank keys by attention accumulated over the whole prefill,
+        # which the exact prefill can report without a second pass.
+        cache, last_logits, captured, mass, top1 = L.prefill_accumulate(
+            model, ids, args.obs, args.prefill_chunk, args.key_chunk,
+            query_stride=args.accumulate_stride)
+    else:
+        cache, last_logits, captured = L.prefill_capture(model, ids, args.obs, args.prefill_chunk)
+        mass = top1 = None
     torch.cuda.synchronize()
     prefill_s = time.time() - t0
     next_id = last_logits.argmax(-1)
@@ -105,8 +114,20 @@ def run_record(model, rec, args, eos_ids, row_id):
 
     def get_scores(policy):
         if policy not in score_cache:
-            mode = "last" if policy == "lex_obs" else policy[4:]
-            score_cache[policy] = L.obs_scores(model, captured, cache, Lc, args.obs, mode, args.key_chunk)
+            if policy == "h2o":
+                score_cache[policy] = mass
+            elif policy == "tova":
+                score_cache[policy] = top1
+            else:
+                # `quest` ranks with the current query (Quest block selection);
+                # `pyramid` with the SnapKV-shaped window mean, because PyramidKV
+                # builds on SnapKV.  The difference from `obs_last`/`obs_mean` is
+                # then the retention unit and the layer schedule, not the scoring
+                # signal.
+                mode = {"lex_obs": "last", "quest": "last", "pyramid": "mean",
+                        "pyramid_mild": "mean"}.get(policy, policy[4:])
+                score_cache[policy] = L.obs_scores(model, captured, cache, Lc, args.obs,
+                                                   mode, args.key_chunk)
         return score_cache[policy]
 
     rows = []
@@ -115,7 +136,8 @@ def run_record(model, rec, args, eos_ids, row_id):
         for layer, (ok, ov) in zip(cache.layers, orig):
             layer.keys, layer.values = ok, ov
         budgets = [None] if policy == "full" else args.budgets
-        scores = None if policy in ("full", "recent", "sink_recent") else get_scores(policy)
+        scores = (None if policy in ("full", "recent", "sink_recent")
+                  else get_scores(policy))
         for budget in budgets:
             eff = budget if budget is not None else Lc
             nrecent = max(1, int(eff * 0.25)) if budget is not None else 0
@@ -131,6 +153,11 @@ def run_record(model, rec, args, eos_ids, row_id):
                     layer.keys = ok.gather(2, ek).contiguous()
                     layer.values = ov.gather(2, ek).contiguous()
             kept = int(cache.get_seq_length())
+            # a layer-varying policy (pyramid) keeps a different width per layer, so
+            # `kept` (the first layer's width) is not the request's state; record the
+            # mean as well and let the tables report that
+            kept_mean = (round(sum(int(index.shape[1]) for index in idxs) / len(idxs), 1)
+                         if idxs else float(kept))
             text, ngen, dec_s = L.decode(model, cache, next_id, Lc, args.max_new, eos_ids)
             rec_score = recall_of(rec, text)
             row = {
@@ -142,6 +169,7 @@ def run_record(model, rec, args, eos_ids, row_id):
                 "policy": policy,
                 "budget": budget,
                 "kept_slots": kept,
+                "kept_slots_mean": kept_mean,
                 "prediction": text,
                 "generated": ngen,
                 "outputs": rec.meta["outputs"],
@@ -165,6 +193,9 @@ def main():
     ap.add_argument("--tasks", nargs="+", default=None)
     ap.add_argument("--lengths", type=int, nargs="+", default=None)
     ap.add_argument("--max-records", type=int, default=None)
+    ap.add_argument("--max-per-task", type=int, default=None,
+                    help="keep at most N records per task, spread evenly across "
+                         "that task's length-ordered records")
     ap.add_argument("--policies", nargs="+", default=["full", "obs_last", "obs_mean"])
     ap.add_argument("--budgets", type=int, nargs="+", default=[128, 256, 512, 1024])
     ap.add_argument("--obs", type=int, default=64)
@@ -174,6 +205,11 @@ def main():
     ap.add_argument("--lex-cap", type=int, default=128)
     ap.add_argument("--hops", type=int, default=0)
     ap.add_argument("--key-chunk", type=int, default=4096)
+    ap.add_argument("--accumulate-stride", type=int, default=1,
+                    help="accumulate the H2O/TOVA statistics from every n-th "
+                         "query (both are means over queries, so a stride "
+                         "estimates the same ranking more cheaply; the artifact "
+                         "records the stride it ran with)")
     ap.add_argument("--max-new", type=int, default=24)
     ap.add_argument("--prefill-chunk", type=int, default=8192)
     ap.add_argument("--no-answer-prefix", action="store_true")
@@ -201,6 +237,22 @@ def main():
     records = load_ruler(args.ruler_jsonl, args.tasks, args.lengths,
                          args.max_records, not args.no_answer_prefix, tokenizer=tokenizer,
                          question_tokens=args.obs, hops=args.hops)
+    if args.max_per_task:
+        # an even spread across each task's length-ordered records, so a subset
+        # keeps the length range instead of taking the shortest N
+        by_task = defaultdict(list)
+        for rec in records:
+            by_task[rec.meta.get("task")].append(rec)
+        records = []
+        for task in sorted(by_task):
+            entries = by_task[task]
+            n = len(entries)
+            keep = args.max_per_task
+            picks = ([round(i * (n - 1) / (keep - 1)) for i in range(keep)]
+                     if keep > 1 and n > keep else list(range(min(keep, n))))
+            records.extend(entries[index] for index in sorted(set(picks)))
+        print(f"[setup] --max-per-task {args.max_per_task}: "
+              f"{len(records)} of the loaded records kept", flush=True)
     print(f"[setup] {len(records)} RULER records", flush=True)
 
     rows = []
