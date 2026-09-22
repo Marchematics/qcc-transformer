@@ -97,3 +97,26 @@ def test_quest_keeps_whole_blocks_and_pyramid_varies_the_layer_budget():
     assert widths == sorted(widths, reverse=True)          # lower layers keep more
     assert abs(sum(widths) / len(widths) - budget) <= 1     # mean width preserved
     assert widths[0] > budget > widths[-1]
+
+
+def test_maskless_prefill_matches_the_masked_path():
+    """`attention_mask=False` is an optimisation, not a different computation.
+
+    The maskless path exists because an explicit mask of length `end` is
+    materialised per chunk and forces a non-flash kernel at long context; the two
+    must agree exactly or the long-context rows would be measured on a different
+    function.
+    """
+    from benchmarks.benchmark_bounded_decode_frontier import prefill_capture
+
+    model = tiny_model()
+    ids = _ids(model, length=48)
+    cache_a, logits_a, tails_a = prefill_capture(model, ids, obs=8, chunk=16,
+                                                 attention_mask=True)
+    cache_b, logits_b, tails_b = prefill_capture(model, ids, obs=8, chunk=16,
+                                                 attention_mask=False)
+    assert torch.equal(logits_a, logits_b)
+    for layer_a, layer_b in zip(cache_a.layers, cache_b.layers):
+        assert torch.equal(layer_a.keys, layer_b.keys)
+        assert torch.equal(layer_a.values, layer_b.values)
+    assert all(torch.equal(tails_a[i], tails_b[i]) for i in tails_a)

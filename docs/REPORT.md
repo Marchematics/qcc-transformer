@@ -1711,6 +1711,74 @@ An adaptive rule - measure how much of the question the window can name and pick
 filler accordingly - is the natural follow-up, and 3.27 supplies the measurement that
 would drive it.
 
+### 3.33 Low-rank latent KV against exact-token selection, at matched bytes
+
+The frontier long-context models buy context with a *low-rank* KV representation
+(MLA-shaped latent attention): every token is kept, each as a handful of latent
+coordinates instead of a full key and value. This project buys context by keeping a
+*subset* of tokens exactly. Both are training-free at this scale if the low-rank basis
+is fitted post hoc, so the two can be compared on the same records at the same stored
+bytes: `r = slots x head_dim / L`, i.e. 9-25 of 64 coordinates for these prompts
+(`benchmarks/benchmark_lowrank_kv_ruler.py`, 40 `niah_multikey_2`/`niah_multikey_3`
+records, official recall, `artifacts/lowrank-kv-ruler.json`):
+
+| arm | mean stored bytes | mean rank | retention | matched records |
+|---|---:|---:|---:|---:|
+| bounded exact-token selection (shipped) | 144.0 MiB | - | **1.0000** | 28 |
+| low-rank latent, byte-matched | 143.0 MiB | 24 / 64 | 0.2500 | 28 |
+| low-rank latent, twice the bytes | 258.6 MiB | 38 / 64 | 0.5357 | 28 |
+
+At matched bytes the two mechanisms are not close on retrieval: exact-token selection
+keeps **four times** the retention of an SVD-fitted latent, and the latent arm needs
+about 1.8x the bytes to reach half of it (full rank, 64 of 64, is exact by
+construction). The mechanism sections explain the sign: retrieval needs one position's
+key and value *exactly*, and a rank-`r` fit over 12-64K tokens spends its capacity on
+the dominant subspace, which a single needle is not in.
+
+**What this does and does not bound.** It bounds what a *post-hoc, training-free*
+low-rank retrofit can do on a stock checkpoint; it does not bound MLA itself, where
+the projection is trained jointly with the model and the rest of the network adapts to
+the latent bottleneck. That is precisely the trade the project's retrofit requirement
+makes: for a frozen pretrained LM, selection plus quantization is the training-free
+path (3.23), and the low-rank axis belongs to models that were trained for it.
+
+### 3.34 Why the 1M row is still blocked, and what would unblock it
+
+The 1M metrics have been reported as hardware-blocked because a 1M bf16 Full-KV
+cache is 32 GiB for the 1B model. That blocker is removable: Qwen2.5-0.5B stores
+12 KiB per token, so its 1M cache is **12.0 GiB** and both arms fit on this card.
+`benchmarks/benchmark_million_context.py` was written to measure the 1M row that way
+(128K and 1M, both arms, YaRN rope scaling with `factor = length / 32768` applied
+identically to both, needles at random depths). It surfaced a **second** blocker,
+which is software rather than memory, and the measurements that isolate it are
+worth recording.
+
+**The exact prefill needs an explicit causal mask in this stack.** With
+`transformers` 5.16 and `attn_implementation="sdpa"`, a chunked prefill that carries a
+KV cache builds a `chunk x end` mask. At 128K that is what dominates the footprint:
+
+| path | chunk | observed |
+|---|---:|---|
+| explicit 2-D mask | 4,096 | 21.5 GiB allocated, prefill did not finish in ~10 min |
+| no mask (`attention_mask=None`) | 2,048 | 22.45 GiB, OOM before the chunk loop finished |
+| raw fused SDPA, no mask, `is_causal=True`, GQA | 2,048 x 131,072 | **1.60 s, 0.32 GiB** |
+
+The last row is the same computation the model needs: forcing the fused kernel
+(`torch.nn.attention.sdpa_kernel(enable_flash=True, enable_math=False,
+enable_mem_efficient=False)`) makes a 2,048-query chunk against 131,072 keys cost
+0.32 GiB and 1.6 s. The default dispatch does not choose it, and Hugging Face's SDPA
+attention integration passes a mask for the chunked-prefill case (and `is_causal`
+only when query and key lengths match), so the fused kernel is never selected.
+
+**What would unblock it** is therefore one of: installing `flash-attn` (its kernel is
+what the fused SDPA path wants), or routing the prefill attention through a
+`is_causal=True` call for the chunked case — valid here because the chunk's queries
+are the last `n` positions of the cached keys, which is exactly the semantics
+`is_causal=True` gives for `q` of length `n` against `k` of length `end`. Both are
+engineering changes outside the retention law; neither changes what the law computes.
+Until one of them lands, the 1M retrieval and 1M TPOT rows stay unmeasured, and the
+state-growth claim stays measured to 256K (3.22).
+
 ## 4. What this establishes, and what it does not
 
 Establishes (every number produced by the shipped `compile_bounded_cache`, see

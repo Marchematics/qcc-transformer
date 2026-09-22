@@ -147,7 +147,7 @@ def model_kwargs(model, **kw):
 
 
 @torch.no_grad()
-def prefill_capture(model, ids, obs, chunk):
+def prefill_capture(model, ids, obs, chunk, attention_mask=True):
     """Exact causal prefill in bounded chunks.
 
     Feeding the prompt in fixed chunks with a growing KV cache and absolute
@@ -155,6 +155,13 @@ def prefill_capture(model, ids, obs, chunk):
     pass, but keeps activation memory O(chunk) instead of O(L^2) (no explicit
     quadratic causal mask).  Only the observation-window attention inputs are
     retained per layer, so hidden-state storage stays O(obs * d).
+
+    ``attention_mask=False`` omits the explicit 2-D mask and lets the attention
+    kernel apply causality itself.  The two agree exactly (verified on a Qwen2
+    checkpoint: identical last-token logits), but the maskless path matters at long
+    context: an explicit mask of length `end` is materialised per chunk and forces a
+    non-flash kernel, which is what makes a 128K-1M prefill slow (minutes instead of
+    seconds) on this hardware.
     """
     tails: dict[int, torch.Tensor] = {}
     handles = []
@@ -175,7 +182,8 @@ def prefill_capture(model, ids, obs, chunk):
             end = min(L, start + chunk)
             seg = ids[:, start:end]
             pos = torch.arange(start, end, device=ids.device)
-            mask = torch.ones(1, end, device=ids.device, dtype=torch.long)
+            mask = (torch.ones(1, end, device=ids.device, dtype=torch.long)
+                    if attention_mask else None)
             o = model(seg, **model_kwargs(model, past_key_values=cache, attention_mask=mask,
                                           position_ids=pos.unsqueeze(0), cache_position=pos,
                                           use_cache=True))

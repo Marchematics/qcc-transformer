@@ -52,6 +52,7 @@ Full-KV quality on the records the Full-KV arm answers.
 | decode throughput / SLA concurrency | 32K, batch sweep | **15.6x** throughput (speed config), **8-16x** concurrency at a 50 ms SLA |
 | against the industry stack at 32K | vLLM 0.11 paged Full-KV vs bounded (1,152 slots) | vLLM **11-17** resident 32K requests per card at 247-373 tok/s; bounded **32+** at 1,947 tok/s |
 | single-stream TPOT, both arms CUDA-graphed | 32K, parity-gated repeats | **5.0x** (p95 55.2 ms vs 11.03 ms) |
+| against the frontier technique (latent KV) | post-hoc rank-`r` latent vs exact-token selection, matched bytes | 1.000 vs 0.250 retention at 144 MiB (rank 24/64); latent needs 1.8x the bytes for half — the low-rank axis belongs to models trained for it |
 | trainable parameters added | — | **0** |
 
 The measurement record has two hard limits: the **1M rows cannot be measured on

@@ -177,6 +177,35 @@ Serving throughput and SLA concurrency are produced by
 by `analyze_sla_concurrency.py`; the numbers in the README are the ones those
 two scripts print, with the measurement window stated next to them.
 
+## Low-rank latent KV at matched bytes
+
+```bash
+python benchmarks/benchmark_lowrank_kv_ruler.py --model <checkpoint> \
+    --ruler-jsonl <split> --tasks niah_multikey_2 niah_multikey_3 --max-records 40 \
+    --budget 4096 --lex-cap 512 --obs 64 --nsink 4 --pool 7 --dilate 9 --hops 6 \
+    --key-chunk 1024 --max-new 128 --arms full bounded lowrank1 lowrank2 \
+    --out artifacts/lowrank-kv-ruler.json
+```
+
+`lowrankN` keeps every token at `N` times the byte-matched rank (`slots x head_dim / L`,
+about 9-25 of 64 here) and reconstructs keys and values at compile time, so the
+comparison is quality per stored byte rather than a fused kernel.
+
+## The 1M harness
+
+```bash
+python benchmarks/benchmark_million_context.py --model <checkpoint with a small KV> \
+    --lengths 131072 1048576 --items 4 --seeds 2 --budget 4096 --lex-cap 512 \
+    --out <path for the 1M rows, e.g. /tmp/million-context.json>
+```
+
+The harness is complete but the exact prefill does not fit the software path this
+stack provides at those lengths (`artifacts/million-prefill-blocker.json`, report
+3.34): `transformers` 5.16 builds an explicit
+`chunk x end` mask for cached chunked prefill, so 128K needs ~22 GiB while the same
+computation through the fused SDPA kernel needs 0.32 GiB. Install `flash-attn`, or
+route the chunked case through `is_causal=True`, before running it.
+
 ## Limits
 
 * **1M rows are not reproducible on a 24 GiB card.** A 1M-token bf16 Full-KV
