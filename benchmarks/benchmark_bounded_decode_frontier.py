@@ -23,6 +23,7 @@ import os
 import random
 import re
 import time
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -147,7 +148,31 @@ def model_kwargs(model, **kw):
 
 
 @torch.no_grad()
-def prefill_capture(model, ids, obs, chunk, attention_mask=True):
+def flash_only_sdpa():
+    """Force the fused SDPA kernel for the enclosed forwards, when available.
+
+    The default dispatch picks a kernel that materialises attention for long
+    queries, which is what makes a 128K-1M prefill need tens of GiB; the fused
+    kernel does the same computation in a fraction of the memory (measured: 2,048
+    queries x 131,072 keys in 0.32 GiB and 1.6 s).  Hugging Face only sets
+    `is_causal` for the chunked-prefill case when no attention mask is passed, so
+    this belongs together with `attention_mask=False`.
+    """
+    try:
+        # the legacy flag API is the one that selects a working fused kernel on
+        # torch 2.8+cu128 here; `sdpa_kernel([SDPBackend.FLASH_ATTENTION])` raises
+        # "No available kernel" for the same call, so it is only a fallback
+        return torch.backends.cuda.sdp_kernel(enable_flash=True, enable_math=False,
+                                              enable_mem_efficient=False)
+    except Exception:                                  # pragma: no cover
+        try:
+            from torch.nn.attention import SDPBackend, sdpa_kernel
+            return sdpa_kernel([SDPBackend.FLASH_ATTENTION])
+        except Exception:
+            return nullcontext()
+
+
+def prefill_capture(model, ids, obs, chunk, attention_mask=True, flash=False):
     """Exact causal prefill in bounded chunks.
 
     Feeding the prompt in fixed chunks with a growing KV cache and absolute
@@ -178,16 +203,18 @@ def prefill_capture(model, ids, obs, chunk, attention_mask=True):
     cache = DynamicCache()
     last_logits = None
     try:
-        for start in range(0, L, chunk):
-            end = min(L, start + chunk)
-            seg = ids[:, start:end]
-            pos = torch.arange(start, end, device=ids.device)
-            mask = (torch.ones(1, end, device=ids.device, dtype=torch.long)
-                    if attention_mask else None)
-            o = model(seg, **model_kwargs(model, past_key_values=cache, attention_mask=mask,
-                                          position_ids=pos.unsqueeze(0), cache_position=pos,
-                                          use_cache=True))
-            last_logits = o.logits[:, -1:]
+        context = flash_only_sdpa() if flash else nullcontext()
+        with context:
+            for start in range(0, L, chunk):
+                end = min(L, start + chunk)
+                seg = ids[:, start:end]
+                pos = torch.arange(start, end, device=ids.device)
+                mask = (torch.ones(1, end, device=ids.device, dtype=torch.long)
+                        if attention_mask else None)
+                o = model(seg, **model_kwargs(
+                    model, past_key_values=cache, attention_mask=mask,
+                    position_ids=pos.unsqueeze(0), cache_position=pos, use_cache=True))
+                last_logits = o.logits[:, -1:]
     finally:
         for h in handles:
             h.remove()

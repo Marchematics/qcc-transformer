@@ -1770,14 +1770,19 @@ enable_mem_efficient=False)`) makes a 2,048-query chunk against 131,072 keys cos
 attention integration passes a mask for the chunked-prefill case (and `is_causal`
 only when query and key lengths match), so the fused kernel is never selected.
 
-**What would unblock it** is therefore one of: installing `flash-attn` (its kernel is
-what the fused SDPA path wants), or routing the prefill attention through a
-`is_causal=True` call for the chunked case — valid here because the chunk's queries
-are the last `n` positions of the cached keys, which is exactly the semantics
-`is_causal=True` gives for `q` of length `n` against `k` of length `end`. Both are
-engineering changes outside the retention law; neither changes what the law computes.
-Until one of them lands, the 1M retrieval and 1M TPOT rows stay unmeasured, and the
-state-growth claim stays measured to 256K (3.22).
+**The unblock is implemented.** `prefill_capture(..., attention_mask=False,
+flash=True)` passes no mask — so Hugging Face sets `is_causal`, which for a chunk of
+`n` queries against `end` cached keys is exactly the causal mask that chunk needs —
+and wraps the forward in a fused-kernel context. One detail is worth recording
+because it cost a debugging round: on torch 2.8+cu128 the *legacy* flag API
+(`torch.backends.cuda.sdp_kernel(enable_flash=True, enable_math=False,
+enable_mem_efficient=False)`) selects a working kernel while
+`torch.nn.attention.sdpa_kernel([SDPBackend.FLASH_ATTENTION])` raises "No available
+kernel" for the identical call, so the helper tries the former and falls back to the
+latter. With that path the chunked prefill runs through the fused kernel and the
+1M rows become a matter of GPU availability rather than of the method or the
+software stack; until they are run, the state-growth claim stays measured to 256K
+(3.22).
 
 ## 4. What this establishes, and what it does not
 
