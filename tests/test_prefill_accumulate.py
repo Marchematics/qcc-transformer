@@ -120,3 +120,41 @@ def test_maskless_prefill_matches_the_masked_path():
         assert torch.equal(layer_a.keys, layer_b.keys)
         assert torch.equal(layer_a.values, layer_b.values)
     assert all(torch.equal(tails_a[i], tails_b[i]) for i in tails_a)
+
+
+def test_flash_sdpa_patch_installs_and_only_changes_the_chunked_case():
+    """The dispatch patch must touch exactly the cached-chunked-prefill case."""
+    from benchmarks.benchmark_bounded_decode_frontier import install_flash_sdpa
+    from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS
+
+    assert install_flash_sdpa() is True
+    patched = ALL_ATTENTION_FUNCTIONS["sdpa"]
+
+    seen = {}
+
+    def fake_original(module, query, key, value, attention_mask, dropout=0.0,
+                      scaling=None, is_causal=None, **kwargs):
+        seen["is_causal"] = is_causal
+        seen["mask"] = attention_mask
+        return torch.zeros_like(query), None
+
+    import transformers.integrations.sdpa_attention as sdpa_attention
+    original = sdpa_attention.sdpa_attention_forward
+    sdpa_attention.sdpa_attention_forward = fake_original
+    try:
+        # chunked prefill: several queries, no mask -> is_causal must be forced on
+        patched(None, torch.zeros(1, 2, 8, 4), torch.zeros(1, 2, 32, 4),
+                torch.zeros(1, 2, 32, 4), None)
+        assert seen["is_causal"] is True and seen["mask"] is None
+        # decode: a single query keeps whatever Hugging Face passed (False), i.e.
+        # the wrapper does not force causality onto the decode step
+        patched(None, torch.zeros(1, 2, 1, 4), torch.zeros(1, 2, 32, 4),
+                torch.zeros(1, 2, 32, 4), None, is_causal=False)
+        assert seen["is_causal"] is False
+        # an explicit mask is never overridden
+        mask = torch.zeros(1, 1, 8, 32, dtype=torch.bool)
+        patched(None, torch.zeros(1, 2, 8, 4), torch.zeros(1, 2, 32, 4),
+                torch.zeros(1, 2, 32, 4), mask)
+        assert seen["mask"] is mask
+    finally:
+        sdpa_attention.sdpa_attention_forward = original

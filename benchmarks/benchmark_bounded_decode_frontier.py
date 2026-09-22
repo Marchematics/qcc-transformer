@@ -172,6 +172,48 @@ def flash_only_sdpa():
             return nullcontext()
 
 
+_FLASH_INSTALLED = False
+
+
+def install_flash_sdpa(verbose=False):
+    """Make the SDPA attention path use `is_causal` for cached chunked prefill.
+
+    Hugging Face only sets `is_causal` when query and key lengths match, so a chunked
+    prefill with a cache passes a mask instead and the fused kernel is never selected
+    (measured: 21.5 GiB for a 128K prefill that the fused kernel does in 0.32 GiB).
+    The wrapper only changes that case: no mask and more than one query, where the
+    chunk's queries are the last `n` positions of the cached keys and `is_causal`
+    therefore *is* the correct mask.  Everything else - projections, rope, norms -
+    stays Hugging Face's own code, so only the attention kernel changes.
+    """
+    global _FLASH_INSTALLED
+    if _FLASH_INSTALLED:
+        return True
+    try:
+        import transformers.integrations.sdpa_attention as sdpa_attention
+        from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS
+    except Exception:                                   # pragma: no cover
+        return False
+    def causal_chunk(module, query, key, value, attention_mask, dropout=0.0,
+                     scaling=None, is_causal=None, **kwargs):
+        if attention_mask is None and query.shape[2] > 1:
+            is_causal = True
+        # looked up at call time, so a later patch (or a test double) is honoured
+        return sdpa_attention.sdpa_attention_forward(
+            module, query, key, value, attention_mask, dropout=dropout,
+            scaling=scaling, is_causal=is_causal, **kwargs)
+
+    for name in ("sdpa", "paged|sdpa"):
+        try:
+            ALL_ATTENTION_FUNCTIONS[name] = causal_chunk
+        except Exception:                               # pragma: no cover
+            pass
+    _FLASH_INSTALLED = True
+    if verbose:
+        print("[flash] SDPA dispatch patched for cached chunked prefill", flush=True)
+    return True
+
+
 def prefill_capture(model, ids, obs, chunk, attention_mask=True, flash=False):
     """Exact causal prefill in bounded chunks.
 
@@ -203,6 +245,8 @@ def prefill_capture(model, ids, obs, chunk, attention_mask=True, flash=False):
     cache = DynamicCache()
     last_logits = None
     try:
+        if flash:
+            install_flash_sdpa()
         context = flash_only_sdpa() if flash else nullcontext()
         with context:
             for start in range(0, L, chunk):
