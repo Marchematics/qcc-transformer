@@ -65,8 +65,18 @@ from qcc_transformer.hf_loading import _ensure_remote_code_compat, load_hf_causa
 from qcc_transformer.retention import (RetentionConfig, compile_bounded_cache,
                                        fixed_rope_length, prefill_capture)
 
+try:  # the selection rules the published-family arms share with the RULER runner
+    import benchmark_bounded_decode_frontier as frontier
+except ImportError:  # pragma: no cover - benchmarks/ is not on sys.path
+    frontier = None
+
 SCHEMA = "qcc-longbench-retention-v1"
 TRUNCATION_POLICIES = ("head_tail", "skip")
+
+#: `bounded` is the shipped compile; the rest are the published families as
+#: selection rules (see `benchmarks/benchmark_bounded_decode_frontier.py`)
+POLICIES = ("full", "bounded", "obs_mean", "obs_max", "obs_last", "quest",
+            "pyramid", "h2o", "tova")
 
 
 def parse_args(argv=None):
@@ -96,7 +106,10 @@ def parse_args(argv=None):
     parser.add_argument("--prefill-chunk", type=int, default=8192)
     parser.add_argument("--key-chunk", type=int, default=4096)
     parser.add_argument("--arms", nargs="*", default=["full", "bounded"],
-                        choices=("full", "bounded"))
+                        choices=POLICIES,
+                        help="full, the shipped bounded compile (`bounded`), or one "
+                             "of the published-family selection rules implemented "
+                             "in benchmark_bounded_decode_frontier.py")
     parser.add_argument("--cache-dir", default=None,
                         help=f"LongBench cache; default ${lbd.ENV_CACHE_DIR} or "
                              f"{lbd.DEFAULT_CACHE_DIR}")
@@ -280,15 +293,58 @@ def main(argv=None):
                         torch.cuda.synchronize()
                     start = time.time()
                     if arm == "full":
-                        cache, logits, _captured = prefill_capture(
+                        cache, logits, captured = prefill_capture(
                             model, ids, config.observation_window, config.prefill_chunk)
-                    else:
+                        mass = top1 = None
+                    elif arm == "bounded":
                         cache, logits = compile_bounded_cache(model, ids, config,
                                                               tokenizer=tokenizer)
+                    else:
+                        # a published-family arm shares the exact prefill and the
+                        # observation-window capture, then selects with its own rule
+                        if frontier is None:
+                            raise SystemExit("published-family arms need benchmarks/ "
+                                             "on sys.path")
+                        if arm in ("h2o", "tova"):
+                            cache, logits, captured, mass, top1 = frontier.prefill_accumulate(
+                                model, ids, config.observation_window,
+                                config.prefill_chunk, config.key_chunk)
+                        else:
+                            cache, logits, captured = prefill_capture(
+                                model, ids, config.observation_window,
+                                config.prefill_chunk)
+                            mass = top1 = None
                     if device.type == "cuda":
                         torch.cuda.synchronize()
                     prefill_seconds = time.time() - start
                     kept = int(cache.get_seq_length())
+                    if arm not in ("full", "bounded"):
+                        if arm == "h2o":
+                            scores = mass
+                        elif arm == "tova":
+                            scores = top1
+                        else:
+                            mode = {"quest": "last", "pyramid": "mean"}.get(
+                                arm, arm.split("_")[-1] if arm.startswith("obs_") else "last")
+                            scores = frontier.obs_scores(
+                                model, captured, cache, length,
+                                config.observation_window, mode, config.key_chunk)
+                        originals = [(layer.keys, layer.values) for layer in cache.layers]
+                        idxs = frontier.build_idxs(
+                            arm, scores, cache, _PlainRecord(), config.budget,
+                            config.attention_sinks, config.recent_window, length,
+                            config.pool, ids.device, config.dilate, config.lex_cap)
+                        for layer, (ok, ov), slots in zip(cache.layers, originals, idxs):
+                            heads = ok.shape[1]
+                            gather = slots.unsqueeze(0).unsqueeze(-1).expand(
+                                1, heads, slots.shape[1], ok.shape[-1])
+                            layer.keys = ok.gather(2, gather).contiguous()
+                            layer.values = ov.gather(2, gather).contiguous()
+                        kept = int(cache.get_seq_length())
+                        kept_mean = round(
+                            sum(int(slots.shape[1]) for slots in idxs) / len(idxs), 1)
+                    else:
+                        kept_mean = float(kept)
                     generated, decode_seconds = greedy(
                         model, cache, logits[:, -1:].argmax(-1), length, max_new,
                         eos_ids, kwargs_names)
@@ -299,7 +355,7 @@ def main(argv=None):
                         "official_length": record.get("length"),
                         "prompt_tokens": length, "prompt_tokens_before": before,
                         "truncated": bool(before > length),
-                        "arm": arm, "kept_slots": kept,
+                        "arm": arm, "kept_slots": kept, "kept_slots_mean": kept_mean,
                         "slots_per_token": round(kept / length, 4),
                         "max_new": max_new, "generated": len(generated),
                         "prediction": text,
@@ -338,6 +394,12 @@ def main(argv=None):
                            metric_errors, progress_path, partial=False)
     print("\n" + json.dumps(summary, indent=1))
     return summary
+
+
+class _PlainRecord:
+    """Record stand-in for selection rules that do not read the prompt's anchors."""
+
+    lexical_positions: list = []
 
 
 def summarize(results, args):

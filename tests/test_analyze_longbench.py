@@ -80,3 +80,27 @@ def test_load_artifact_reads_records(tmp_path):
     path = tmp_path / "a.json"
     path.write_text('{"records": []}')
     assert load_artifact(path)["records"] == []
+
+
+def test_arm_matrix_keeps_one_column_per_policy():
+    """A run that emits published-family arms must not be read as full/bounded."""
+    from benchmarks.analyze_longbench import arm_matrix, format_arm_matrix
+
+    payload = {"records": [
+        {"task": "t", "id": "a", "arm": "full", "score": 0.4, "prediction": "x"},
+        {"task": "t", "id": "a", "arm": "obs_mean", "score": 0.3, "prediction": "x"},
+        {"task": "t", "id": "a", "arm": "h2o", "score": 0.1, "prediction": "x"},
+        {"task": "t", "id": "b", "arm": "full", "score": 0.2, "prediction": "y"},
+        {"task": "t", "id": "b", "arm": "obs_mean", "score": 0.3, "prediction": "y"},
+        {"task": "t", "id": "b", "arm": "h2o", "score": 0.2, "prediction": "y"},
+    ]}
+    matrix = arm_matrix([("run.json", payload)])
+    entry = matrix["run.json"]["t"]
+    assert entry["n"] == 2
+    assert abs(entry["means"]["full"] - 0.3) < 1e-9      # (0.4 + 0.2) / 2
+    assert abs(entry["means"]["obs_mean"] - 0.3) < 1e-9
+    assert round(entry["ratios"]["h2o"], 4) == 0.5
+    table = format_arm_matrix([("run.json", payload)])
+    assert "| artifact | task | n | full | obs_mean | h2o |" in table
+    assert "| run.json | t | 2 | 0.3000 | 0.3000 | 0.1500 |" in table
+    assert "| run.json | t | 1.000 | 1.000 | 0.500 |" in table

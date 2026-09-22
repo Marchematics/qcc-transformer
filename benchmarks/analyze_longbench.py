@@ -169,6 +169,57 @@ def matched_ratio(pairs):
             (statistics.mean(ratios) if ratios else None), len(ratios))
 
 
+def arm_matrix(payloads):
+    """Mean score per (artifact, task, arm) and the matched ratio against `full`.
+
+    The LongBench runner can emit any of the published-family selection rules as
+    arms, so this view keeps one column per arm instead of assuming the
+    `full`/`bounded` pair.
+    """
+    rows = {}
+    for name, payload in payloads:
+        by_task = collections.defaultdict(lambda: collections.defaultdict(list))
+        for row in payload.get("records", []):
+            by_task[row.get("task")][row.get("arm")].append(row.get("score"))
+        for task, arms in by_task.items():
+            means = {arm: statistics.mean([s for s in scores if s is not None])
+                     for arm, scores in arms.items() if scores}
+            reference = means.get("full")
+            rows.setdefault(os.path.basename(name), {})[task] = {
+                "n": len(arms.get("full", [])) or max(len(v) for v in arms.values()),
+                "means": means,
+                "ratios": {arm: (value / reference if reference else None)
+                           for arm, value in means.items()},
+            }
+    return rows
+
+
+def format_arm_matrix(payloads):
+    matrix = arm_matrix(payloads)
+    arms = []
+    for per_task in matrix.values():
+        for entry in per_task.values():
+            for arm in entry["means"]:
+                if arm not in arms:
+                    arms.append(arm)
+    lines = ["| artifact | task | n | " + " | ".join(arms) + " |",
+             "|---|---|---:|" + "---:|" * len(arms)]
+    for name, per_task in matrix.items():
+        for task, entry in sorted(per_task.items()):
+            cells = [("-" if entry["means"].get(arm) is None
+                      else f"{entry['means'][arm]:.4f}") for arm in arms]
+            lines.append(f"| {name} | {task} | {entry['n']} | " + " | ".join(cells) + " |")
+    lines.append("")
+    lines.append("| artifact | task | " + " | ".join(f"{arm} ratio" for arm in arms) + " |")
+    lines.append("|---|---|" + "---:|" * len(arms))
+    for name, per_task in matrix.items():
+        for task, entry in sorted(per_task.items()):
+            cells = [("-" if entry["ratios"].get(arm) is None
+                      else f"{entry['ratios'][arm]:.3f}") for arm in arms]
+            lines.append(f"| {name} | {task} | " + " | ".join(cells) + " |")
+    return "\n".join(lines)
+
+
 def format_task_table(payloads):
     lines = ["| artifact | task | matched | full | bounded | ratio | losing | worst-3 share |",
              "|---|---|---:|---:|---:|---:|---:|---:|"]
@@ -194,12 +245,21 @@ def main(argv=None):
     parser.add_argument("paths", nargs="+")
     parser.add_argument("--task", default=None,
                         help="task to attribute in detail (default: the lowest ratio)")
+    parser.add_argument("--view", default="attribution",
+                        choices=["attribution", "arms"],
+                        help="`attribution` reads the full/bounded pair; `arms` "
+                             "prints one column per arm, for runs that emit the "
+                             "published-family selection rules")
     parser.add_argument("--cache-dir", default=os.environ.get("QCC_LONGBENCH_DIR"),
                         help="LongBench cache with the references, for the "
                              "ROUGE-L precision/recall split")
     args = parser.parse_args(argv)
 
     payloads = [(path, load_artifact(path)) for path in args.paths]
+    if args.view == "arms":
+        print("**mean score per arm, and the matched ratio against `full`**\n")
+        print(format_arm_matrix(payloads))
+        return 0
     print("**per task**\n")
     print(format_task_table(payloads))
 
