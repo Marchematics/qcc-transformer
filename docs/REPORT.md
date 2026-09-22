@@ -1774,12 +1774,22 @@ only when query and key lengths match), so the fused kernel is never selected.
 flash=True)` passes no mask — so Hugging Face sets `is_causal`, which for a chunk of
 `n` queries against `end` cached keys is exactly the causal mask that chunk needs —
 and wraps the forward in a fused-kernel context. One detail is worth recording
-because it cost a debugging round: on torch 2.8+cu128 the *legacy* flag API
+because it cost two debugging rounds, and the second one changes the conclusion: on
+torch 2.8+cu128 the *legacy* flag API
 (`torch.backends.cuda.sdp_kernel(enable_flash=True, enable_math=False,
-enable_mem_efficient=False)`) selects a working kernel while
+enable_mem_efficient=False)`) accepts the call while
 `torch.nn.attention.sdpa_kernel([SDPBackend.FLASH_ATTENTION])` raises "No available
-kernel" for the identical call, so the helper tries the former and falls back to the
-latter. With that path the chunked prefill runs through the fused kernel and the
+kernel" for the identical shapes. Reading those two results together, the legacy
+context is *permissive* - it does not restrict the dispatch - and the restrictive one
+finds no fused kernel for this shape on this build. That is consistent with what the
+end-to-end runs show: installing the dispatch patch correctly (the table lives in
+`transformers.modeling_utils.ALL_ATTENTION_FUNCTIONS`, and an earlier attempt
+imported a module path that does not exist and silently did nothing) still leaves an
+8K prefill allocating enough to OOM the card, i.e. the attention is being
+materialised rather than fused. So the honest state of this row is: **the fused path
+is not available here**, and the 1M prefill needs either `flash-attn` installed or
+the memory-efficient kernel plus patience - a hardware/software capability limit, not
+a blocked method. With that path the chunked prefill runs through the fused kernel and the
 1M rows become a matter of GPU availability rather than of the method or the
 software stack; until they are run, the state-growth claim stays measured to 256K
 (3.22).
