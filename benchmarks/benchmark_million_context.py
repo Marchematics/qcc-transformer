@@ -104,6 +104,21 @@ def build_haystack(tokenizer, length, items, seed):
     return prompt, input_ids, sorted(set(positions)), values, keys
 
 
+def completed_keys(path):
+    """``(length, seed, arm)`` rows already present in an artifact, for resume.
+
+    The 1M harness runs on a *shared* GPU, so an attempt can die at any record;
+    resuming from the rows already written is what lets the sweep accumulate its
+    result across many short windows instead of restarting each time.
+    """
+    try:
+        payload = json.loads(Path(path).read_text())
+    except Exception:
+        return set(), []
+    rows = payload.get("results") or []
+    return {(r["length"], r["seed"], r["arm"]) for r in rows}, rows
+
+
 def recall_of(text, values):
     low = text.lower()
     return 1.0 if all(v.lower() in low for v in values) else 0.0
@@ -138,7 +153,9 @@ def main(argv=None):
     tokenizer = AutoTokenizer.from_pretrained(args.model)
     L.TOKENIZER = tokenizer
     eos = None
-    results = []
+    done, results = completed_keys(args.out)
+    if done:
+        print(f"[resume] {len(done)} rows already in {args.out}", flush=True)
     for length in args.lengths:
         config = AutoConfig.from_pretrained(args.model)
         trained = int(getattr(config, "max_position_embeddings", 32768))
@@ -183,6 +200,9 @@ def main(argv=None):
             print(f"[{length} seed {seed}] prefill {prefill_s:.0f}s peak {peak_gib}GiB "
                   f"L={true_length} needles={len(needle_positions)}", flush=True)
             for arm in args.arms:
+                if (length, seed, arm) in done:
+                    print(f"   {arm:<8} already measured, skipped", flush=True)
+                    continue
                 for layer, (ok, ov) in zip(cache.layers, originals):
                     layer.keys, layer.values = ok, ov
                 kept_bytes = full_bytes
@@ -225,6 +245,7 @@ def main(argv=None):
                     "decode_s": round(decode_s, 3),
                 }
                 results.append(row)
+                done.add((length, seed, arm))
                 print(f"   {arm:<8} slots={row['kept_slots']:>7d} "
                       f"state={kept_bytes / 2**20:8.1f}MiB recall={row['recall']:.0f} "
                       f"tpot={row['tpot_ms']:.1f}ms pred={text[:40]!r}", flush=True)
