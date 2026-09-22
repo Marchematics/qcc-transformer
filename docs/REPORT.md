@@ -1663,6 +1663,54 @@ being a stronger claim: 20 records per task with one greedy generation each, and
 per-policy tuning, so the 1% `gov_report` gap is inside the noise of this design;
 and the summary lengths differ slightly between arms, which ROUGE-L F1 penalises.
 
+### 3.32 One knob, two tasks: the filler signal trades retrieval for summarisation
+
+The published-family comparison (3.29-3.31) suggests an obvious hybrid: keep the
+anchor channel, which is what multi-key retrieval needs, and replace only the
+*filler* signal with the accumulated attention that the summarisation tasks prefer.
+Both hybrids are implemented in the shared selection code (`mean_lex`, `h2o_lex`)
+and measured on both sides of the trade.
+
+`gov_report` (20 records, 4,096 slots + 512 anchors, official ROUGE-L,
+`artifacts/longbench-hybrid-filler.json`):
+
+| arm | mean | ratio |
+|---|---:|---:|
+| full (reference) | 0.2808 | 1.000 |
+| **`h2o_lex`: accumulated attention + anchors** | **0.2762** | **0.984** |
+| shipped: final query + anchors | 0.2649 | 0.943 |
+| `mean_lex`: window mean + anchors | 0.2590 | 0.922 |
+
+Multi-key retrieval (the 40 `niah_multikey_2` and `niah_multikey_3` records, official
+recall, `artifacts/baselines-h2o-lex.json`; the shipped arm's row is the stored
+baseline run over the same records):
+
+| arm | retention | matched records |
+|---|---:|---:|
+| shipped: final query + anchors | **1.0000** | 28 |
+| `h2o_lex`: accumulated attention + anchors | 0.8929 | 28 |
+
+The same knob moves the two families in opposite directions: **+4.3% on the worst
+summarisation task and -10.7% on multi-key retrieval.** Neither filler signal
+dominates, and the shipped default stays the retrieval-optimal one, because the
+project's aggregate and worst-task requirements are set by retrieval tasks.
+
+The mechanism sections say why. The final query *is* the question, so ranking by its
+attention concentrates the non-anchor slots on the positions the question is about;
+accumulated attention is dominated by tokens that are globally salient (sinks,
+high-frequency words), which is what a summary needs as background and exactly what
+a single low-mass needle is not. The measured consequence is two presets rather than
+one:
+
+| preset | filler signal | best for | measured |
+|---|---|---|---|
+| shipped default | final-query attention | multi-key retrieval (RULER) | 1.0083 aggregate, 0.500 worst task |
+| summarisation preset | accumulated attention | long-document summarisation | `gov_report` 0.984 at 4,096 slots (0.943 shipped) |
+
+An adaptive rule - measure how much of the question the window can name and pick the
+filler accordingly - is the natural follow-up, and 3.27 supplies the measurement that
+would drive it.
+
 ## 4. What this establishes, and what it does not
 
 Establishes (every number produced by the shipped `compile_bounded_cache`, see

@@ -17,6 +17,7 @@ experiments in `qcc_transformer/` and are kept for the audit trail.
 | `bounded-decode-frontier-multimodel-{llama3.1-8b,qwen2.5-3b,phi35}.json` | cross-family results |
 | `longbench-retention-llama32-1b.json` | LongBench, nine tasks, official metrics |
 | `longbench-published-families.json` | the published families on two summarisation tasks (report 3.31) |
+| `longbench-hybrid-filler.json`, `baselines-h2o-lex.json` | the filler-signal trade: summarisation against multi-key retrieval (report 3.32) |
 | `bounded-decode-frontier-baselines-b4096.json`, `-lexonly-b4096.json` | matched-budget selection baselines |
 | `baselines-quest-pyramid.json`, `baselines-accumulated.json`, `baselines-pyramid-mild.json` | the published eviction families at the same retained width (Quest-shaped blocks, PyramidKV-shaped layer budgets, H2O accumulated attention, TOVA top-1 counts) |
 | `bounded-decode-frontier-multimodel-llama1b-{nolex,nolex-mean,rare,rare-hops0,pattern-hops0,mean-anchors,b1024,b2048}.json` | anchor/scoring attribution and the quality/state curve |
