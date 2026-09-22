@@ -45,6 +45,7 @@ Full-KV quality on the records the Full-KV arm answers.
 | quality vs state | 48 / 80 / 144 MiB | 0.987 / 0.975 / 1.007 aggregate |
 | matched-budget baselines | sliding window / sinks+recent / last-query / window-mean / **QCC** | 0.167 / 0.332 / 0.842 / 0.880 / **1.008** |
 | published eviction families, same records and retained width | SnapKV-shaped / window-max / Quest-shaped / PyramidKV-shaped / H2O / TOVA | 0.880 / 0.863 / 0.832 / 0.829 / 0.747 / 0.583 — **QCC 1.008**, and every one of them fails a task outright |
+| the same families on summarisation | LongBench `gov_report` / `samsum` | the field closes to ~5%: Quest-shaped 0.267/0.374, H2O 0.264/0.374, QCC 0.265/**0.392**, SnapKV-shaped 0.256/0.403 (Full-KV 0.281/0.376) |
 | KV quantization at matched bytes | Full-KV int8, bounded+int8 | int8 lossless at 2x; **bounded+int8 = Full-KV quality at 72.3 MiB** |
 | where the fixed state stops being enough | `k` items asked for at once (32K, Qwen2.5-3B) | measured: the limit is the **query**, not the context — see `docs/MECHANISM.md` |
 | decode throughput / SLA concurrency | 32K, batch sweep | **15.6x** throughput (speed config), **8-16x** concurrency at a 50 ms SLA |

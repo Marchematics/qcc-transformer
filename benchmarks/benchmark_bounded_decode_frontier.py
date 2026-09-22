@@ -643,9 +643,14 @@ def build_idxs(policy, scores, cache, record, budget, nsink, nrecent, L, pool, d
         forced = sorted(set(list(range(min(nsink, L))) + list(range(max(0, L - nrecent), L))))
         sel = sorted(set(anchors) | set(forced))
         return [torch.tensor([sel] * sc.shape[0], device=device, dtype=torch.long) for sc in scores]
-    if policy == "lex_obs":
+    if policy in ("lex_obs", "mean_lex", "h2o_lex"):
         # Each head keeps its own attention ranking and additionally receives the
-        # question's rare strings found in the context.  The retained width is
+        # question's rare strings found in the context.  The three names differ
+        # only in the *filler* signal handed in as `scores`: the final query
+        # (`lex_obs`, the shipped configuration), the observation-window mean
+        # (`mean_lex`), or attention accumulated over the whole prefill
+        # (`h2o_lex`), so the anchor channel is held fixed while the filler
+        # selector changes.  The retained width is
         # forced to exactly `budget + lex_cap` for every head, layer and request,
         # so a single batched attention mask can describe all of them (a
         # per-layer-varying width cannot be expressed by one 2-D mask).

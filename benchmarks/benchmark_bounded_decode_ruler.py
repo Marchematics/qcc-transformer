@@ -92,7 +92,7 @@ def run_record(model, rec, args, eos_ids, row_id):
     torch.cuda.reset_peak_memory_stats()
     torch.cuda.synchronize()
     t0 = time.time()
-    accumulated = [p for p in args.policies if p in ("h2o", "tova")]
+    accumulated = [p for p in args.policies if p in ("h2o", "tova", "h2o_lex")]
     if accumulated:
         # H2O and TOVA rank keys by attention accumulated over the whole prefill,
         # which the exact prefill can report without a second pass.
@@ -114,7 +114,7 @@ def run_record(model, rec, args, eos_ids, row_id):
 
     def get_scores(policy):
         if policy not in score_cache:
-            if policy == "h2o":
+            if policy in ("h2o", "h2o_lex"):
                 score_cache[policy] = mass
             elif policy == "tova":
                 score_cache[policy] = top1
@@ -125,7 +125,8 @@ def run_record(model, rec, args, eos_ids, row_id):
                 # then the retention unit and the layer schedule, not the scoring
                 # signal.
                 mode = {"lex_obs": "last", "quest": "last", "pyramid": "mean",
-                        "pyramid_mild": "mean"}.get(policy, policy[4:])
+                        "pyramid_mild": "mean", "mean_lex": "mean"}.get(
+                    policy, policy[4:])
                 score_cache[policy] = L.obs_scores(model, captured, cache, Lc, args.obs,
                                                    mode, args.key_chunk)
         return score_cache[policy]

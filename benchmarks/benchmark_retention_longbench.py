@@ -76,7 +76,9 @@ TRUNCATION_POLICIES = ("head_tail", "skip")
 #: `bounded` is the shipped compile; the rest are the published families as
 #: selection rules (see `benchmarks/benchmark_bounded_decode_frontier.py`)
 POLICIES = ("full", "bounded", "obs_mean", "obs_max", "obs_last", "quest",
-            "pyramid", "h2o", "tova")
+            "pyramid", "h2o", "tova",
+            # anchor channel held fixed, filler signal varied
+            "mean_lex", "h2o_lex")
 
 
 def parse_args(argv=None):
@@ -305,7 +307,7 @@ def main(argv=None):
                         if frontier is None:
                             raise SystemExit("published-family arms need benchmarks/ "
                                              "on sys.path")
-                        if arm in ("h2o", "tova"):
+                        if arm in ("h2o", "tova", "h2o_lex"):
                             cache, logits, captured, mass, top1 = frontier.prefill_accumulate(
                                 model, ids, config.observation_window,
                                 config.prefill_chunk, config.key_chunk)
@@ -319,19 +321,24 @@ def main(argv=None):
                     prefill_seconds = time.time() - start
                     kept = int(cache.get_seq_length())
                     if arm not in ("full", "bounded"):
-                        if arm == "h2o":
+                        if arm in ("h2o", "h2o_lex"):
                             scores = mass
                         elif arm == "tova":
                             scores = top1
                         else:
-                            mode = {"quest": "last", "pyramid": "mean"}.get(
+                            mode = {"quest": "last", "pyramid": "mean",
+                                    "mean_lex": "mean"}.get(
                                 arm, arm.split("_")[-1] if arm.startswith("obs_") else "last")
                             scores = frontier.obs_scores(
                                 model, captured, cache, length,
                                 config.observation_window, mode, config.key_chunk)
                         originals = [(layer.keys, layer.values) for layer in cache.layers]
+                        # the *_lex arms also need the question's rare strings
+                        lexical = (frontier.question_lexical_positions(
+                            tokenizer, prompt, config.observation_window, hops=config.chain_hops)
+                            if arm.endswith("_lex") else [])
                         idxs = frontier.build_idxs(
-                            arm, scores, cache, _PlainRecord(), config.budget,
+                            arm, scores, cache, _PlainRecord(lexical), config.budget,
                             config.attention_sinks, config.recent_window, length,
                             config.pool, ids.device, config.dilate, config.lex_cap)
                         for layer, (ok, ov), slots in zip(cache.layers, originals, idxs):
@@ -397,9 +404,10 @@ def main(argv=None):
 
 
 class _PlainRecord:
-    """Record stand-in for selection rules that do not read the prompt's anchors."""
+    """Record stand-in carrying the question's rare-string positions."""
 
-    lexical_positions: list = []
+    def __init__(self, lexical_positions=None):
+        self.lexical_positions = lexical_positions or []
 
 
 def summarize(results, args):

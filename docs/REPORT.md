@@ -1625,6 +1625,44 @@ here and 32 is not the bounded cache's. None of this is a quality comparison: th
 bounded arm's prompts are single-needle records and its recall is 1.0 on every one
 of them at every batch.
 
+### 3.31 The published families on LongBench: where the field closes
+
+Section 3.29 measures the head-to-head on retrieval. The task family that could
+break the comparison is summarisation, because the shipped configuration's
+advantage comes from the lexical anchors and a summary prompt names nothing rare to
+anchor on. The same selection rules therefore run on the two summarisation tasks
+with the same budget and protocol (`artifacts/longbench-published-families.json`,
+20 records each, 4,096 slots, 512 anchors where the policy uses them; metric is the
+official per-task one, ROUGE-L for both):
+
+| arm | `gov_report` | ratio | `samsum` | ratio |
+|---|---:|---:|---:|---:|
+| full (reference) | 0.2808 | 1.000 | 0.3756 | 1.000 |
+| Quest-shaped: whole-block selection | **0.2674** | **0.953** | 0.3741 | 0.996 |
+| **shipped: final query + anchors** | 0.2649 | 0.943 | **0.3916** | 1.043 |
+| H2O: accumulated attention | 0.2636 | 0.939 | 0.3741 | 0.996 |
+| window mean, SnapKV-shaped | 0.2561 | 0.912 | **0.4030** | **1.073** |
+| PyramidKV-shaped (1.5x to 0.5x) | 0.2533 | 0.902 | 0.3869 | 1.030 |
+| TOVA: top-1 counts | 0.2527 | 0.900 | 0.3755 | 1.000 |
+
+Read honestly, this is the first table in the report where the shipped
+configuration is **not** the winner: Quest-shaped block selection is 1% ahead on
+`gov_report` (0.2674 against 0.2649), and on `samsum` four policies beat Full-KV by
+3-7% — the cleaner-context effect of 3.21, in which dropping filler improves a
+summary rather than hurting it. The order also flips between the two tasks: the
+policy that leads `gov_report` is 5% behind on `samsum`, and the window mean that
+trails `gov_report` leads `samsum`.
+
+The size of the spread is the point. Across seven policies the two summarisation
+tasks span 0.253-0.267 and 0.374-0.403, i.e. about 5% — the RULER spread across the
+same seven is 0.17-1.01 aggregate, a factor of six. So the field is bunched where
+the mechanism says it should be (nothing to disambiguate, the filler signal is
+almost the whole story) and separated where it also says it should be (the query
+names items that only the anchor channel can find). Two caveats keep this from
+being a stronger claim: 20 records per task with one greedy generation each, and no
+per-policy tuning, so the 1% `gov_report` gap is inside the noise of this design;
+and the summary lengths differ slightly between arms, which ROUGE-L F1 penalises.
+
 ## 4. What this establishes, and what it does not
 
 Establishes (every number produced by the shipped `compile_bounded_cache`, see
