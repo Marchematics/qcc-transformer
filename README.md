@@ -48,6 +48,7 @@ Full-KV quality on the records the Full-KV arm answers.
 | KV quantization at matched bytes | Full-KV int8, bounded+int8 | int8 lossless at 2x; **bounded+int8 = Full-KV quality at 72.3 MiB** |
 | where the fixed state stops being enough | `k` items asked for at once (32K, Qwen2.5-3B) | measured: the limit is the **query**, not the context — see `docs/MECHANISM.md` |
 | decode throughput / SLA concurrency | 32K, batch sweep | **15.6x** throughput (speed config), **8-16x** concurrency at a 50 ms SLA |
+| against the industry stack at 32K | vLLM 0.11 paged Full-KV vs bounded (1,152 slots) | vLLM **11-17** resident 32K requests per card at 247-373 tok/s; bounded **32+** at 1,947 tok/s |
 | single-stream TPOT, both arms CUDA-graphed | 32K, parity-gated repeats | **5.0x** (p95 55.2 ms vs 11.03 ms) |
 | trainable parameters added | — | **0** |
 

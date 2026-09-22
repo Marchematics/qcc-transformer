@@ -22,6 +22,7 @@ experiments in `qcc_transformer/` and are kept for the audit trail.
 | `bounded-decode-frontier-state-growth.json`, `-state-growth-long.json` | retained slots and bytes vs prompt length |
 | `bounded-decode-frontier-kv-quant.json` | quality against decode-state bytes with KV quantization |
 | `bounded-decode-frontier-tpot-p95.json`, `-tpot-floor-32k-r1-contended.json` | parity-gated TPOT percentiles |
+| `serving-vllm-32k.json`, `serving-vllm-32k-concurrency.json` | vLLM's paged Full-KV cache at 32K: decode-only throughput, TPOT and the KV-capacity concurrency ceiling |
 | `bounded-decode-frontier-batch-validation.json` | ragged-batch exactness |
 | `bounded-decode-frontier-ruler-v6.json` | the stored benchmark-harness run the package is compared against |
 | `prediction-density.json` | NLL against long-range structure destroyed in three stages (MECHANISM, prediction 3) |

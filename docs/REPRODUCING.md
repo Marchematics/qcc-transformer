@@ -157,6 +157,21 @@ python benchmarks/benchmark_bounded_decode_tpot_floor.py --length 32768 \
 python benchmarks/analyze_latency_percentiles.py /tmp/tpot-*.json
 ```
 
+## The industry serving stack (vLLM)
+
+`benchmarks/benchmark_vllm_serving_compare.py` measures the same model, prompt
+length and decode under vLLM's paged Full-KV cache, and reports decode-only
+throughput and TPOT by prefilling the prompt once and reusing it through prefix
+caching. The engine's own start-up line ("maximum concurrency for N tokens per
+request") is the KV-capacity statement the report quotes.
+
+```bash
+python benchmarks/benchmark_vllm_serving_compare.py --model <checkpoint> \
+    --length 32768 --batches 1 2 4 8 --max-new 128 \
+    --gpu-memory-utilization 0.6 --max-num-seqs 8 \
+    --out artifacts/serving-vllm-32k.json
+```
+
 Serving throughput and SLA concurrency are produced by
 `benchmark_bounded_decode_serving.py` (a sweep over batch sizes) and summarised
 by `analyze_sla_concurrency.py`; the numbers in the README are the ones those

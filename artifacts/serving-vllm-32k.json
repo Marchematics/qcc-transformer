@@ -1,0 +1,90 @@
+{
+ "model": "/root/qcc/models/Llama-3.2-1B-Instruct",
+ "length": 32768,
+ "max_new": 128,
+ "engine": "vllm",
+ "config": {
+  "model": "/root/qcc/models/Llama-3.2-1B-Instruct",
+  "length": 32768,
+  "batches": [
+   1,
+   2,
+   4,
+   8
+  ],
+  "max_new": 128,
+  "gpu_memory_utilization": 0.6,
+  "max_num_seqs": 8,
+  "out": "artifacts/serving-vllm-32k.json"
+ },
+ "rows": [
+  {
+   "batch": 1,
+   "prompt_tokens": 32768,
+   "metrics_attrs": null,
+   "decode_only_tokens_per_s": 97.9,
+   "decode_only_tpot_ms": 10.21,
+   "engine_load_s": 18.8,
+   "wall_s": 1.3,
+   "generated_tokens": 128,
+   "metrics_available": false,
+   "prefill_s": null,
+   "decode_s": null,
+   "decode_tokens_per_s": null,
+   "tpot_ms": null,
+   "e2e_tokens_per_s": 98.7,
+   "ok": true
+  },
+  {
+   "batch": 2,
+   "prompt_tokens": 32768,
+   "metrics_attrs": null,
+   "decode_only_tokens_per_s": 159.8,
+   "decode_only_tpot_ms": 12.52,
+   "engine_load_s": 18.3,
+   "wall_s": 1.59,
+   "generated_tokens": 256,
+   "metrics_available": false,
+   "prefill_s": null,
+   "decode_s": null,
+   "decode_tokens_per_s": null,
+   "tpot_ms": null,
+   "e2e_tokens_per_s": 161.0,
+   "ok": true
+  },
+  {
+   "batch": 4,
+   "prompt_tokens": 32768,
+   "metrics_attrs": null,
+   "decode_only_tokens_per_s": 261.9,
+   "decode_only_tpot_ms": 15.27,
+   "engine_load_s": 18.6,
+   "wall_s": 1.94,
+   "generated_tokens": 512,
+   "metrics_available": false,
+   "prefill_s": null,
+   "decode_s": null,
+   "decode_tokens_per_s": null,
+   "tpot_ms": null,
+   "e2e_tokens_per_s": 263.9,
+   "ok": true
+  },
+  {
+   "batch": 8,
+   "prompt_tokens": 32768,
+   "metrics_attrs": null,
+   "decode_only_tokens_per_s": 247.6,
+   "decode_only_tpot_ms": 32.31,
+   "engine_load_s": 17.8,
+   "wall_s": 4.1,
+   "generated_tokens": 1024,
+   "metrics_available": false,
+   "prefill_s": null,
+   "decode_s": null,
+   "decode_tokens_per_s": null,
+   "tpot_ms": null,
+   "e2e_tokens_per_s": 249.6,
+   "ok": true
+  }
+ ]
+}

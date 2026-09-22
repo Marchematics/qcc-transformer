@@ -1582,6 +1582,49 @@ applies to every policy alike. No per-method tuning beyond the published choices
 (40 records for the two accumulated-attention families, which need a second pass
 over the prompt's attention and are reported against their own reference arms).
 
+### 3.30 Against the industry serving stack: vLLM's paged Full-KV at 32K
+
+The sections above compare the retention law against matched Full-KV arms inside one
+harness. The industry reference for serving a long context is a paged Full-KV cache
+(vLLM's PagedAttention), and it is a *capacity* comparison rather than a quality
+one: every resident request keeps every token's key and value, so a 32K request
+costs about 1 GiB of KV for this model (32 KiB/token) while the bounded cache costs
+36 MiB at 1,152 retained slots.
+
+`benchmarks/benchmark_vllm_serving_compare.py` runs vLLM 0.11.0 on the same model,
+the same 32K prompt length, the same greedy decode and the same single GPU, and
+reports decode throughput and TPOT with the prompt prefilled once and reused
+through prefix caching, so both columns are decode-only. The bounded column is the
+stored sequential serving run at 32K
+(`artifacts/bounded-decode-frontier-serving-seq-32k.json`, budget 1,024 + 128
+anchors, one prefill at a time, batched decode, recall 1.0 on every request):
+
+| batch | vLLM, paged Full-KV (tok/s / TPOT) | bounded 1,152 slots (tok/s / TPOT) |
+|---:|---:|---:|
+| 1 | 97.9 / 10.2 ms | 70.9 / 14.1 ms |
+| 2 | 159.8 / 12.5 ms | 142.5 / 14.0 ms |
+| 4 | 261.9 / 15.3 ms | 291.1 / 13.7 ms |
+| 8 | 247.6 / 32.3 ms | 583.0 / 13.7 ms |
+| 16 | 372.7 / 42.9 ms | **1,174.8 / 13.6 ms** |
+| 32 | - | **1,946.8 / 16.4 ms** |
+
+Concurrency, from vLLM's own start-up accounting on this card: its KV pool holds
+11.27 GiB at `gpu_memory_utilization=0.6` ("maximum concurrency for 33,024 tokens
+per request: 11.18x") and 17.16 GiB at 0.85 ("17.02x") — 11 and 17 resident 32K
+requests. The bounded cache keeps 32 such requests in 1.15 GiB (36 MiB each,
+1,946 tok/s, recall 1.0 on all 32) and degrades only at 64, where the batched decode
+itself becomes the limit (741 tok/s and some zero recalls).
+
+Two honest readings. **Below batch 4 vLLM wins on per-token latency** (10.2 ms
+against 14.1 ms): its paged-attention kernel is far more optimised than this
+project's Hugging Face decode loop, so the bounded cache has no kernel claim at that
+end. **From batch 8 the cache policy dominates**, because the cost that scales with
+batch is KV traffic — 8 x 1 GiB per step for Full-KV against 8 x 36 MiB for the
+bounded cache — which is why 17 concurrent requests is the industry stack's ceiling
+here and 32 is not the bounded cache's. None of this is a quality comparison: the
+bounded arm's prompts are single-needle records and its recall is 1.0 on every one
+of them at every batch.
+
 ## 4. What this establishes, and what it does not
 
 Establishes (every number produced by the shipped `compile_bounded_cache`, see
