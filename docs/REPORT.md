@@ -1852,10 +1852,26 @@ the fused kernel is doing the attention. Candidates, in the order worth testing:
    `O(chunk)` - the rope tables, a mask, or a full-tensor `contiguous()`;
 3. allocator fragmentation across 24 layers x many chunks.
 
-Each is a one-line probe (`torch.cuda.memory_allocated()` around the cache construction,
-around the rope call, and per chunk). Until one of them is identified, the 1M retrieval
-and 1M TPOT rows stay unmeasured - the correction recorded in 3.35 stands: earlier
-figures for a 128K prefill in this harness are not usable.
+Each is a one-line probe, and the first round of them already localises the shape of
+the culprit: measuring `torch.cuda.memory_allocated()` after the load, after the cache
+constructor and after each 512-token chunk of a patched forward gives
+
+| point | allocated | peak |
+|---|---:|---:|
+| after model load | 950.2 MiB | - |
+| after `DynamicCache()` | 950.2 MiB | - |
+| after chunk 1 | **3,892.7 MiB** | 3,907.5 MiB |
+| after chunk 2 | **6,743.5 MiB** | 6,888.3 MiB |
+
+so the allocation is **per chunk and retained** - 2,943 MiB for 512 tokens, i.e. about
+5.8 MiB per token, roughly 500x what the KV cache itself costs (12,288 bytes per token).
+It is not the cache constructor, and it is not the weights or the patch installation.
+That ratio is the thing to explain, and the candidates are now narrow: a rotary table
+sized to `max_position_embeddings` (set to 140,000 here for YaRN) rebuilt or
+re-materialised per forward, or a per-chunk tensor that the patched forward keeps alive.
+Until it is identified the 1M retrieval and 1M TPOT rows stay unmeasured, and the
+correction recorded in 3.35 stands: earlier figures for a 128K prefill in this harness
+are not usable.
 
 ## 4. What this establishes, and what it does not
 
