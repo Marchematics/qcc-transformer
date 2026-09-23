@@ -142,6 +142,10 @@ def main(argv=None):
     parser.add_argument("--max-new", type=int, default=32)
     parser.add_argument("--prefill-chunk", type=int, default=8192)
     parser.add_argument("--arms", nargs="*", default=["full", "bounded"])
+    parser.add_argument("--attn-impl", default="sdpa",
+                        help="flash_attention_2 makes the exact long-context prefill "
+                             "affordable: the fused kernel is what keeps a 128K-1M "
+                             "prefill at hundreds of MiB instead of tens of GiB (3.34)")
     parser.add_argument("--yarn", default="auto", choices=["auto", "off"],
                         help="`auto` applies YaRN rope scaling with "
                              "factor = length / trained window, identically to both arms")
@@ -170,7 +174,7 @@ def main(argv=None):
         config.max_position_embeddings = max(length + 1024, trained)
         model = AutoModelForCausalLM.from_pretrained(
             args.model, config=config, dtype=torch.bfloat16,
-            attn_implementation="sdpa").to("cuda").eval()
+            attn_implementation=args.attn_impl).to("cuda").eval()
         eos_ids = {model.config.eos_token_id} if model.config.eos_token_id is not None else set()
         print(f"[length {length}] rope_scaling={getattr(config, 'rope_scaling', None)}",
               flush=True)
