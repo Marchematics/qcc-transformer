@@ -149,6 +149,16 @@ tests/                    CPU test suite (policy invariants, quantization, LongB
 | [`docs/NOVELTY.md`](docs/NOVELTY.md) | the boundary against prior bounded-memory attention work |
 | [`docs/RELEASE.md`](docs/RELEASE.md) | the release bundle and how to verify it |
 
+## Related projects
+
+The retention law answers one question — *how much state does a single query need?* —
+and that question is what this repository measures. A **separate** project,
+[`ephemeral-kv`](https://github.com/Marchematics/ephemeral-kv), asks the OS-shaped
+question instead: whether model state should be durable across the turns of a
+long-lived session at all. The two share an outlook — long context as data, live state
+compiled on demand — but not a code path: `ephemeral-kv` treats the compiler as a
+pluggable interface and is built so that its claim cannot hinge on this law.
+
 ## Limitations
 
 The retention law is implemented, tested and measured, and the evidence is
