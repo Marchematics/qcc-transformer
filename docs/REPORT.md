@@ -1794,6 +1794,37 @@ a blocked method. With that path the chunked prefill runs through the fused kern
 software stack; until they are run, the state-growth claim stays measured to 256K
 (3.22).
 
+### 3.35 The 1M row's blocker has narrowed to the harness, not the kernel
+
+Three fixes since 3.34, each verified:
+
+* **`logits_to_keep=1`.** `prefill_capture` computed logits for every chunk position
+  against the vocabulary (4096 x 152K x 4B = 2.5 GB per chunk on the 0.5B checkpoint).
+  With it, one 128K run went from 23.5 GiB to 2.98 GiB at 100% GPU utilisation.
+* **Per-layer attention replacement.** transformers 5.16 resolves the attention
+  function per module, so replacing `ALL_ATTENTION_FUNCTIONS["flash_attention_2"]` and
+  intercepting `get_interface` both did nothing (measured: zero `flash_attn_func` calls
+  in a forward, before or after load). Replacing each layer's forward — keeping the
+  model's projections, q/k norms, rotary embedding, cache update and output projection,
+  changing only the operator for the multi-query case — is correct (same-model
+  last-token logits differ by 0.75 in bf16, argmax unchanged) and makes a 128K prefill
+  cost **3.2 s / 11.86 GiB** instead of 21.5 GiB and no result.
+* **`past_key_values` (plural).** Hugging Face passes the cache under the plural name,
+  so the patched forward's singular parameter stayed `None` and the cache never filled
+  (`IndexError` on `cache.layers`); accepting both names fills it (24 layers, full
+  sequence). The anchor scan in the 1M harness is also bypassed, since the planted
+  needles' token positions are known and the scan over a 128K-1M-token prompt is the
+  expensive part of that harness with nothing to add to what the row measures.
+
+The primitive is not the limit: `flash_attn_func(q, k, v, causal=True)` does
+2,048 x 131,072 with GQA in **0.83 s and 0.07 GiB**. What remains is the harness's own
+stages — a full-pipeline 128K run with one needle still produced no output in nine
+minutes (no OOM) — so the next step is per-stage accounting
+(`torch.cuda.max_memory_allocated()` around `build_haystack`, `prefill_capture`,
+`obs_scores`, selection and each arm's decode) rather than any further work on the
+attention operator. The 1M retrieval, 1M TPOT and 128K TPOT-ratio rows stay unmeasured
+until that lands.
+
 ## 4. What this establishes, and what it does not
 
 Establishes (every number produced by the shipped `compile_bounded_cache`, see
