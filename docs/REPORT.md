@@ -1928,6 +1928,23 @@ holds the full KV transiently. Two candidate directions:
   natural order and a block shuffle, and the item-capacity axis is measured on one
   prompt shape.
 
+## 6b. Status against the project's target metrics
+
+| target | value | status | evidence |
+|---|---|---|---|
+| Full-KV task quality, aggregate | >= 99% | **met** | RULER 1.0071 (A2), LongBench 1.0049 (A13) |
+| Full-KV task quality, worst task | >= 97% | **met for RULER (1.000)**; LongBench worst task 0.897 at the 4,608-slot budget and 1.020 at 8,704 (3.28, A17) |
+| 1M retrieval | >= 99.5% | **blocked by the environment**: exact 1M prefill needs a fused attention kernel this build does not select, and the shared GPU has no stable window (3.34, B1, `artifacts/million-prefill-blocker.json`) |
+| History state | O(1) / bounded | **met** | 4,608 slots and 144 MiB at every length (A7) |
+| 128K -> 1M state growth | <= 1.25x, ideally ~1x | **met to 256K (1.00x)**; the 1M endpoint shares the 1M blocker above |
+| 128K TPOT | >= 5x Full-KV | **not measurable on this hardware**: the matched Full-KV arm OOMs at 131K, so no step-matched ratio exists (B2); 32K is 4.9-5.0x (3.11b) |
+| 1M TPOT | >= 5x Full-KV | shares the 1M blocker |
+| Throughput | >= 3x | **met** | 15.6x speed configuration, 5.0x quality configuration (3.8) |
+| Fixed-SLA concurrency | >= 8x | **met** | 8-16x at a 50 ms SLA (3.18) |
+| Trainable parameters | <= 0.5%, target <= 0.2% | **met** | 0 parameters (A1) |
+| Retrofit | stock pretrained LM, no retraining | **met** | every number is produced from a frozen checkpoint (A1) |
+| Frontier-work comparison | head-to-head with recent methods | **met where measurable**: the published eviction families (3.29-3.32), vLLM's paged Full-KV (3.30) and post-hoc latent KV (3.33); trained-in architectures (native sparse attention, linear-attention hybrids) are not reproducible on a frozen checkpoint and no such model fits this GPU |
+
 ## 7. Scope
 
 This page reports the retention law as measured: official RULER and LongBench
