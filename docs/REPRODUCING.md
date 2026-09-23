@@ -195,22 +195,34 @@ comparison is quality per stored byte rather than a fused kernel.
 
 ```bash
 python benchmarks/benchmark_million_context.py --model <checkpoint with a small KV> \
-    --lengths 131072 1048576 --items 4 --seeds 2 --budget 4096 --lex-cap 512 \
-    --out <path for the 1M rows, e.g. /tmp/million-context.json>
+    --lengths 131072 1048576 --items 1 --seeds 2 --budget 4096 --lex-cap 512 \
+    --prefill-chunk 8192 --value-digits 2 --yarn auto \
+    --attn-impl flash_attention_2 --out <path for the 1M rows>
 ```
 
-The harness is complete but the exact prefill does not fit the software path this
-stack provides at those lengths (`artifacts/million-prefill-blocker.json`, report
-3.34): `transformers` 5.16 builds an explicit
-`chunk x end` mask for cached chunked prefill, so 128K needs ~22 GiB while the same
-computation through the fused SDPA kernel needs 0.32 GiB. Install `flash-attn`, or
-route the chunked case through `is_causal=True`, before running it.
+Four things are required, and each was a measured failure before it was a flag
+(report 3.34-3.39):
+
+* **`flash-attn` installed.** The chunked prefill routes each layer through
+  `flash_attn_func`; the stock SDPA path materialises an explicit `chunk x end` mask
+  and needs ~22 GiB at 128K, against 3.05 GiB measured with the fused kernel.
+* **`torch.no_grad` on the prefill.** Without it every chunk's autograd graph stays
+  reachable from the persistent cache: 1.31 MiB retained per token instead of 0.015.
+* **A preallocated cache.** `DynamicCache` grows by `torch.cat`, so a 1M append needs
+  the old and the new cache at once (12.0 + 12.0 GiB) and dies inside `update`. The
+  harness builds a `PreallocatedCache` automatically.
+* **The retrieval protocol.** `--value-digits 2` and the answer prefix are part of the
+  measurement: a 6-digit value is six tokens here and a 0.5B checkpoint drops a digit
+  often enough to zero a record whose retrieval worked, and without the prefix the
+  model re-lists the question's keys. `--items 1` is what this checkpoint can actually
+  retrieve: the 4-needle form scores 0 on the Full-KV arm itself.
 
 ## Limits
 
-* **1M rows are not reproducible on a 24 GiB card.** A 1M-token bf16 Full-KV
-  cache is 32 GiB for the 1B model, and the law requires an *exact* Full-KV
-  prefill, so a quantized or streaming prefill would measure a different method.
+* **The 1M Full-KV arm fits only because the checkpoint's KV is 12 KiB per token.**
+  Qwen2.5-0.5B (24 layers, 2 kv heads, head_dim 64) stores 12.0 GiB at 1M, which is
+  what makes an *exact* Full-KV arm possible on a 24 GiB card for the first time here.
+  A 1B-class model at 32 KiB/token would need 32 GiB and does not fit.
 * **The 128K TPOT ratio has no matched baseline on this hardware class.** The
   same-path harness OOMs on the Full-KV arm at 131K tokens; the bounded arm's own
   floor is reproducible (11.0 ms/token, p50 = p95).

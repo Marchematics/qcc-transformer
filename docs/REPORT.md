@@ -1873,6 +1873,146 @@ Until it is identified the 1M retrieval and 1M TPOT rows stay unmeasured, and th
 correction recorded in 3.35 stands: earlier figures for a 128K prefill in this harness
 are not usable.
 
+### 3.37 The per-chunk allocation was a retained autograd graph
+
+The growth in 3.36 is not a leak in the patch, not the rope table, and not the cache.
+It is gradient tracking: the benchmark harness's copy of `prefill_capture` was the one
+forward entry point in it without `@torch.no_grad()`, so every chunk built a graph. The
+cache is *persistent* and is grown with `torch.cat`, so each chunk's graph stays
+reachable from cache tensors the caller keeps — the retention accumulates per chunk
+rather than being freed with the output. The shipped library is not affected: its
+`qcc_transformer/retention.py::prefill_capture` carries the decorator, as do the
+harness's `prefill_accumulate` and `decode`. So this is a defect in the benchmark
+replica, and no shipped number depends on it — what it blocked was the harness's
+ability to reach 1M at all.
+
+Same model, same 2,201-token prompt, same chunking, one flag apart:
+
+| mode | after load | chunk 1 | chunk 2 | after releasing the cache |
+|---|---:|---:|---:|---:|
+| grad enabled (as the harness ran) | 958.3 MiB | 3,771.9 MiB | 6,621.8 MiB | 958.3 MiB |
+| `torch.no_grad` | 950.2 MiB | 984.1 MiB | 1,012.8 MiB | 958.3 MiB |
+
+That is **1.31 MiB per token retained with grad against 0.015 MiB per token without**
+(a factor of 87), which is the "500x the KV cache" ratio 3.36 could not explain, and it
+is what filled a free 24 GiB card at 32K. The three earlier candidates are now each
+positively excluded:
+
+* **the cache** is exact — `keys.shape = (1, 2, seq, 64)` with 25.8 MiB at 2,201 keys
+  and 51.6 MiB at 4,402, i.e. exactly the 12,288 bytes/token of this checkpoint;
+* **the rope table** is not it — loading the model with `max_position_embeddings=4096`
+  (no YaRN) leaves the growth unchanged at ~2,850 MiB per 512-token chunk;
+* **the patched forward** holds nothing global — it projects, applies rope, updates the
+  cache and calls `flash_attn_func`; its per-chunk temporaries are `O(chunk)` and are
+  released, and the dispatch question was already closed by the 120 `flash_attn_func`
+  calls in 3.36.
+
+So the memory model in `prefill_capture`'s own docstring — `O(chunk)` activation, not
+`O(L^2)` — only holds with tracking off; with it on, the "bounded" prefill silently
+retains `O(L)` per chunk. `@torch.no_grad()` is now on `prefill_capture`, and
+`tests/test_prefill_no_grad.py` pins the mechanism instead of the decorator: it asserts
+grad mode is off inside every layer's attention forward and that no cache tensor carries
+a `grad_fn`, with a control test that reproduces the retention by running the same
+chunked prefill *with* gradients enabled. Nothing in this retrofit is trainable, so the
+fix costs nothing and no measured quality number is affected — the affected artefact was
+the harness's ability to reach 1M at all.
+
+With that fixed, the 128K record runs: **exact prefill 15 s at a 3.05 GiB peak**, both
+arms, needles at random depths. The 1M record then died for a different and final
+reason, in 3.38.
+
+### 3.38 The 1M prefill needs a cache that does not double on every append
+
+`DynamicCache` grows by `torch.cat`, so appending a chunk needs the old cache and the
+new cache alive at the same time. At 128K that is 1.5 + 1.5 GiB and invisible; at 1M on
+this checkpoint it is **12.0 + 12.0 GiB**, and the run died inside the cache update:
+
+```
+torch.OutOfMemoryError: Tried to allocate 256.00 MiB. GPU 0 has a total capacity of
+23.55 GiB of which 168.25 MiB is free. ... 22.65 GiB is allocated by PyTorch
+  self.values = torch.cat([self.values, value_states], dim=-2)
+```
+
+The weights are 0.95 GiB and selection had not run yet, so the entire 22.65 GiB is
+cache-plus-copy. The same doubling recurs on every decode step against a full cache,
+which is why the Full-KV arm of a 1M record cannot be measured with `DynamicCache` at
+all on a 24 GiB card.
+
+`qcc_transformer/preallocated_cache.py` allocates one buffer per (layer, kv-head) up
+front and *writes each chunk into its slice*, returning the written prefix as a view.
+Appending becomes `O(chunk)` instead of `O(sequence)`, the transient copy is gone, and
+the footprint is exactly the state the model needs — `capacity x kv_heads x head_dim x 2
+x 2` bytes per layer, measured as `cache.nbytes` in `tests/test_preallocated_cache.py`.
+It is a drop-in for `DynamicCache` (`isinstance`, `layers`, `get_seq_length`,
+`get_mask_sizes`, decode through the model's own attention), and the shipped
+`qcc_transformer.retention._compile_one` now uses it, so the 1M path in the library does
+not depend on the benchmark.
+
+Three details cost a debugging round each and are pinned by tests now, because each one
+fails silently rather than loudly:
+
+* **Length must mean written, not reserved.** `DynamicLayer` derives
+  `get_seq_length()`/`get_mask_sizes()` from the tensor's shape, which for a fixed buffer
+  is the capacity: a 16-token chunk against a 64-slot buffer produced an 80-wide mask and
+  attention died on a shape mismatch (`32` against `80`).
+* **Growth must start from the written prefix.** An undersized buffer that concatenates
+  the *whole* buffer puts uninitialised slots inside the attention window (measured: a
+  16-token chunk against an 8-slot buffer reported 24 keys).
+* **A compile replaces the buffer.** The bounded path gathers `layer.keys` down to the
+  selected slots, which is a new tensor; the cache must then report the compiled width
+  and append like `DynamicCache` from there, not write at the old offset.
+
+The cache also reports `overflowed`, so an undersized allocation is visible rather than
+inferred, and it grows correctly (never truncates) if a caller generates past its
+capacity. `tests/test_preallocated_cache.py` checks all of it against `DynamicCache` on
+the same model: identical logits, identical keys and values, identical reported length.
+
+### 3.39 The 1M *retrieval* row is a protocol measurement, not just a model one
+
+With the prefill fixed, the first 1M-scale records scored **recall 0 on the Full-KV arm
+as well as the bounded one**. A row where the exact arm is zero measures the protocol, so
+it was taken apart before anything was reported from it. Three separate causes, each
+measured:
+
+* **No answer prefix.** Asked cold, Qwen2.5-0.5B re-lists the keys from the question
+  instead of answering (`pred='-c53edf, trace-d75528, trace-14ba5e, tra...'`), so every
+  arm scores zero. RULER ships an `answer_prefix` per record for this reason; the harness
+  now opens the answer for the model (`The magic numbers are `). This is the difference
+  between a record that can measure retention and one that cannot.
+* **Six-digit values are six tokens.** Every digit is a separate token on this
+  tokenizer, so a 6-digit value is a 6-token answer that a 0.5B checkpoint reproduces
+  with an occasional dropped digit: at 32K *and* 128K, with YaRN on *and* off, the model
+  returned **3 of 4 values exactly and one missing its leading digit** (`536110` ->
+  `36110`, `509532` -> `09532`), which scored the whole record 0 while retrieval was
+  plainly working. `--value-digits 2` keeps the same task 1-2 tokens wide.
+* **Token-space splicing glued the needles to the filler.** The needle statement was
+  spliced without its own whitespace, so the prompt read
+  `"...estimate for the coming year. TheOne of the magic numbers for trace-c53edf is
+  794772. committee reviewed..."`. The statements now carry a leading and trailing space,
+  and the value is verified present in the decoded prompt region.
+
+What the corrected protocol shows on the Full-KV arm (the model's own ceiling, which
+bounds any retention claim), 2-digit values, answer prefix on:
+
+| rope | needles | 32K | 128K | prediction |
+|---|---:|---:|---:|---|
+| YaRN `factor=4` | 1 | **1.0** | **1.0** | `7. ... The answer is 97.` |
+| YaRN off | 1 | **1.0** | **1.0** | `7. ... The magic number for trace-c53edf is 97.` |
+| YaRN `factor=4` | 4 | 0.0 | 0.0 | `5, 51, 38, 38, 38, ...` |
+| YaRN off | 4 | 0.0 | 0.0 | `8, 14ba5e, 8490bc. ...` |
+
+Two conclusions follow, and both matter for the 1M row:
+
+* **Post-hoc YaRN is not the problem.** Applying YaRN `factor=4` to a checkpoint that was
+  not trained with it (and `factor=32` at 1M) leaves the single-needle answer identical
+  to the native-window answer, so the long-context rows can be run with the standard
+  setting applied to both arms.
+* **Multi-needle retrieval is beyond this checkpoint, not beyond the method.** Four
+  needles score 0 on the Full-KV arm itself, with looping answers that list partial
+  values; the single-needle protocol is what a 0.5B model can be held to, and the
+  1M rows are measured with `--items 1`. Reporting a 4-needle number here would be
+  reporting the checkpoint, not the retention policy.
+
 ## 4. What this establishes, and what it does not
 
 Establishes (every number produced by the shipped `compile_bounded_cache`, see

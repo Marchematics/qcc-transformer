@@ -269,7 +269,7 @@ def install_flash_attn_kernel(verbose=False):
     return True
 
 
-def install_flash_layer_attn(model, verbose=False):
+def install_flash_layer_attn(model, verbose=False, delegate_decode=True):
     """Per-layer attention through `flash_attn_func` for the long-context prefill.
 
     transformers 5.16 resolves the attention function per module, so replacing the
@@ -283,6 +283,12 @@ def install_flash_layer_attn(model, verbose=False):
 
     The primitive is what makes 128K-1M affordable: 2,048 x 131,072 with GQA in
     0.83 s and 0.07 GiB, against 3.79 GiB on the first chunk through the stock path.
+
+    Only prefill is overridden.  Single-token decode is handed back to the module's
+    original forward, so it runs whatever the model was loaded with (`flash_attention_2`
+    here) instead of a hand-rolled SDPA call - that fixed per-step cost is what decides
+    a batch-1 TPOT ratio once one arm's cache is bounded, and delegating keeps the
+    operator identical across arms.
     """
     import types
     try:
@@ -291,7 +297,7 @@ def install_flash_layer_attn(model, verbose=False):
     except Exception:                                   # pragma: no cover
         return False
 
-    def make():
+    def make(original, accepts):
         def forward(self, hidden_states, position_embeddings=None, attention_mask=None,
                     past_key_value=None, past_key_values=None, cache_position=None,
                     **kwargs):
@@ -300,6 +306,21 @@ def install_flash_layer_attn(model, verbose=False):
             # was the symptom)
             if past_key_value is None:
                 past_key_value = past_key_values
+            if hidden_states.shape[1] == 1 and original is not None and delegate_decode:
+                # Single-token decode goes back to the model's own attention
+                # implementation instead of a hand-rolled SDPA call: the fused decode
+                # kernel is several times faster for the same cache, and the fixed
+                # per-step cost is what dominates a batch-1 TPOT once the cache is
+                # bounded.  Both arms get the same operator, so the TPOT comparison
+                # stays like-for-like; only the multi-query prefill is overridden.
+                call = {"hidden_states": hidden_states,
+                        "position_embeddings": position_embeddings,
+                        "attention_mask": attention_mask,
+                        "cache_position": cache_position,
+                        "past_key_values" if "past_key_values" in accepts
+                        else "past_key_value": past_key_value}
+                return original(**{k: v for k, v in call.items()
+                                   if k in accepts or k == "hidden_states"})
             shape = hidden_states.shape[:-1]
             head_shape = (*shape, -1, self.head_dim)
             query = self.q_proj(hidden_states).view(head_shape).transpose(1, 2)
@@ -318,7 +339,7 @@ def install_flash_layer_attn(model, verbose=False):
                                       key.transpose(1, 2).contiguous(),
                                       value.transpose(1, 2).contiguous(),
                                       causal=True, softmax_scale=self.scaling)
-            else:                                      # decode: stock operator
+            else:                                      # decode without a delegate
                 out = torch.nn.functional.scaled_dot_product_attention(
                     query, key, value,
                     enable_gqa=getattr(self, "num_key_value_groups", 1) > 1)
@@ -326,20 +347,34 @@ def install_flash_layer_attn(model, verbose=False):
             out = out.reshape(*shape, -1).contiguous()
             return self.o_proj(out), None
         return forward
+    import inspect
     count = 0
     for index, layer in enumerate(model.model.layers):
         # the patched forward writes to the cache itself, so the layer index has to
         # be set on the module (a missing index leaves `cache.layers` empty)
         if getattr(layer.self_attn, "layer_idx", None) is None:
             layer.self_attn.layer_idx = index
-        layer.self_attn.forward = types.MethodType(make(), layer.self_attn)
+        original, accepts = layer.self_attn.forward, set()
+        try:
+            accepts = set(inspect.signature(original).parameters)
+        except (TypeError, ValueError):                       # pragma: no cover
+            original = None
+        if not delegate_decode:
+            original = None
+        # a module whose forward names neither cache argument keeps the local
+        # implementation rather than being called in a shape it may not accept
+        if not ({"past_key_value", "past_key_values"} & accepts):
+            original = None
+        layer.self_attn.forward = types.MethodType(make(original, accepts),
+                                                   layer.self_attn)
         count += 1
     if verbose:
         print(f"[flash] per-layer attention replaced on {count} layers", flush=True)
     return count > 0
 
 
-def prefill_capture(model, ids, obs, chunk, attention_mask=True, flash=False):
+@torch.no_grad()
+def prefill_capture(model, ids, obs, chunk, attention_mask=True, flash=False, cache=None):
     """Exact causal prefill in bounded chunks.
 
     Feeding the prompt in fixed chunks with a growing KV cache and absolute
@@ -348,12 +383,31 @@ def prefill_capture(model, ids, obs, chunk, attention_mask=True, flash=False):
     quadratic causal mask).  Only the observation-window attention inputs are
     retained per layer, so hidden-state storage stays O(obs * d).
 
+    ``no_grad`` is what makes the bounded activation memory real, and the shipped
+    ``qcc_transformer.retention.prefill_capture`` has always carried it - this harness
+    copy did not.  With gradient tracking on, the cache update (`torch.cat` into a
+    cache the caller keeps) leaves every chunk's graph reachable from the persistent
+    cache tensors, so a chunk retains **1.31 MiB per token** instead of 0.015 -
+    measured on the same model and prompt: 2,201-token chunks cost 2,813.6 MiB then
+    2,849.9 MiB with grad enabled, against 33.9 MiB then 28.7 MiB under `no_grad`,
+    and both drop back to the 950 MiB baseline when the cache is released.  That
+    single difference is what OOMed the earlier 128K run: the leak was a retained
+    graph, not the cache (which is exact: 25.8 MiB at 2,201 keys, 51.6 MiB at 4,402,
+    matching 12 KiB/token) and not the RoPE table (setting
+    `max_position_embeddings=4096` left the growth unchanged).  Nothing here is
+    trainable - the model is a frozen retrofit - so this costs nothing.
+
     ``attention_mask=False`` omits the explicit 2-D mask and lets the attention
     kernel apply causality itself.  The two agree exactly (verified on a Qwen2
     checkpoint: identical last-token logits), but the maskless path matters at long
     context: an explicit mask of length `end` is materialised per chunk and forces a
     non-flash kernel, which is what makes a 128K-1M prefill slow (minutes instead of
     seconds) on this hardware.
+
+    A `cache` may be passed in - the 1M harness passes a
+    `qcc_transformer.preallocated_cache.PreallocatedCache` sized to the record, because
+    `DynamicCache` grows by `torch.cat` and therefore needs the old and the new cache
+    alive at once (12 GiB + 12 GiB at 1M, which is the OOM this harness hit).
     """
     tails: dict[int, torch.Tensor] = {}
     handles = []
@@ -367,7 +421,8 @@ def prefill_capture(model, ids, obs, chunk, attention_mask=True, flash=False):
             return hook
         handles.append(layer.self_attn.register_forward_hook(make(i), with_kwargs=True))
     L = ids.shape[1]
-    cache = DynamicCache()
+    if cache is None:
+        cache = DynamicCache()
     last_logits = None
     try:
         if flash:

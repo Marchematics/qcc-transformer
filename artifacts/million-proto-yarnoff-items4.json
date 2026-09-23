@@ -1,0 +1,148 @@
+{
+ "config": {
+  "model": "/root/qcc/models/Qwen2.5-0.5B-Instruct",
+  "lengths": [
+   32768,
+   131072
+  ],
+  "items": 4,
+  "seeds": 1,
+  "budget": 4096,
+  "lex_cap": 512,
+  "obs": 64,
+  "nsink": 4,
+  "pool": 7,
+  "dilate": 9,
+  "hops": 6,
+  "key_chunk": 4096,
+  "max_new": 24,
+  "prefill_chunk": 8192,
+  "arms": [
+   "full"
+  ],
+  "attn_impl": "flash_attention_2",
+  "yarn": "off",
+  "value_style": "digits",
+  "value_digits": 2,
+  "answer_prefix": true,
+  "out": "artifacts/million-proto-yarnoff-items4.json"
+ },
+ "summary": {
+  "32768": {
+   "records": 0,
+   "full_recall": 0.0,
+   "bounded_recall": null,
+   "matched_records": 0,
+   "retention": null,
+   "state_mib": null,
+   "full_state_gib": null,
+   "tpot_ms": {
+    "full": 25.53
+   },
+   "prefill_s": 1.6
+  },
+  "131072": {
+   "records": 0,
+   "full_recall": 0.0,
+   "bounded_recall": null,
+   "matched_records": 0,
+   "retention": null,
+   "state_mib": null,
+   "full_state_gib": null,
+   "tpot_ms": {
+    "full": 22.94
+   },
+   "prefill_s": 14.9
+  }
+ },
+ "results": [
+  {
+   "length": 32768,
+   "true_tokens": 32764,
+   "seed": 0,
+   "items": 4,
+   "arm": "full",
+   "recall": 0.0,
+   "prediction": "5, 51, 38, 38, 38, 38, 3",
+   "values": [
+    "65",
+    "62",
+    "51",
+    "38"
+   ],
+   "keys": [
+    "trace-c53edf",
+    "trace-d75528",
+    "trace-14ba5e",
+    "trace-8490bc"
+   ],
+   "needle_positions": [
+    11732,
+    11733,
+    11734,
+    11735,
+    11736,
+    11737,
+    11738,
+    11739
+   ],
+   "rope_scaling": {
+    "rope_theta": 1000000.0,
+    "rope_type": "default"
+   },
+   "prefill_s": 1.6,
+   "peak_gib": 2.25,
+   "kept_slots": 32788,
+   "kept_bytes": 402604032,
+   "full_kv_bytes": 402604032,
+   "compression": 1.0,
+   "generated": 24,
+   "tpot_ms": 25.53,
+   "decode_s": 0.613
+  },
+  {
+   "length": 131072,
+   "true_tokens": 131068,
+   "seed": 0,
+   "items": 4,
+   "arm": "full",
+   "recall": 0.0,
+   "prediction": "8, 14ba5e, 8490bc. The magic numbers for all of these keys",
+   "values": [
+    "65",
+    "62",
+    "51",
+    "38"
+   ],
+   "keys": [
+    "trace-c53edf",
+    "trace-d75528",
+    "trace-14ba5e",
+    "trace-8490bc"
+   ],
+   "needle_positions": [
+    46930,
+    46931,
+    46932,
+    46933,
+    46934,
+    46935,
+    46936,
+    46937
+   ],
+   "rope_scaling": {
+    "rope_theta": 1000000.0,
+    "rope_type": "default"
+   },
+   "prefill_s": 14.9,
+   "peak_gib": 3.48,
+   "kept_slots": 131092,
+   "kept_bytes": 1610563584,
+   "full_kv_bytes": 1610563584,
+   "compression": 1.0,
+   "generated": 24,
+   "tpot_ms": 22.94,
+   "decode_s": 0.551
+  }
+ ]
+}

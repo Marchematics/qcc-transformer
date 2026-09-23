@@ -39,6 +39,8 @@ from dataclasses import dataclass, field
 import torch
 import torch.nn.functional as F
 
+from qcc_transformer.preallocated_cache import preallocated_cache_for
+
 __all__ = [
     "RetentionConfig",
     "fixed_rope_length",
@@ -116,13 +118,18 @@ def _apply_rope(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.
 
 @torch.no_grad()
 def prefill_capture(model, input_ids: torch.Tensor, observation_window: int,
-                    chunk_size: int):
+                    chunk_size: int, cache=None):
     """Exact chunked prefill, capturing only the observation-window inputs.
 
     Feeding the prompt in fixed chunks with a growing KV cache and absolute
     position ids is algebraically the same causal prefill as one long forward
     pass, but activation memory stays ``O(chunk)`` and only ``O(obs * d)`` hidden
     state per layer is retained.
+
+    ``cache`` may be supplied; :func:`_compile_one` passes a preallocated one, since
+    a `DynamicCache` grows by ``torch.cat`` and therefore holds the old and the new
+    cache at once - 12.0 GiB each at 1M on a 0.5B checkpoint, which does not fit
+    beside the weights on a 24 GiB card.
     """
     from transformers import DynamicCache
 
@@ -140,7 +147,8 @@ def prefill_capture(model, input_ids: torch.Tensor, observation_window: int,
         handles.append(layer.self_attn.register_forward_hook(make(i), with_kwargs=True))
 
     total = input_ids.shape[1]
-    cache = DynamicCache()
+    if cache is None:
+        cache = DynamicCache()
     last_logits = None
     try:
         for start in range(0, total, chunk_size):
@@ -483,8 +491,12 @@ def _compile_one(model, input_ids: torch.Tensor, config: RetentionConfig,
                  tokenizer=None):
     """Compile a single unpadded request; ``(cache, last_logits)``."""
     length = input_ids.shape[1]
+    # a fixed buffer instead of `DynamicCache`: growing by `torch.cat` needs the old
+    # and the new cache alive at once, which at 1M is 12.0 + 12.0 GiB on a 0.5B
+    # checkpoint and dies in `update` before selection ever runs
+    cache = preallocated_cache_for(model, length, device=input_ids.device)
     cache, last_logits, captured = prefill_capture(
-        model, input_ids, config.observation_window, config.prefill_chunk)
+        model, input_ids, config.observation_window, config.prefill_chunk, cache=cache)
     scores = observation_scores(model, captured, cache, length, config)
     anchors = None
     if config.lex_cap > 0 and tokenizer is not None:

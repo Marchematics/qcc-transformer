@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import statistics
 import sys
 import time
@@ -43,6 +44,7 @@ try:
     import benchmark_bounded_decode_frontier as L
 except ImportError:  # pragma: no cover - package layout
     from benchmarks import benchmark_bounded_decode_frontier as L
+from qcc_transformer.preallocated_cache import preallocated_cache_for
 
 FILLER = (
     "The committee reviewed the record and noted that the programme continues on "
@@ -57,7 +59,22 @@ class Record:
         self.lexical_positions = positions
 
 
-def build_haystack(tokenizer, length, items, seed):
+# single-token English nouns, used when the answer style is `words`: a 6-digit number
+# is six tokens on this tokenizer, and a 0.5B model mis-generates one digit often
+# enough to hide what the row is about (measured at 32K *and* 128K, both rope
+# settings: 3 of 4 values exact, one value missing its leading digit, so every record
+# scored 0 while retrieval was plainly working).  A single-token answer makes the
+# metric measure retention instead of digit arithmetic.
+_VALUE_WORDS = (
+    "apple", "orange", "banana", "bridge", "castle", "forest", "hammer", "needle",
+    "rabbit", "table", "window", "yellow", "anchor", "engine", "mirror", "river",
+    "silver", "wagon", "kernel", "melon", "rocket", "danger", "hunter", "ribbon",
+    "badge", "fabric", "marker", "parcel", "socket", "vine",
+)
+
+
+def build_haystack(tokenizer, length, items, seed, answer_prefix=True,
+                   value_style="digits", value_digits=2):
     """A prompt of about `length` tokens with `items` needles at random depths.
 
     Built in *token* space: the filler is tiled from its own token ids and the needle
@@ -66,16 +83,50 @@ def build_haystack(tokenizer, length, items, seed):
     return within seven minutes for a 128K prompt (report 3.35), while the model work
     that follows it is 3.2 s.  The needle positions are exact by construction, which is
     what the selection needs.
+
+    ``answer_prefix`` opens the answer for the model ("The magic words are"), which is
+    what the working long-context protocols do (RULER ships an `answer_prefix` per
+    record) and it is not cosmetic on this checkpoint: asked cold, Qwen2.5-0.5B
+    re-lists the keys from the question instead of answering, so every arm scores zero
+    and the row measures nothing about retention.  With the prefix the model only has
+    to emit the values.
+
+    ``value_style``/``value_digits`` pick what the needle holds.  `digits` is the
+    default because the number phrasing is what this checkpoint actually answers, and
+    the width matters: on this tokenizer *every* digit is its own token, so a six-digit
+    value is a six-token answer that a 0.5B model reproduces with an occasional dropped
+    digit (measured: 3 of 4 values exact at both 32K and 128K, which scored the whole
+    record 0 while retrieval was plainly working).  Two digits keeps the same task one
+    or two tokens wide.  `words` uses single-token nouns instead (see `_VALUE_WORDS`).
     """
     import random
 
     rng = random.Random(seed)
     keys = [f"trace-{rng.randrange(16 ** 6):06x}" for _ in range(items)]
-    values = [f"{rng.randrange(10 ** 6):06d}" for _ in range(items)]
-    statements = [f"One of the magic numbers for {key} is {value}."
+    if value_style == "digits":
+        width = int(value_digits)
+        values = [f"{rng.randrange(10 ** width):0{width}d}" for _ in range(items)]
+        noun, noun_plural = "number", "numbers"
+    else:
+        values = rng.sample(_VALUE_WORDS, items)
+        noun, noun_plural = "word", "words"
+    # the statements carry their own surrounding spaces: the filler is spliced in
+    # *token* space, so a bare statement glues to the neighbouring filler tokens
+    # (measured: "...estimate for the coming year. TheOne of the magic numbers...")
+    statements = [f" One of the magic {noun_plural} for {key} is {value}. "
                   for key, value in zip(keys, values)]
-    question = ("What are the magic numbers for all of these keys mentioned above: "
-                + ", ".join(keys) + "? Answer with the numbers separated by commas.")
+    if items == 1:
+        question = (f"What is the magic {noun} for {keys[0]} mentioned above? "
+                    f"Answer with the {noun}.")
+        opening = f"The magic {noun} is "
+    else:
+        question = (f"What are the magic {noun_plural} for all of these keys mentioned "
+                    "above: " + ", ".join(keys)
+                    + f"? Answer with the {noun_plural} separated by commas.")
+        opening = f"The magic {noun_plural} are "
+    if not answer_prefix:
+        opening = ""
+    question = question + ("\n" + opening if opening else "")
 
     filler = tokenizer(FILLER, add_special_tokens=False)["input_ids"]
     question_ids = tokenizer(question, add_special_tokens=False)["input_ids"]
@@ -111,9 +162,18 @@ def completed_keys(path):
     return {(r["length"], r["seed"], r["arm"]) for r in rows}, rows
 
 
-def recall_of(text, values):
+def recall_of(text, values, value_style="words"):
+    """Whether every planted value came back.
+
+    `words` matches the value as a whole word (a substring hit would count
+    "gondola" inside "gondolas"); `digits` compares digit runs, so separators and
+    punctuation around the numbers do not decide the score.
+    """
+    if value_style == "digits":
+        found = {run.lstrip("0") or "0" for run in re.findall(r"\d+", text)}
+        return 1.0 if all((v.lstrip("0") or "0") in found for v in values) else 0.0
     low = text.lower()
-    return 1.0 if all(v.lower() in low for v in values) else 0.0
+    return 1.0 if all(re.search(rf"\b{re.escape(v.lower())}\b", low) for v in values) else 0.0
 
 
 def main(argv=None):
@@ -141,6 +201,18 @@ def main(argv=None):
     parser.add_argument("--yarn", default="auto", choices=["auto", "off"],
                         help="`auto` applies YaRN rope scaling with "
                              "factor = length / trained window, identically to both arms")
+    parser.add_argument("--value-style", default="digits", choices=["words", "digits"],
+                        help="what the needle holds; `digits` is what this checkpoint "
+                             "answers (see build_haystack for the width argument)")
+    parser.add_argument("--value-digits", type=int, default=2,
+                        help="digit width of a `digits` value: every digit is a separate "
+                             "token here, so a wide value adds generation noise to a "
+                             "retrieval measurement")
+    parser.add_argument("--answer-prefix", action=argparse.BooleanOptionalAction,
+                        default=True,
+                        help="open the answer for the model ('The magic numbers are'); "
+                             "without it this checkpoint re-lists the question's keys, "
+                             "so every arm scores zero and the row measures nothing")
     parser.add_argument("--out", required=True)
     args = parser.parse_args(argv)
 
@@ -172,7 +244,10 @@ def main(argv=None):
               flush=True)
         for seed in range(args.seeds):
             prompt, ids, needle_positions, values, keys = build_haystack(
-                tokenizer, length, args.items, seed)
+                tokenizer, length, args.items, seed,
+                answer_prefix=getattr(args, "answer_prefix", True),
+                value_style=getattr(args, "value_style", "digits"),
+                value_digits=getattr(args, "value_digits", 2))
             tensor = torch.tensor([ids], device="cuda")
             true_length = int(tensor.shape[1])
             torch.cuda.reset_peak_memory_stats()
@@ -182,9 +257,15 @@ def main(argv=None):
             # exactly the mask a chunk needs when it is the last n positions of the
             # cached keys, and the fused kernel keeps the prefill at a few hundred MiB
             # instead of tens of GiB (report 3.34)
+            # a preallocated cache: `DynamicCache` grows by `torch.cat`, so at 1M it
+            # needs the old 12.0 GiB and the new 12.0 GiB alive at once and dies in
+            # `update` (measured, 22.65 GiB allocated); writing into a fixed buffer
+            # also makes every append O(chunk) instead of O(sequence) - report 3.38
+            cache = preallocated_cache_for(model, true_length + args.max_new + 8)
             cache, logits, captured = L.prefill_capture(model, tensor, args.obs,
                                                         args.prefill_chunk,
-                                                        attention_mask=False, flash=True)
+                                                        attention_mask=False, flash=True,
+                                                        cache=cache)
             torch.cuda.synchronize()
             prefill_s = time.time() - started
             peak_gib = round(torch.cuda.max_memory_allocated() / 2 ** 30, 2)
@@ -232,7 +313,9 @@ def main(argv=None):
                 row = {
                     "length": length, "true_tokens": true_length, "seed": seed,
                     "items": args.items, "arm": arm,
-                    "recall": recall_of(text, values), "prediction": text,
+                    "recall": recall_of(text, values,
+                                        getattr(args, "value_style", "digits")),
+                    "prediction": text, "values": values, "keys": keys,
                     "needle_positions": needle_positions[:8],
                     "rope_scaling": getattr(config, "rope_scaling", None),
                     "prefill_s": round(prefill_s, 1),
