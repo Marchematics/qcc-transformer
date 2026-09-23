@@ -1834,6 +1834,29 @@ patched path while printing peak memory per chunk, and check whether the per-lay
 replacement is actually active in the harness process (it returns True in-process here,
 but a silent fall-back to the stock path would produce exactly this footprint).
 
+### 3.36 The fused kernel *is* called; the footprint still grows with length
+
+The counter check that settled the dispatch-table question settles this one too:
+with the per-layer replacement installed, a 2,201-token prefill through
+`prefill_capture(flash=True)` makes **120 `flash_attn_func` calls** (24 layers x 5
+chunks) and fills the cache to the full sequence, so the replacement is what runs.
+
+Its footprint is the puzzle: **3.87 GiB peak for 2,201 tokens**, of which the weights
+are 0.93 GiB and the KV 26 MiB. The same call at 32K on a card that was completely free
+(24,117 MiB) filled the GPU and OOMed, so the residual scales with length even though
+the fused kernel is doing the attention. Candidates, in the order worth testing:
+
+1. the cache object preallocating to `max_position_embeddings` (set to 140,000 here for
+   YaRN) rather than growing with the sequence;
+2. something in the patched forward per chunk that is `O(total keys)` rather than
+   `O(chunk)` - the rope tables, a mask, or a full-tensor `contiguous()`;
+3. allocator fragmentation across 24 layers x many chunks.
+
+Each is a one-line probe (`torch.cuda.memory_allocated()` around the cache construction,
+around the rope call, and per chunk). Until one of them is identified, the 1M retrieval
+and 1M TPOT rows stay unmeasured - the correction recorded in 3.35 stands: earlier
+figures for a 128K prefill in this harness are not usable.
+
 ## 4. What this establishes, and what it does not
 
 Establishes (every number produced by the shipped `compile_bounded_cache`, see
