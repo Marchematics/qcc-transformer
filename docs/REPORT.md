@@ -1817,13 +1817,15 @@ Three fixes since 3.34, each verified:
   expensive part of that harness with nothing to add to what the row measures.
 
 The primitive is not the limit: `flash_attn_func(q, k, v, causal=True)` does
-2,048 x 131,072 with GQA in **0.83 s and 0.07 GiB**. What remains is the harness's own
-stages — a full-pipeline 128K run with one needle still produced no output in nine
-minutes (no OOM) — so the next step is per-stage accounting
-(`torch.cuda.max_memory_allocated()` around `build_haystack`, `prefill_capture`,
-`obs_scores`, selection and each arm's decode) rather than any further work on the
-attention operator. The 1M retrieval, 1M TPOT and 128K TPOT-ratio rows stay unmeasured
-until that lands.
+2,048 x 131,072 with GQA in **0.83 s and 0.07 GiB**. Neither is the model path: an
+isolated `prefill_capture(flash=True)` at 128K is 3.2 s. **The stall is the harness's
+prompt builder**, and it is on the CPU: timing `build_haystack(tokenizer, 131072, 4, 0)`
+alone — no model, no GPU — did not return within seven minutes. That is the piece to
+fix, and the fix is to build the prompt in *token* space (splice the needle statements'
+token ids into the filler ids and skip the detokenise/re-tokenise round trip that the
+current builder performs once per needle plus once for the offsets pass over a 1.5 MB
+string). Once that returns in seconds, the 128K and 1M rows are a matter of running the
+already verified prefill path; until then they stay unmeasured.
 
 ## 4. What this establishes, and what it does not
 
