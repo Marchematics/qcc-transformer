@@ -31,7 +31,8 @@ def _run(model, cache, ids, chunk):
         end = min(ids.shape[1], start + chunk)
         position = torch.arange(start, end)
         out = model(ids[:, start:end], past_key_values=cache, use_cache=True,
-                    cache_position=position, position_ids=position.unsqueeze(0))
+                    cache_position=position,
+                    position_ids=position.unsqueeze(0).expand(ids.shape[0], -1))
         logits = out.logits[:, -1:]
     return logits
 
@@ -110,6 +111,43 @@ def test_overrunning_the_buffer_grows_correctly_and_says_so():
         assert torch.equal(layer.values, ref_layer.values)
     cache.reset()
     assert cache.overflowed is False and cache.get_seq_length() == 0
+
+
+def test_batched_cache_matches_dynamic_cache():
+    """A batch is the geometry the TPOT question needs: at batch > 1 the per-step weight
+    read amortises and the cache decides the step, so the cache has to support it."""
+    from transformers import DynamicCache
+    model = tiny_model()
+    torch.manual_seed(0)
+    ids = torch.randint(1, model.config.vocab_size, (3, 32))
+    dynamic, preallocated = DynamicCache(), preallocated_cache_for(model, 64, batch=3)
+    ref = _run(model, dynamic, ids, 16)
+    got = _run(model, preallocated, ids, 16)
+    assert torch.equal(got, ref)
+    assert preallocated.get_seq_length() == ids.shape[1]
+    for layer, ref_layer in zip(preallocated.layers, dynamic.layers):
+        assert layer.keys.shape[0] == 3                    # one buffer row per batch row
+        assert torch.equal(layer.keys[:, :, :ids.shape[1]], ref_layer.keys)
+        assert torch.equal(layer.values[:, :, :ids.shape[1]], ref_layer.values)
+
+
+def test_batched_decode_appends_per_row():
+    from transformers import DynamicCache
+    model = tiny_model()
+    torch.manual_seed(0)
+    ids = torch.randint(1, model.config.vocab_size, (2, 24))
+    dynamic, preallocated = DynamicCache(), preallocated_cache_for(model, 64, batch=2)
+    reference = _run(model, dynamic, ids, 24)
+    _run(model, preallocated, ids, 24)
+    token = reference.argmax(-1)
+    position = torch.tensor([ids.shape[1]])
+    pos_ids = position.unsqueeze(0).expand(token.shape[0], -1)
+    ref_out = model(token, past_key_values=dynamic, use_cache=True,
+                    cache_position=position, position_ids=pos_ids)
+    out = model(token, past_key_values=preallocated, use_cache=True,
+                cache_position=position, position_ids=pos_ids)
+    assert torch.equal(out.logits, ref_out.logits)
+    assert preallocated.get_seq_length() == ids.shape[1] + 1
 
 
 def test_reset_reuses_the_buffer_for_a_recompile():

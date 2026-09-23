@@ -34,9 +34,10 @@ class PreallocatedLayer(DynamicLayer):
     """
 
     def __init__(self, capacity: int, num_heads: int, head_dim: int,
-                 dtype: torch.dtype = torch.bfloat16, device="cpu"):
+                 dtype: torch.dtype = torch.bfloat16, device="cpu", batch: int = 1):
         self.capacity = int(capacity)
-        self.keys = torch.zeros(1, num_heads, self.capacity, head_dim,
+        self.batch = int(batch)
+        self.keys = torch.zeros(self.batch, num_heads, self.capacity, head_dim,
                                 dtype=dtype, device=device)
         self.values = torch.zeros_like(self.keys)
         self.dtype, self.device = dtype, device
@@ -117,11 +118,12 @@ class PreallocatedCache(DynamicCache):
     """`DynamicCache` with fixed buffers; appends are O(chunk), not O(sequence)."""
 
     def __init__(self, capacity: int, num_layers: int, num_heads: int, head_dim: int,
-                 dtype: torch.dtype = torch.bfloat16, device="cpu"):
+                 dtype: torch.dtype = torch.bfloat16, device="cpu", batch: int = 1):
         super().__init__()
         self.capacity = int(capacity)
+        self.batch = int(batch)
         self.layers = [PreallocatedLayer(self.capacity, num_heads, head_dim,
-                                         dtype=dtype, device=device)
+                                         dtype=dtype, device=device, batch=batch)
                        for _ in range(int(num_layers))]
         # layers are created here, so the lazy-replication path must not run
         self.layer_class_to_replicate = None
@@ -131,7 +133,7 @@ class PreallocatedCache(DynamicCache):
             template = self.layers[-1]
             self.layers.append(PreallocatedLayer(
                 self.capacity, template.keys.shape[1], template.keys.shape[-1],
-                dtype=template.dtype, device=template.device))
+                dtype=template.dtype, device=template.device, batch=template.batch))
         return self.layers[layer_idx].update(key_states, value_states, *args, **kwargs)
 
     def get_seq_length(self, layer_idx: int = 0) -> int:
@@ -157,7 +159,8 @@ class PreallocatedCache(DynamicCache):
 
 
 def preallocated_cache_for(model, capacity: int, device=None,
-                           dtype: torch.dtype | None = None) -> PreallocatedCache:
+                           dtype: torch.dtype | None = None,
+                           batch: int = 1) -> PreallocatedCache:
     """Size a cache for `model` to hold exactly `capacity` tokens.
 
     Reads the KV geometry from the config (grouped-query models store far fewer KV
@@ -176,5 +179,5 @@ def preallocated_cache_for(model, capacity: int, device=None,
         default_dtype, default_device = torch.bfloat16, "cpu"
     return PreallocatedCache(
         capacity=capacity, num_layers=int(config.num_hidden_layers),
-        num_heads=num_heads, head_dim=head_dim,
+        num_heads=num_heads, head_dim=head_dim, batch=batch,
         dtype=dtype or default_dtype, device=device or default_device)

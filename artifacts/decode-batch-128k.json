@@ -1,0 +1,113 @@
+{
+ "config": {
+  "model": "/root/qcc/models/Qwen2.5-0.5B-Instruct",
+  "contexts": [
+   131072
+  ],
+  "budget": 4632,
+  "batches": [
+   1,
+   2,
+   4,
+   8
+  ],
+  "steps": 12,
+  "prefill_chunk": 8192,
+  "attn_impl": "flash_attention_2",
+  "no_graph": false,
+  "out": "artifacts/decode-batch-128k.json"
+ },
+ "results": [
+  {
+   "context": 131072,
+   "arm": "full",
+   "batch": 1,
+   "cache_keys": 131087,
+   "wall_ms_per_step": 20.046519115567207,
+   "steps": 11,
+   "graph_ms_per_step": 6.826359429396689
+  },
+  {
+   "context": 131072,
+   "arm": "bounded",
+   "batch": 1,
+   "cache_keys": 4647,
+   "wall_ms_per_step": 20.470505580306053,
+   "steps": 11,
+   "graph_ms_per_step": 3.780691768042743
+  },
+  {
+   "context": 131072,
+   "arm": "full",
+   "batch": 2,
+   "cache_keys": 131087,
+   "wall_ms_per_step": 21.097706630825996,
+   "steps": 11,
+   "graph_ms_per_step": 9.574618306942284
+  },
+  {
+   "context": 131072,
+   "arm": "bounded",
+   "batch": 2,
+   "cache_keys": 4647,
+   "wall_ms_per_step": 20.586276426911354,
+   "steps": 11,
+   "graph_ms_per_step": 4.551958292722702
+  },
+  {
+   "context": 131072,
+   "arm": "full",
+   "batch": 4,
+   "cache_keys": 131087,
+   "wall_ms_per_step": 20.937783643603325,
+   "steps": 11,
+   "graph_ms_per_step": 14.66906606219709
+  },
+  {
+   "context": 131072,
+   "arm": "bounded",
+   "batch": 4,
+   "cache_keys": 4647,
+   "wall_ms_per_step": 20.665552467107773,
+   "steps": 11,
+   "graph_ms_per_step": 4.838883527554572
+  },
+  {
+   "context": 131072,
+   "arm": "full",
+   "batch": 8,
+   "cache_keys": 131087,
+   "wall_ms_per_step": 25.783225893974304,
+   "steps": 11,
+   "graph_ms_per_step": 24.581982288509607
+  },
+  {
+   "context": 131072,
+   "arm": "bounded",
+   "batch": 8,
+   "cache_keys": 4647,
+   "wall_ms_per_step": 21.34092152118683,
+   "steps": 11,
+   "graph_ms_per_step": 5.27654611505568
+  }
+ ],
+ "ratios": {
+  "ctx131072_batch1": {
+   "wall_ratio": 0.9792879338971116,
+   "graph_ratio": 1.8055847575563353
+  },
+  "ctx131072_batch2": {
+   "wall_ratio": 1.0248432593300882,
+   "graph_ratio": 2.103406422297278
+  },
+  "ctx131072_batch4": {
+   "wall_ratio": 1.01317318648649,
+   "graph_ratio": 3.03149806740862
+  },
+  "ctx131072_batch8": {
+   "wall_ratio": 1.2081589760956315,
+   "graph_ratio": 4.658725945437929
+  }
+ },
+ "honesty": "both arms share the operator and the capture path; the ratio is full-KV per-step divided by bounded per-step at the same batch"
+}

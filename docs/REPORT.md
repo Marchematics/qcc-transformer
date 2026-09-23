@@ -2072,6 +2072,27 @@ of this section quoted them:
   1,048,583 keys it reports 83.10 ms per step against a 25.74 ms wall step, which cannot
   both be true. The probe now records `profile_exceeds_wall` for such rows and the
   absolute statements above use only wall differences.
+**The 128K row, and what batch does to it.** At batch 1 the launch-free ratio is 1.81x
+because 131K keys add only 3.1 ms to a step whose floor is the model's own weight read.
+Serving does not run at batch 1, so `benchmarks/probe_decode_batch.py` measures the same
+matched arms, launch-free, as the batch grows (Qwen2.5-0.5B, 131,072 keys, 4,632-slot
+budget):
+
+| batch | exact ms/step | bounded ms/step | launch-free ratio | wall ratio |
+|---:|---:|---:|---:|---:|
+| 1 | 6.83 | 3.78 | 1.81x | 0.98x |
+| 2 | 9.57 | 4.55 | 2.10x | 1.02x |
+| 4 | 14.67 | 4.84 | 3.03x | 1.01x |
+| 8 | 24.58 | 5.28 | **4.65x** | 1.21x |
+| 16 | **infeasible** | 6.19 | - | - |
+
+The ratio is monotone in batch, and at batch 16 the exact arm cannot be run at all: its
+cache alone is 131,072 x 12,288 B x 16 = **25.8 GiB** against a 23.55 GiB card, while the
+bounded arm's whole batch is 0.85 GiB and costs 6.19 ms/step. So the 128K target is not
+met as measured (best 4.65x at batch 8, launch-free), and the batch where this checkpoint
+would cross 5x is the batch where the exact baseline stops fitting - which is the same
+capacity argument the 1M state rows make, arriving from the latency side.
+
 * **Capture is refused on the flash decode path but works on the SDPA one.**
   `torch.cuda.graph` raises "operation not permitted when stream is capturing" with the
   delegated `flash_attention_2` decode, so the launch cost was captured away on the
@@ -2249,10 +2270,10 @@ holds the full KV transiently. Two candidate directions:
 |---|---|---|---|
 | Full-KV task quality, aggregate | >= 99% | **met** | RULER 1.0071 (A2), LongBench 1.0049 (A13) |
 | Full-KV task quality, worst task | >= 97% | **met for RULER (1.000)**; LongBench worst task 0.897 at the 4,608-slot budget and 1.020 at 8,704 (3.28, A17) |
-| 1M retrieval | >= 99.5% | **measured, not met, and not by the cache**: at 1M the exact Full-KV arm itself scores 0 (asked for `97` it answers `53`), so no retention policy can reach 99.5% there; the single-needle protocol is at parity one length down (128K: exact 2 of 2, bounded 1 of 2). A 12 KiB/token checkpoint is the only 1M-feasible Full-KV configuration on this card (3.40, A24) |
+| 1M retrieval | >= 99.5% | **measured, not met, and not by the cache**: at 1M the exact Full-KV arm itself scores 0 - with post-hoc YaRN it answers `53` for `97`, and **with no rope scaling at all it degenerates into repetition** (`to the change the change the change`), so the limit is the checkpoint rather than the rope setting; the single-needle protocol is at parity one length down (128K: exact 2 of 2, bounded 1 of 2). A 12 KiB/token checkpoint is the only 1M-feasible Full-KV configuration on this card (3.40, A24) |
 | History state | O(1) / bounded | **met** | 4,608 slots and 144 MiB at every length (A7); 4,632 slots and **54.0 MiB** at 1M under the 1M harness's budget (A23) |
 | 128K -> 1M state growth | <= 1.25x, ideally ~1x | **met at the ideal value: 1.00x** - 54.0 MiB at 128K and at 1M, against 1,500.0 MiB and 12,288.0 MiB for the exact cache (A23); the earlier 1.00x to 256K is superseded by the measurement at 1M |
-| 128K TPOT | >= 5x Full-KV | **not met: 1.81x launch-free** (6.84 vs 3.78 ms/step) and 1.07x on the wall clock (24.88 vs 23.27 ms). 131K keys add only 3.1 ms to a step of this 12 KiB/token model, so 5x at 128K needs the heavier geometry where the earlier 4.9-5.0x was measured (Llama-3.2-1B, 32 KiB/token) (A25, 3.40) |
+| 128K TPOT | >= 5x Full-KV | **not met as measured: 4.65x at batch 8** launch-free (24.58 vs 5.28 ms/step), 1.81x at batch 1, and 0.98-1.21x on the wall clock. The ratio is monotone in batch, but at batch 16 the exact arm's cache alone needs 25.8 GiB against a 23.55 GiB card while the bounded arm runs at 6.19 ms/step in 0.85 GiB - the batch where this checkpoint would cross 5x is the batch where the exact baseline stops fitting (A25, 3.40) |
 | 1M TPOT | >= 5x Full-KV | **met in the launch-free measurement: 6.31x** (23.85 vs 3.78 ms/step, same operator, CUDA-graph captured); the same arms measure 1.12x on the wall clock because ~16 ms/step of host launch overhead sits in both (A25, 3.40) |
 | Throughput | >= 3x | **met** | 15.6x speed configuration, 5.0x quality configuration (3.8) |
 | Fixed-SLA concurrency | >= 8x | **met** | 8-16x at a 50 ms SLA (3.18) |
