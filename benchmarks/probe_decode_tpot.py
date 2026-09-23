@@ -42,18 +42,35 @@ from benchmarks import benchmark_bounded_decode_frontier as L  # noqa: E402
 
 
 def build_cache(model, size, chunk, device):
-    """A cache holding exactly `size` keys, built by an exact chunked prefill."""
+    """A cache holding exactly `size` keys, built by an exact chunked prefill.
+
+    The cache is preallocated.  `DynamicCache` grows by `torch.cat`, so at 1M every chunk
+    copies a growing 12 GiB tensor and needs the old and the new one alive at once: the
+    1M prefill measured 850.65 s with a fixed buffer in the harness, and did not finish
+    in 25 minutes here with `DynamicCache` (report 3.38, 3.40).
+    """
+    from qcc_transformer.preallocated_cache import preallocated_cache_for
+
     ids = torch.randint(1, 1000, (1, size), device=device)
+    cache = preallocated_cache_for(model, size + 8, device=device)
     cache, logits, _tails = L.prefill_capture(model, ids, obs=64, chunk=chunk,
-                                              attention_mask=False, flash=True)
+                                              attention_mask=False, flash=True,
+                                              cache=cache)
     return cache, logits[:, -1:].argmax(-1)
 
 
 @torch.no_grad()
-def time_decode(model, cache, first, steps, device):
-    """Per-step seconds, medians over `steps` single-token decodes."""
+def time_decode(model, cache, first, steps, device, use_mask=True):
+    """Per-step seconds, medians over `steps` single-token decodes.
+
+    ``use_mask=False`` passes no attention mask.  With a cache, causality and the
+    absolute positions already determine the mask, so it is redundant - and it is worth
+    measuring because the harness passed one and the per-step cost turned out to be
+    dominated by something that does not scale with the cache (a 4,632-slot decode costs
+    the same as a 131,092-slot one).
+    """
     kept = cache.get_seq_length()
-    mask = torch.ones(1, kept + 1, device=device, dtype=torch.long)
+    mask = (torch.ones(1, kept + 1, device=device, dtype=torch.long) if use_mask else None)
     cur, times = first, []
     for step in range(steps):
         position = torch.tensor([kept + step], device=device)
@@ -65,12 +82,51 @@ def time_decode(model, cache, first, steps, device):
         cur = out.logits[:, -1:].argmax(-1)
         torch.cuda.synchronize()
         times.append(time.perf_counter() - started)
-        mask = torch.cat([mask, torch.ones(1, 1, device=device, dtype=torch.long)], dim=1)
+        if use_mask:
+            mask = torch.cat([mask, torch.ones(1, 1, device=device, dtype=torch.long)],
+                             dim=1)
     times = times[1:]                                   # drop the first (warm-up) step
     return {"median_ms": 1000.0 * statistics.median(times),
             "min_ms": 1000.0 * min(times),
             "p95_ms": 1000.0 * sorted(times)[max(0, int(0.95 * len(times)) - 1)],
             "steps": len(times)}
+
+
+@torch.no_grad()
+def profile_decode(model, cache, first, steps, device, use_mask=True):
+    """Profiler kernel time per step - an upper bound, not the GPU busy time.
+
+    A CUDA graph would give the clean number, but capture is not permitted on this
+    stack's flash decode path ("operation not permitted when stream is capturing"), so
+    the kernel time is summed instead.  CUPTI serializes the ~600 launches of a decode
+    step, so the sum includes the bubbles it introduces: at 1,048,583 keys it reports
+    83.10 ms per step against a 25.74 ms wall step.  Treat this as a ranking with a
+    known inflation, and use the wall difference between cache sizes for any absolute
+    statement (see `profile_exceeds_wall` in the artifact).
+    """
+    from torch.profiler import ProfilerActivity, profile
+
+    kept = cache.get_seq_length()
+    mask = torch.ones(1, kept + 1, device=device, dtype=torch.long) if use_mask else None
+    cur = first.clone()
+
+    def step():
+        out = model(cur, **L.model_kwargs(
+            model, past_key_values=cache, attention_mask=mask,
+            cache_position=torch.tensor([kept], device=device),
+            position_ids=torch.tensor([[kept]], device=device), use_cache=True))
+        cur.copy_(out.logits[:, -1:].argmax(-1))
+
+    for _ in range(2):
+        step()
+    torch.cuda.synchronize()
+    with profile(activities=[ProfilerActivity.CUDA]) as prof:
+        for _ in range(steps):
+            step()
+        torch.cuda.synchronize()
+    # `self_device_time_total` is microseconds
+    total_us = sum(event.self_device_time_total for event in prof.key_averages())
+    return {"gpu_ms_per_step": total_us / 1000.0 / steps, "steps": steps}
 
 
 def main(argv=None):
@@ -82,6 +138,17 @@ def main(argv=None):
     parser.add_argument("--prefill-chunk", type=int, default=8192)
     parser.add_argument("--attn-impl", default="flash_attention_2")
     parser.add_argument("--decode", choices=["flash", "sdpa", "both"], default="both")
+    parser.add_argument("--passes", type=int, default=2,
+                        help="repeat the wall sweep per cache size; the step is "
+                             "host-bound, so a single sweep is at the edge of run-to-run "
+                             "host noise (two sweeps of the same code gave 22.6 ms flat "
+                             "across 512-131,072 keys and 27-28 ms with no trend)")
+    parser.add_argument("--profile", action=argparse.BooleanOptionalAction, default=True,
+                        help="also report a profiler kernel sum per step; it is "
+                             "CUPTI-serialized and can exceed the wall clock, so the "
+                             "artifact flags those rows (profile_exceeds_wall)")
+    parser.add_argument("--mask", choices=["on", "off", "both"], default="both",
+                        help="whether the decode step passes an explicit attention mask")
     parser.add_argument("--out", required=True)
     args = parser.parse_args(argv)
 
@@ -92,25 +159,73 @@ def main(argv=None):
         args.model, dtype=torch.bfloat16, attn_implementation=args.attn_impl).to(device).eval()
     L.TOKENIZER = None
     rows = []
-    for operator in (["flash", "sdpa"] if args.decode == "both" else [args.decode]):
-        L.install_flash_layer_attn(model, delegate_decode=(operator == "flash"))
-        print(f"[decode {operator}] attn_impl={args.attn_impl}", flush=True)
-        for size in args.sizes:
-            torch.cuda.empty_cache()
-            cache, first = build_cache(model, size, args.prefill_chunk, device)
-            stats = time_decode(model, cache, first, args.steps, device)
-            row = {"decode": operator, "cache_keys": int(cache.get_seq_length()), **stats}
-            rows.append(row)
-            print(f"   {size:>8d} keys  tpot {stats['median_ms']:8.2f} ms "
-                  f"(min {stats['min_ms']:.2f}, p95 {stats['p95_ms']:.2f})", flush=True)
-            del cache
-            torch.cuda.empty_cache()
-    payload = {"config": vars(args), "results": rows}
+    masks = [True, False] if args.mask == "both" else [args.mask == "on"]
+    operators = ["flash", "sdpa"] if args.decode == "both" else [args.decode]
+    # size outer, operator inner: a cache is built once and reused for every operator and
+    # every pass, because building one is the expensive part - at 1M it is a 850 s exact
+    # prefill, and an earlier version of this probe paid it twice (once for the wall pass,
+    # once for the profiler pass)
+    for size in args.sizes:
+        torch.cuda.empty_cache()
+        cache, first = build_cache(model, size, args.prefill_chunk, device)
+        keys = int(cache.get_seq_length())
+        for operator in operators:
+            L.install_flash_layer_attn(model, delegate_decode=(operator == "flash"))
+            print(f"[decode {operator}] attn_impl={args.attn_impl} keys={keys}", flush=True)
+            for use_mask in masks:
+                for sweep in range(max(1, args.passes)):
+                    stats = time_decode(model, cache, first, args.steps, device,
+                                        use_mask=use_mask)
+                    rows.append({"decode": operator, "mask": use_mask, "sweep": sweep,
+                                 "cache_keys": keys, **stats})
+                    print(f"   {size:>8d} keys mask={int(use_mask)} sweep={sweep}  "
+                          f"tpot {stats['median_ms']:8.2f} ms "
+                          f"(min {stats['min_ms']:.2f}, p95 {stats['p95_ms']:.2f})",
+                          flush=True)
+            if args.profile:
+                stats = profile_decode(model, cache, first, 5, device)
+                rows.append({"decode": operator, "mask": True, "profile": True,
+                             "cache_keys": keys, **stats})
+                print(f"   {size:>8d} keys profile  "
+                      f"gpu {stats['gpu_ms_per_step']:8.2f} ms", flush=True)
+        del cache
+        torch.cuda.empty_cache()
+    # The profiler sum is CUPTI-serialized and can exceed the wall clock it is supposed
+    # to decompose (measured: 83.10 ms/step of "GPU" time at 1,048,583 keys against a
+    # 25.74 ms wall step, which is impossible for one step).  Flag it in the artifact
+    # rather than quoting it: the wall difference between cache sizes is the quantity
+    # that survives the check.
+    for row in rows:
+        if not row.get("profile"):
+            continue
+        wall = [r["median_ms"] for r in rows
+                if not r.get("profile") and r.get("cache_keys") == row["cache_keys"]]
+        row["wall_ms_same_cache"] = wall[0] if wall else None
+        row["profile_exceeds_wall"] = bool(wall) and row["gpu_ms_per_step"] > wall[0]
+    sweeps = {}
+    for row in rows:
+        if row.get("profile"):
+            continue
+        key = (row["decode"], row["mask"], row["cache_keys"])
+        sweeps.setdefault(key, []).append(row["median_ms"])
+    summary = {f"{op}|mask{int(mask)}|{keys}": {
+        "passes": len(values), "per_pass_ms": [round(v, 2) for v in values],
+        "best_ms": round(min(values), 2),
+        "spread_ms": round(max(values) - min(values), 2)}
+        for (op, mask, keys), values in sorted(sweeps.items(), key=lambda kv: kv[0][2])}
+    payload = {"config": vars(args), "sweep_summary": summary, "results": rows,
+               "honesty": ("per-step wall time is the measured quantity; the profiler "
+                           "kernel sum is retained only when it is below the wall time "
+                           "for the same cache (see profile_exceeds_wall)")}
     Path(args.out).write_text(json.dumps(payload, indent=1))
-    for operator in sorted({r["decode"] for r in rows}):
-        sizes = [r for r in rows if r["decode"] == operator]
-        print(f"[{operator}] " + "  ".join(
-            f"{r['cache_keys']}:{r['median_ms']:.2f}ms" for r in sizes))
+    for operator, mask, kind in sorted({(r["decode"], r["mask"],
+                                        "gpu" if r.get("profile") else "wall")
+                                        for r in rows}):
+        sizes = [r for r in rows if r["decode"] == operator and r["mask"] == mask
+                 and ("gpu" if r.get("profile") else "wall") == kind]
+        key = "gpu_ms_per_step" if kind == "gpu" else "median_ms"
+        print(f"[{operator} mask={int(mask)} {kind}] " + "  ".join(
+            f"{r['cache_keys']}:{r[key]:.2f}ms" for r in sizes))
     print("wrote", args.out)
     return 0
 

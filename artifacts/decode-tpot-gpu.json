@@ -1,0 +1,88 @@
+{
+ "config": {
+  "model": "/root/qcc/models/Qwen2.5-0.5B-Instruct",
+  "sizes": [
+   512,
+   4632,
+   32768,
+   131072
+  ],
+  "steps": 24,
+  "prefill_chunk": 8192,
+  "attn_impl": "flash_attention_2",
+  "decode": "flash",
+  "profile": true,
+  "mask": "on",
+  "out": "artifacts/decode-tpot-gpu.json"
+ },
+ "results": [
+  {
+   "decode": "flash",
+   "mask": true,
+   "cache_keys": 536,
+   "median_ms": 21.68780006468296,
+   "min_ms": 21.444201469421387,
+   "p95_ms": 21.865226328372955,
+   "steps": 23
+  },
+  {
+   "decode": "flash",
+   "mask": true,
+   "cache_keys": 4656,
+   "median_ms": 21.593354642391205,
+   "min_ms": 21.383419632911682,
+   "p95_ms": 21.7053834348917,
+   "steps": 23
+  },
+  {
+   "decode": "flash",
+   "mask": true,
+   "cache_keys": 32792,
+   "median_ms": 21.800914779305458,
+   "min_ms": 21.45244926214218,
+   "p95_ms": 21.97342738509178,
+   "steps": 23
+  },
+  {
+   "decode": "flash",
+   "mask": true,
+   "cache_keys": 131096,
+   "median_ms": 21.87950536608696,
+   "min_ms": 21.59937471151352,
+   "p95_ms": 22.462720051407814,
+   "steps": 23
+  },
+  {
+   "decode": "flash",
+   "mask": true,
+   "profile": true,
+   "cache_keys": 519,
+   "gpu_ms_per_step": 5127.460800000028,
+   "steps": 5
+  },
+  {
+   "decode": "flash",
+   "mask": true,
+   "profile": true,
+   "cache_keys": 4639,
+   "gpu_ms_per_step": 5647.4730000000145,
+   "steps": 5
+  },
+  {
+   "decode": "flash",
+   "mask": true,
+   "profile": true,
+   "cache_keys": 32775,
+   "gpu_ms_per_step": 9284.786600000125,
+   "steps": 5
+  },
+  {
+   "decode": "flash",
+   "mask": true,
+   "profile": true,
+   "cache_keys": 131079,
+   "gpu_ms_per_step": 20532.85879999987,
+   "steps": 5
+  }
+ ]
+}

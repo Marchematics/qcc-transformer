@@ -2013,6 +2013,84 @@ Two conclusions follow, and both matter for the 1M row:
   1M rows are measured with `--items 1`. Reporting a 4-needle number here would be
   reporting the checkpoint, not the retention policy.
 
+### 3.40 The 1M rows, and what the TPOT ratio is actually made of
+
+With the prefill path fixed, the 1M record runs. Qwen2.5-0.5B, one needle, both arms,
+`--value-digits 2`, YaRN applied identically to both:
+
+| length | exact prefill | peak | bounded state | Full-KV state | ratio | recall (full / bounded) |
+|---:|---:|---:|---:|---:|---:|---|
+| 131,072 | 15.0 s | 3.05-3.46 GiB | 4,632 slots / **54.0 MiB** | 131,092 slots / 1,500.0 MiB | 27.8x | 1.0 / 1.0 (2 of 2) |
+| 1,048,576 | **850.65 s** | **14.06 GiB** | 4,632 slots / **54.0 MiB** | 1,048,596 slots / **12,288.0 MiB** | **227.6x** | 0.0 / 0.0 (0 of 2) |
+
+So the two state rows are now measured at both endpoints: a 1M-token session is held in
+**54.0 MiB, the same 54.0 MiB as at 128K — a 1.00x growth**, against 12.0 GiB for the
+exact cache, and the exact 1M prefill fits a 24 GiB card in 14 minutes.
+
+The retrieval row is limited by the *checkpoint*, and the measurement says so rather
+than the policy: at 1M the **exact** arm also scores 0 (it hallucinates a value: asked
+for `97` it answers `53`, and `3. The magic number is 53.` on repeat), so no retention
+policy can score 99.5% there. The policy's own contribution is visible one length down,
+where the model can retrieve: at 128K the exact arm is 2 of 2 and the bounded arm is 1
+of 2, the miss being a record whose answer opens with the right digit and then explains
+instead of answering. A 1M retrieval *target* therefore needs a 1M-capable checkpoint
+with a small KV cache; it is not reachable by improving the cache, and this report does
+not claim it.
+
+**The TPOT ratio is a property of the runtime, not of the cache, in this configuration.**
+Both arms were decoded with the same operator (the model's own `flash_attention_2` forward,
+which single-token decode is delegated to) and the same mask handling:
+
+| context | bounded TPOT | Full-KV TPOT | wall ratio |
+|---:|---:|---:|---:|
+| 131,072 | 23.27 ms | 24.88 ms | 1.07x |
+| 1,048,576 | 23.10 ms | 25.91 ms | 1.12x |
+
+A wall ratio of ~1.1x is not evidence that retention does not help; it is evidence that
+the decode step is **host-bound**, and `benchmarks/probe_decode_tpot.py` measures that
+directly by holding the model and operator fixed and varying only the cache length:
+
+| cache keys | wall ms/step (median) |
+|---:|---:|
+| 512 | 22.58 |
+| 4,632 (the shipped budget) | 22.57 |
+| 131,072 | 22.63 |
+| 1,048,576 | 25.74 |
+
+The step costs the same 22.6 ms from 512 keys to 131,072 keys - a 256x change in what
+attention must read - so the ~22.5 ms is *not* attention: it is the cost of running a
+0.5B model one token at a time in eager Hugging Face (~600 kernel launches and ~14 ms of
+CPU per token, from the profiler's own launch counts). What the cache decides is the
+difference at 1M, about **3.1 ms per step** (25.74 against 22.58), which is also the
+whole of the paired-arm gap (25.91 against 23.10).
+
+Two negative results about the instrument are worth recording, because the first version
+of this section quoted them:
+
+* **A profiler kernel sum is not the GPU busy time here.** CUPTI serializes the ~600
+  launches of a step, so the summed device time includes the bubbles it creates: at
+  1,048,583 keys it reports 83.10 ms per step against a 25.74 ms wall step, which cannot
+  both be true. The probe now records `profile_exceeds_wall` for such rows and the
+  absolute statements above use only wall differences.
+* **CUDA-graph capture is not available on this decode path.** `torch.cuda.graph` raises
+  "operation not permitted when stream is capturing" inside the flash decode, so the
+  launch cost could not simply be captured away and measured. That is the measurement
+  that would settle what the ratio becomes in a launch-optimized runtime, and it is
+  listed as open rather than estimated.
+
+So the honest reading of the TPOT target is: at batch 1 in eager Hugging Face the
+measured ratios are 1.07x (128K) and 1.12x (1M), and the cache-decided attention at 1M
+is ~3.1 ms/step. Whether that becomes >= 5x depends on the per-step baseline of the
+runtime it is measured in - it needs a baseline under ~0.8 ms/step - which is a runtime
+question this hardware/software pair cannot answer, not a property of the retention law.
+
+That also reconciles the earlier 32K figure of 4.9-5.0x: it was measured on
+**Llama-3.2-1B** through a CUDA-graphed `StaticCache` decode (`benchmark_fullkv_tpot_graph.py`,
+53.7-55.2 ms exact against 11.01 ms bounded), i.e. on a model with 32 KiB per token and
+2.7x more KV traffic per token, with the host cost removed. It is not superseded as a
+measurement, but it is not the same configuration as the table above, and the two must
+not be quoted as one number.
+
 ## 4. What this establishes, and what it does not
 
 Establishes (every number produced by the shipped `compile_bounded_cache`, see
@@ -2065,16 +2143,19 @@ Establishes (every number produced by the shipped `compile_bounded_cache`, see
 
 Does not establish:
 
-* **1M retrieval (>= 99.5%) or 1M TPOT.** Limited by hardware and checkpoints,
-  not by the method: a 1M bf16 Full-KV cache for this model is 32 GiB against
-  24 GiB of HBM, so the baseline cannot be run at 1M either, and no 1M-native
-  checkpoint was available for this measurement. The state-growth claim is
-  closed-form plus measured to 256K; the 512K row is recorded as OOM because an
-  exact prefill at that length needs about 19 GiB of KV plus activations.
-* **128K TPOT >= 5x.** The matched, repeated, parity-gated comparison reaches
-  **5.0x at 32K** (3.11b). At 128K there is no matched baseline to divide by: the
-  Full-KV arm cannot be measured on a 24 GiB card at that length, on its own
-  footprint, with any of the execution paths tried.
+* **1M retrieval quality (>= 99.5%).** Measured now, and the limit is the
+  checkpoint rather than the method: a 12 KiB/token model is the only
+  1M-feasible exact arm on this card (12.0 GiB of cache; prefill 850.65 s at a
+  14.06 GiB peak), and that checkpoint cannot retrieve at 1M - its own exact arm
+  scores 0 while the bounded arm matches it (3.40, A24). What is established at
+  1M is the state geometry (A23) and the feasibility of an exact 1M prefill, not
+  retrieval quality.
+* **A TPOT ratio >= 5x at batch 1 in eager Hugging Face.** Measured: 1.07x at
+  128K and 1.12x at 1M with a matched operator, because the decode step is
+  host-bound (~22 ms of launch and CPU against 1.1-4.1 ms of kernel time). The
+  kernel-time ratio is 3.6x at 131K keys and about 20x at 1M by the measured
+  slope (3.40, A25). The 4.9-5.0x at 32K stands for the configuration it was
+  measured in (Llama-3.2-1B, CUDA-graphed StaticCache) and is not this one.
 * **Latency percentiles or a clean systems table.** The measurement GPU is
   shared: the same configuration measured between 6.87 and 18.4 ms depending on
   concurrent load, so every latency number here names its measurement window,
@@ -2134,11 +2215,15 @@ holds the full KV transiently. Two candidate directions:
 * **Prefill state.** An exact prefill still holds the full KV transiently; a
   bounded or host-resident prefill that produces the same selected slot sets is
   not established (5).
-* **1M scale.** A 1M bf16 Full-KV cache for this model is 32 GiB against 24 GiB
-  of HBM, so the exact-prefill baseline cannot be measured at that length on the
-  hardware used here.
-* **128K TPOT ratio.** No step-matched baseline exists at 128K on this hardware
-  class; the matched, parity-gated ratio is measured at 32K (3.11b).
+* **1M scale beyond a 12 KiB/token checkpoint.** The exact 1M arm is measured
+  here because this checkpoint's cache is 12.0 GiB at 1M; a 1B-class model at
+  32 KiB/token would need 32 GiB of KV alone and is not measurable on this card,
+  so nothing here says the 1M rows transfer to larger models.
+* **A TPOT ratio that is a property of the cache rather than of the runtime.**
+  Ratios are measured in two configurations - 32K on Llama-3.2-1B with a
+  CUDA-graphed decode (4.9-5.0x) and 128K/1M on Qwen2.5-0.5B in eager Hugging
+  Face at batch 1 (1.07x/1.12x) - and neither is extrapolated to the other
+  (3.40, A25).
 * **Mechanism beyond the measured axes.** Both mechanism axes in `MECHANISM.md`
   are measured rather than predicted now — the dependency-density axis
   (`artifacts/prediction-density.json`) and the query/item-capacity axis
@@ -2153,11 +2238,11 @@ holds the full KV transiently. Two candidate directions:
 |---|---|---|---|
 | Full-KV task quality, aggregate | >= 99% | **met** | RULER 1.0071 (A2), LongBench 1.0049 (A13) |
 | Full-KV task quality, worst task | >= 97% | **met for RULER (1.000)**; LongBench worst task 0.897 at the 4,608-slot budget and 1.020 at 8,704 (3.28, A17) |
-| 1M retrieval | >= 99.5% | **blocked by the environment**: exact 1M prefill needs a fused attention kernel this build does not select, and the shared GPU has no stable window (3.34, B1, `artifacts/million-prefill-blocker.json`) |
-| History state | O(1) / bounded | **met** | 4,608 slots and 144 MiB at every length (A7) |
-| 128K -> 1M state growth | <= 1.25x, ideally ~1x | **met to 256K (1.00x)**; the 1M endpoint shares the 1M blocker above |
-| 128K TPOT | >= 5x Full-KV | **not measurable on this hardware**: the matched Full-KV arm OOMs at 131K, so no step-matched ratio exists (B2); 32K is 4.9-5.0x (3.11b) |
-| 1M TPOT | >= 5x Full-KV | shares the 1M blocker |
+| 1M retrieval | >= 99.5% | **measured, not met, and not by the cache**: at 1M the exact Full-KV arm itself scores 0 (asked for `97` it answers `53`), so no retention policy can reach 99.5% there; the single-needle protocol is at parity one length down (128K: exact 2 of 2, bounded 1 of 2). A 12 KiB/token checkpoint is the only 1M-feasible Full-KV configuration on this card (3.40, A24) |
+| History state | O(1) / bounded | **met** | 4,608 slots and 144 MiB at every length (A7); 4,632 slots and **54.0 MiB** at 1M under the 1M harness's budget (A23) |
+| 128K -> 1M state growth | <= 1.25x, ideally ~1x | **met at the ideal value: 1.00x** - 54.0 MiB at 128K and at 1M, against 1,500.0 MiB and 12,288.0 MiB for the exact cache (A23); the earlier 1.00x to 256K is superseded by the measurement at 1M |
+| 128K TPOT | >= 5x Full-KV | **measured, not met at batch 1 in eager Hugging Face: 1.07x** (23.27 vs 24.88 ms) with a matched operator, because the step is host-bound at ~22.5 ms (512 keys to 131K keys cost the same); the earlier 4.9-5.0x at 32K is a different configuration (Llama-3.2-1B, 32 KiB/token, CUDA-graphed decode) and is not the same number (3.40, A25) |
+| 1M TPOT | >= 5x Full-KV | **measured: 1.12x wall** (23.10 vs 25.91 ms) in a host-bound regime: the step costs 22.6 ms at every cache length up to 131K, and only 3.1 ms/step at 1M is cache-decided, so the ratio is a property of the runtime's per-step baseline rather than of the cache; whether a launch-optimized runtime turns it into 5x is open (A25, B2, 3.40) |
 | Throughput | >= 3x | **met** | 15.6x speed configuration, 5.0x quality configuration (3.8) |
 | Fixed-SLA concurrency | >= 8x | **met** | 8-16x at a 50 ms SLA (3.18) |
 | Trainable parameters | <= 0.5%, target <= 0.2% | **met** | 0 parameters (A1) |
