@@ -214,6 +214,55 @@ def install_flash_sdpa(verbose=False):
     return True
 
 
+_FA2_INSTALLED = False
+
+
+def install_flash_attn_kernel(verbose=False):
+    """Route the cached chunked-prefill attention through `flash_attn_func` directly.
+
+    Hugging Face's flash-attention integration still builds length-proportional
+    structures for the chunked case on this version: a plain 128K prefill (no hooks,
+    no selection, `attention_mask=None`, `logits_to_keep=1`) reached 3.7 GiB on the
+    first chunk and OOMed on the second, while the same computation through
+    `flash_attn_func(q, k, v, causal=True)` is **0.83 s and 0.07 GiB** for
+    2,048 x 131,072 with GQA.  The wrapper only intercepts that case - no mask and
+    more than one query, where the chunk's queries are the last `n` positions of the
+    cached keys, so `causal=True` is exactly the right mask - and leaves decode and
+    the masked paths to Hugging Face.
+    """
+    global _FA2_INSTALLED
+    if _FA2_INSTALLED:
+        return True
+    try:
+        from flash_attn import flash_attn_func
+        from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS
+        import transformers.integrations.flash_attention as fa_mod
+    except Exception:                                   # pragma: no cover
+        return False
+    original = fa_mod.flash_attention_forward
+
+    def chunked(module, query, key, value, attention_mask=None, dropout=0.0,
+                scaling=None, is_causal=None, **kwargs):
+        if attention_mask is None and query.shape[2] > 1:
+            out = flash_attn_func(query.transpose(1, 2).contiguous(),
+                                  key.transpose(1, 2).contiguous(),
+                                  value.transpose(1, 2).contiguous(),
+                                  dropout_p=0.0, causal=True, softmax_scale=scaling)
+            return out.transpose(1, 2), None
+        return original(module, query, key, value, attention_mask, dropout=dropout,
+                        scaling=scaling, is_causal=is_causal, **kwargs)
+
+    for name in ("flash_attention_2", "flash_attention_3"):
+        try:
+            ALL_ATTENTION_FUNCTIONS[name] = chunked
+        except Exception:                               # pragma: no cover
+            pass
+    _FA2_INSTALLED = True
+    if verbose:
+        print("[flash] chunked prefill routed through flash_attn_func", flush=True)
+    return True
+
+
 def prefill_capture(model, ids, obs, chunk, attention_mask=True, flash=False):
     """Exact causal prefill in bounded chunks.
 
@@ -247,6 +296,7 @@ def prefill_capture(model, ids, obs, chunk, attention_mask=True, flash=False):
     try:
         if flash:
             install_flash_sdpa()
+            install_flash_attn_kernel()
         context = flash_only_sdpa() if flash else nullcontext()
         with context:
             for start in range(0, L, chunk):
