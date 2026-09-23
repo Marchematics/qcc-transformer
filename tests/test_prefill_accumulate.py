@@ -127,6 +127,7 @@ def test_flash_sdpa_patch_installs_and_only_changes_the_chunked_case():
     from benchmarks.benchmark_bounded_decode_frontier import install_flash_sdpa
     from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS
 
+    original_entry = ALL_ATTENTION_FUNCTIONS["sdpa"]
     assert install_flash_sdpa() is True
     patched = ALL_ATTENTION_FUNCTIONS["sdpa"]
 
@@ -158,3 +159,4 @@ def test_flash_sdpa_patch_installs_and_only_changes_the_chunked_case():
         assert seen["mask"] is mask
     finally:
         sdpa_attention.sdpa_attention_forward = original
+        ALL_ATTENTION_FUNCTIONS["sdpa"] = original_entry

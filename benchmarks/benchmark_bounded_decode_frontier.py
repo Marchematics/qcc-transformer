@@ -373,9 +373,11 @@ def prefill_accumulate(model, ids, obs, chunk, key_chunk=1024, query_stride=1):
             seg = ids[:, start:end]
             positions = torch.arange(start, end, device=device)
             mask = torch.ones(1, end, device=device, dtype=torch.long)
+            extra = ({"logits_to_keep": 1}
+                     if forward_accepts(model, "logits_to_keep") else {})
             o = model(seg, **model_kwargs(model, past_key_values=cache, attention_mask=mask,
                                           position_ids=positions.unsqueeze(0),
-                                          cache_position=positions, use_cache=True))
+                                          cache_position=positions, use_cache=True, **extra))
             last_logits = o.logits[:, -1:]
             # the strided query positions are reused by every layer of this chunk,
             # so they must not mutate the full position vector `positions`
