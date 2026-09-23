@@ -255,9 +255,16 @@ def prefill_capture(model, ids, obs, chunk, attention_mask=True, flash=False):
                 pos = torch.arange(start, end, device=ids.device)
                 mask = (torch.ones(1, end, device=ids.device, dtype=torch.long)
                         if attention_mask else None)
+                # `logits_to_keep=1` matters at long context: without it every chunk
+                # materialises logits for all `chunk` positions x the vocabulary
+                # (4096 x 152K x 4B = 2.5 GB per chunk on this model), which is what
+                # pushed a 128K prefill to the card's limit
+                extra = ({"logits_to_keep": 1}
+                         if forward_accepts(model, "logits_to_keep") else {})
                 o = model(seg, **model_kwargs(
                     model, past_key_values=cache, attention_mask=mask,
-                    position_ids=pos.unsqueeze(0), cache_position=pos, use_cache=True))
+                    position_ids=pos.unsqueeze(0), cache_position=pos,
+                    use_cache=True, **extra))
                 last_logits = o.logits[:, -1:]
     finally:
         for h in handles:
