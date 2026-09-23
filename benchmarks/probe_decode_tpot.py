@@ -41,7 +41,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from benchmarks import benchmark_bounded_decode_frontier as L  # noqa: E402
 
 
-def build_cache(model, size, chunk, device):
+def build_cache(model, size, chunk, device, headroom=64):
     """A cache holding exactly `size` keys, built by an exact chunked prefill.
 
     The cache is preallocated.  `DynamicCache` grows by `torch.cat`, so at 1M every chunk
@@ -52,7 +52,11 @@ def build_cache(model, size, chunk, device):
     from qcc_transformer.preallocated_cache import preallocated_cache_for
 
     ids = torch.randint(1, 1000, (1, size), device=device)
-    cache = preallocated_cache_for(model, size + 8, device=device)
+    # headroom must cover every append the sweep will make: each timed step appends one
+    # token, and running out makes the fixed buffer grow by concatenation - which at 1M
+    # needs a second 12 GiB and OOMed this probe (the shipped cache grows rather than
+    # truncating, so the failure is loud but it costs the whole 1M prefill)
+    cache = preallocated_cache_for(model, size + int(headroom), device=device)
     cache, logits, _tails = L.prefill_capture(model, ids, obs=64, chunk=chunk,
                                               attention_mask=False, flash=True,
                                               cache=cache)
@@ -129,6 +133,57 @@ def profile_decode(model, cache, first, steps, device, use_mask=True):
     return {"gpu_ms_per_step": total_us / 1000.0 / steps, "steps": steps}
 
 
+@torch.no_grad()
+def time_decode_graph(model, cache, first, steps, device):
+    """Per-step seconds with the decode step captured in a CUDA graph.
+
+    This is the measurement the TPOT question needs: the eager step is host-bound (~22
+    ms/step of launch and CPU against ~1-4 ms of kernel time), so a wall-clock ratio
+    between cache sizes cannot show what the cache decides.  A captured graph replays the
+    same step without the host, leaving GPU time.
+
+    Capture works on the local SDPA decode branch and is refused on the flash path
+    ("operation not permitted when stream is capturing"), which is why it is opt-in and
+    reported separately rather than being the default.
+
+    Length and position are held fixed across replays: the graph's shapes and addresses
+    are baked in at capture, so this measures one decode step against exactly
+    `cache.get_seq_length()` keys - the quantity TPOT is about.  The cache must be
+    preallocated, since a growing `DynamicCache` would change shapes mid-capture.
+    """
+    kept = cache.get_seq_length()
+    position = torch.tensor([kept], device=device)
+    mask = torch.ones(1, kept + 1, device=device, dtype=torch.long)
+    cur = first.clone()
+
+    def step():
+        out = model(cur, **L.model_kwargs(
+            model, past_key_values=cache, attention_mask=mask,
+            cache_position=position, position_ids=position.unsqueeze(0), use_cache=True))
+        return out.logits[:, -1:].argmax(-1)
+
+    side = torch.cuda.Stream()
+    side.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(side):                      # warm up outside the capture
+        for _ in range(3):
+            cur.copy_(step())
+    torch.cuda.current_stream().wait_stream(side)
+    torch.cuda.synchronize()
+
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph):
+        cur.copy_(step())
+    torch.cuda.synchronize()
+    graph.replay()                                     # one warm replay
+    torch.cuda.synchronize()
+    started = time.perf_counter()
+    for _ in range(steps):
+        graph.replay()
+    torch.cuda.synchronize()
+    elapsed = 1000.0 * (time.perf_counter() - started) / steps
+    return {"graph_ms_per_step": elapsed, "steps": steps}
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--model", default="/root/qcc/models/Qwen2.5-0.5B-Instruct")
@@ -143,6 +198,10 @@ def main(argv=None):
                              "host-bound, so a single sweep is at the edge of run-to-run "
                              "host noise (two sweeps of the same code gave 22.6 ms flat "
                              "across 512-131,072 keys and 27-28 ms with no trend)")
+    parser.add_argument("--graph", action=argparse.BooleanOptionalAction, default=False,
+                        help="also time the step captured in a CUDA graph; this is the "
+                             "launch-free measurement, and it works on the sdpa decode "
+                             "branch, not on the flash one")
     parser.add_argument("--profile", action=argparse.BooleanOptionalAction, default=True,
                         help="also report a profiler kernel sum per step; it is "
                              "CUPTI-serialized and can exceed the wall clock, so the "
@@ -165,9 +224,10 @@ def main(argv=None):
     # every pass, because building one is the expensive part - at 1M it is a 850 s exact
     # prefill, and an earlier version of this probe paid it twice (once for the wall pass,
     # once for the profiler pass)
+    headroom = args.steps * max(1, args.passes) + 64 + (32 if args.graph else 0)
     for size in args.sizes:
         torch.cuda.empty_cache()
-        cache, first = build_cache(model, size, args.prefill_chunk, device)
+        cache, first = build_cache(model, size, args.prefill_chunk, device, headroom)
         keys = int(cache.get_seq_length())
         for operator in operators:
             L.install_flash_layer_attn(model, delegate_decode=(operator == "flash"))
@@ -182,12 +242,23 @@ def main(argv=None):
                           f"tpot {stats['median_ms']:8.2f} ms "
                           f"(min {stats['min_ms']:.2f}, p95 {stats['p95_ms']:.2f})",
                           flush=True)
+            if args.graph:
+                stats = time_decode_graph(model, cache, first, max(args.steps, 32), device)
+                rows.append({"decode": operator, "mask": True, "graph": True,
+                             "cache_keys": keys, **stats})
+                print(f"   {size:>8d} keys graph    "
+                      f"{stats['graph_ms_per_step']:8.3f} ms/step", flush=True)
             if args.profile:
                 stats = profile_decode(model, cache, first, 5, device)
                 rows.append({"decode": operator, "mask": True, "profile": True,
                              "cache_keys": keys, **stats})
                 print(f"   {size:>8d} keys profile  "
                       f"gpu {stats['gpu_ms_per_step']:8.2f} ms", flush=True)
+        if getattr(cache, "overflowed", False):
+            print(f"   WARNING: cache for {size} keys overflowed its buffer; the sizing "
+                  f"was wrong and these numbers include a growth copy", flush=True)
+            rows.append({"decode": "sizing", "mask": True, "cache_keys": keys,
+                         "overflowed": True})
         del cache
         torch.cuda.empty_cache()
     # The profiler sum is CUPTI-serialized and can exceed the wall clock it is supposed
@@ -204,7 +275,7 @@ def main(argv=None):
         row["profile_exceeds_wall"] = bool(wall) and row["gpu_ms_per_step"] > wall[0]
     sweeps = {}
     for row in rows:
-        if row.get("profile"):
+        if row.get("profile") or row.get("graph"):
             continue
         key = (row["decode"], row["mask"], row["cache_keys"])
         sweeps.setdefault(key, []).append(row["median_ms"])
@@ -218,12 +289,16 @@ def main(argv=None):
                            "kernel sum is retained only when it is below the wall time "
                            "for the same cache (see profile_exceeds_wall)")}
     Path(args.out).write_text(json.dumps(payload, indent=1))
-    for operator, mask, kind in sorted({(r["decode"], r["mask"],
-                                        "gpu" if r.get("profile") else "wall")
+    def kind_of(row):
+        return ("gpu" if row.get("profile") else
+                "graph" if row.get("graph") else "wall")
+
+    for operator, mask, kind in sorted({(r["decode"], r["mask"], kind_of(r))
                                         for r in rows}):
         sizes = [r for r in rows if r["decode"] == operator and r["mask"] == mask
-                 and ("gpu" if r.get("profile") else "wall") == kind]
-        key = "gpu_ms_per_step" if kind == "gpu" else "median_ms"
+                 and kind_of(r) == kind]
+        key = ("gpu_ms_per_step" if kind == "gpu"
+               else "graph_ms_per_step" if kind == "graph" else "median_ms")
         print(f"[{operator} mask={int(mask)} {kind}] " + "  ".join(
             f"{r['cache_keys']}:{r[key]:.2f}ms" for r in sizes))
     print("wrote", args.out)

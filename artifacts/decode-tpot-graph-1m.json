@@ -1,0 +1,102 @@
+{
+ "config": {
+  "model": "/root/qcc/models/Qwen2.5-0.5B-Instruct",
+  "sizes": [
+   1048576,
+   131072,
+   4632
+  ],
+  "steps": 12,
+  "prefill_chunk": 8192,
+  "attn_impl": "flash_attention_2",
+  "decode": "sdpa",
+  "passes": 1,
+  "graph": true,
+  "profile": false,
+  "mask": "on",
+  "out": "artifacts/decode-tpot-graph-1m.json"
+ },
+ "sweep_summary": {
+  "sdpa|mask1|4632": {
+   "passes": 1,
+   "per_pass_ms": [
+    19.96
+   ],
+   "best_ms": 19.96,
+   "spread_ms": 0.0
+  },
+  "sdpa|mask1|131072": {
+   "passes": 1,
+   "per_pass_ms": [
+    20.2
+   ],
+   "best_ms": 20.2,
+   "spread_ms": 0.0
+  },
+  "sdpa|mask1|1048576": {
+   "passes": 1,
+   "per_pass_ms": [
+    25.79
+   ],
+   "best_ms": 25.79,
+   "spread_ms": 0.0
+  }
+ },
+ "results": [
+  {
+   "decode": "sdpa",
+   "mask": true,
+   "sweep": 0,
+   "cache_keys": 1048576,
+   "median_ms": 25.79253539443016,
+   "min_ms": 25.764713063836098,
+   "p95_ms": 26.048006489872932,
+   "steps": 11
+  },
+  {
+   "decode": "sdpa",
+   "mask": true,
+   "graph": true,
+   "cache_keys": 1048576,
+   "graph_ms_per_step": 23.852125566918403,
+   "steps": 32
+  },
+  {
+   "decode": "sdpa",
+   "mask": true,
+   "sweep": 0,
+   "cache_keys": 131072,
+   "median_ms": 20.195811986923218,
+   "min_ms": 19.948426634073257,
+   "p95_ms": 20.744113251566887,
+   "steps": 11
+  },
+  {
+   "decode": "sdpa",
+   "mask": true,
+   "graph": true,
+   "cache_keys": 131072,
+   "graph_ms_per_step": 6.837491993792355,
+   "steps": 32
+  },
+  {
+   "decode": "sdpa",
+   "mask": true,
+   "sweep": 0,
+   "cache_keys": 4632,
+   "median_ms": 19.96147818863392,
+   "min_ms": 19.627291709184647,
+   "p95_ms": 20.170701667666435,
+   "steps": 11
+  },
+  {
+   "decode": "sdpa",
+   "mask": true,
+   "graph": true,
+   "cache_keys": 4632,
+   "graph_ms_per_step": 3.7760132690891623,
+   "steps": 32
+  }
+ ],
+ "honesty": "per-step wall time is the measured quantity; the profiler kernel sum is retained only when it is below the wall time for the same cache (see profile_exceeds_wall)"
+}

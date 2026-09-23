@@ -2072,17 +2072,28 @@ of this section quoted them:
   1,048,583 keys it reports 83.10 ms per step against a 25.74 ms wall step, which cannot
   both be true. The probe now records `profile_exceeds_wall` for such rows and the
   absolute statements above use only wall differences.
-* **CUDA-graph capture is not available on this decode path.** `torch.cuda.graph` raises
-  "operation not permitted when stream is capturing" inside the flash decode, so the
-  launch cost could not simply be captured away and measured. That is the measurement
-  that would settle what the ratio becomes in a launch-optimized runtime, and it is
-  listed as open rather than estimated.
+* **Capture is refused on the flash decode path but works on the SDPA one.**
+  `torch.cuda.graph` raises "operation not permitted when stream is capturing" with the
+  delegated `flash_attention_2` decode, so the launch cost was captured away on the
+  local SDPA branch instead (both arms, same operator).  The bounded arm's launch-free
+  step is **3.78 ms** against a 19.96 ms wall step: the host is 5.3x the work.
 
-So the honest reading of the TPOT target is: at batch 1 in eager Hugging Face the
-measured ratios are 1.07x (128K) and 1.12x (1M), and the cache-decided attention at 1M
-is ~3.1 ms/step. Whether that becomes >= 5x depends on the per-step baseline of the
-runtime it is measured in - it needs a baseline under ~0.8 ms/step - which is a runtime
-question this hardware/software pair cannot answer, not a property of the retention law.
+With the launch cost removed, the ratio the target asks about is measurable after all:
+
+| cache keys | wall ms/step | launch-free ms/step | ratio against 4,632 keys |
+|---:|---:|---:|---:|
+| 4,632 (the shipped budget) | 19.96 | **3.78** | 1.00x |
+| 131,072 | 20.20 | **6.84** | 1.81x |
+| 1,048,576 | 25.79 | **23.85** | **6.31x** |
+
+So the honest reading of the TPOT target is now two numbers rather than an open question:
+**at 1M the target is met - 6.31x launch-free** - while a wall-clock measurement of the
+same arms shows 1.12x because ~16 ms of host launch overhead sits in every step.  At 128K
+the ratio is 1.81x even launch-free, because 131K keys only add 3.1 ms to a step against
+a 3.78 ms floor; the 5x target at 128K therefore needs a model whose KV costs more per
+token than this one's 12 KiB (Llama-3.2-1B at 32 KiB/token is the configuration where the
+earlier 4.9-5.0x was measured).  Neither statement is about the retention law; both are
+about what the runtime and the checkpoint geometry put around it.
 
 That also reconciles the earlier 32K figure of 4.9-5.0x: it was measured on
 **Llama-3.2-1B** through a CUDA-graphed `StaticCache` decode (`benchmark_fullkv_tpot_graph.py`,
@@ -2241,8 +2252,8 @@ holds the full KV transiently. Two candidate directions:
 | 1M retrieval | >= 99.5% | **measured, not met, and not by the cache**: at 1M the exact Full-KV arm itself scores 0 (asked for `97` it answers `53`), so no retention policy can reach 99.5% there; the single-needle protocol is at parity one length down (128K: exact 2 of 2, bounded 1 of 2). A 12 KiB/token checkpoint is the only 1M-feasible Full-KV configuration on this card (3.40, A24) |
 | History state | O(1) / bounded | **met** | 4,608 slots and 144 MiB at every length (A7); 4,632 slots and **54.0 MiB** at 1M under the 1M harness's budget (A23) |
 | 128K -> 1M state growth | <= 1.25x, ideally ~1x | **met at the ideal value: 1.00x** - 54.0 MiB at 128K and at 1M, against 1,500.0 MiB and 12,288.0 MiB for the exact cache (A23); the earlier 1.00x to 256K is superseded by the measurement at 1M |
-| 128K TPOT | >= 5x Full-KV | **measured, not met at batch 1 in eager Hugging Face: 1.07x** (23.27 vs 24.88 ms) with a matched operator, because the step is host-bound at ~22.5 ms (512 keys to 131K keys cost the same); the earlier 4.9-5.0x at 32K is a different configuration (Llama-3.2-1B, 32 KiB/token, CUDA-graphed decode) and is not the same number (3.40, A25) |
-| 1M TPOT | >= 5x Full-KV | **measured: 1.12x wall** (23.10 vs 25.91 ms) in a host-bound regime: the step costs 22.6 ms at every cache length up to 131K, and only 3.1 ms/step at 1M is cache-decided, so the ratio is a property of the runtime's per-step baseline rather than of the cache; whether a launch-optimized runtime turns it into 5x is open (A25, B2, 3.40) |
+| 128K TPOT | >= 5x Full-KV | **not met: 1.81x launch-free** (6.84 vs 3.78 ms/step) and 1.07x on the wall clock (24.88 vs 23.27 ms). 131K keys add only 3.1 ms to a step of this 12 KiB/token model, so 5x at 128K needs the heavier geometry where the earlier 4.9-5.0x was measured (Llama-3.2-1B, 32 KiB/token) (A25, 3.40) |
+| 1M TPOT | >= 5x Full-KV | **met in the launch-free measurement: 6.31x** (23.85 vs 3.78 ms/step, same operator, CUDA-graph captured); the same arms measure 1.12x on the wall clock because ~16 ms/step of host launch overhead sits in both (A25, 3.40) |
 | Throughput | >= 3x | **met** | 15.6x speed configuration, 5.0x quality configuration (3.8) |
 | Fixed-SLA concurrency | >= 8x | **met** | 8-16x at a 50 ms SLA (3.18) |
 | Trainable parameters | <= 0.5%, target <= 0.2% | **met** | 0 parameters (A1) |
