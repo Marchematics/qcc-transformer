@@ -257,6 +257,12 @@ def install_flash_attn_kernel(verbose=False):
             ALL_ATTENTION_FUNCTIONS[name] = chunked
         except Exception:                               # pragma: no cover
             pass
+    # NOTE: writing the dispatch table is *not* enough on transformers 5.16 - a
+    # forward after the table edit still called the stock function (measured: zero
+    # `flash_attn_func` calls in a forward), and intercepting `get_interface` did not
+    # change that either.  The primitive itself is cheap (0.83 s / 0.07 GiB for
+    # 2,048 x 131,072 with GQA), so what remains for the 1M row is to replace the
+    # per-layer `self_attn.forward` instead of the lookup - see report 3.34.
     _FA2_INSTALLED = True
     if verbose:
         print("[flash] chunked prefill routed through flash_attn_func", flush=True)
