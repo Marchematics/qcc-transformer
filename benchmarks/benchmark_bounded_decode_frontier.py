@@ -293,7 +293,13 @@ def install_flash_layer_attn(model, verbose=False):
 
     def make():
         def forward(self, hidden_states, position_embeddings=None, attention_mask=None,
-                    past_key_value=None, cache_position=None, **kwargs):
+                    past_key_value=None, past_key_values=None, cache_position=None,
+                    **kwargs):
+            # transformers passes `past_key_values` (plural) on this version; keeping
+            # both names is what makes the cache actually fill (an empty `cache.layers`
+            # was the symptom)
+            if past_key_value is None:
+                past_key_value = past_key_values
             shape = hidden_states.shape[:-1]
             head_shape = (*shape, -1, self.head_dim)
             query = self.q_proj(hidden_states).view(head_shape).transpose(1, 2)
@@ -321,7 +327,11 @@ def install_flash_layer_attn(model, verbose=False):
             return self.o_proj(out), None
         return forward
     count = 0
-    for layer in model.model.layers:
+    for index, layer in enumerate(model.model.layers):
+        # the patched forward writes to the cache itself, so the layer index has to
+        # be set on the module (a missing index leaves `cache.layers` empty)
+        if getattr(layer.self_attn, "layer_idx", None) is None:
+            layer.self_attn.layer_idx = index
         layer.self_attn.forward = types.MethodType(make(), layer.self_attn)
         count += 1
     if verbose:
