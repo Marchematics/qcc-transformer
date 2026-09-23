@@ -1818,14 +1818,21 @@ Three fixes since 3.34, each verified:
 
 The primitive is not the limit: `flash_attn_func(q, k, v, causal=True)` does
 2,048 x 131,072 with GQA in **0.83 s and 0.07 GiB**. Neither is the model path: an
-isolated `prefill_capture(flash=True)` at 128K is 3.2 s. **The stall is the harness's
-prompt builder**, and it is on the CPU: timing `build_haystack(tokenizer, 131072, 4, 0)`
-alone — no model, no GPU — did not return within seven minutes. That is the piece to
-fix, and the fix is to build the prompt in *token* space (splice the needle statements'
-token ids into the filler ids and skip the detokenise/re-tokenise round trip that the
-current builder performs once per needle plus once for the offsets pass over a 1.5 MB
-string). Once that returns in seconds, the 128K and 1M rows are a matter of running the
-already verified prefill path; until then they stay unmeasured.
+isolated `prefill_capture(flash=True)` at 128K is 3.2 s. **The stall was the harness's prompt builder**, on the CPU: timing `build_haystack(tokenizer, 131072, 4, 0)`
+alone — no model, no GPU — did not return within seven minutes. That is fixed: building the prompt in *token* space (tiling the filler from its own
+token ids and splicing the needle statements' ids in, so the needle positions are exact
+by construction) takes **0.00 s at 128K and 0.01 s at 1M**.
+
+What that exposed is a correction to the numbers above. The 128K prefill measurement of
+3.2 s / 11.86 GiB was taken **before** the `past_key_values` fix, i.e. with a cache that
+was never filled, so it is optimistic. With the cache filling, a standalone replica of
+the harness's stages OOMs *inside* `prefill_capture` at 128K with the process at
+23.54 GiB (weights 0.93 GiB + a 1.5 GiB KV account for 2.4 GiB of that). So the last
+piece is inside the prefill call itself, not in `obs_scores`, selection or decode - which
+is why the per-stage accounting never reached them. Next: sweep `prefill_chunk` on the
+patched path while printing peak memory per chunk, and check whether the per-layer
+replacement is actually active in the harness process (it returns True in-process here,
+but a silent fall-back to the stock path would produce exactly this footprint).
 
 ## 4. What this establishes, and what it does not
 
