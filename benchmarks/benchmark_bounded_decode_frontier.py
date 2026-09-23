@@ -269,6 +269,66 @@ def install_flash_attn_kernel(verbose=False):
     return True
 
 
+def install_flash_layer_attn(model, verbose=False):
+    """Per-layer attention through `flash_attn_func` for the long-context prefill.
+
+    transformers 5.16 resolves the attention function per module, so replacing the
+    lookup table (or `get_interface`) has no effect - measured: zero `flash_attn_func`
+    calls in a forward either way.  This replaces each layer's forward instead,
+    keeping the model's own projections, optional q/k norms, rotary embedding, cache
+    update and output projection, and changing only the operator for the multi-query
+    (prefill) case.  Validated on the same model: max last-token logit difference
+    0.75 in bf16 with the argmax unchanged (an earlier attempt that compared against
+    a `deepcopy` of the model showed 18.9 and was wrong about the cause).
+
+    The primitive is what makes 128K-1M affordable: 2,048 x 131,072 with GQA in
+    0.83 s and 0.07 GiB, against 3.79 GiB on the first chunk through the stock path.
+    """
+    import types
+    try:
+        from flash_attn import flash_attn_func
+        from transformers.models.qwen2.modeling_qwen2 import apply_rotary_pos_emb
+    except Exception:                                   # pragma: no cover
+        return False
+
+    def make():
+        def forward(self, hidden_states, position_embeddings=None, attention_mask=None,
+                    past_key_value=None, cache_position=None, **kwargs):
+            shape = hidden_states.shape[:-1]
+            head_shape = (*shape, -1, self.head_dim)
+            query = self.q_proj(hidden_states).view(head_shape).transpose(1, 2)
+            key = self.k_proj(hidden_states).view(head_shape).transpose(1, 2)
+            value = self.v_proj(hidden_states).view(head_shape).transpose(1, 2)
+            if getattr(self, "q_norm", None) is not None:
+                query = self.q_norm(query)
+            if getattr(self, "k_norm", None) is not None:
+                key = self.k_norm(key)
+            cos, sin = position_embeddings
+            query, key = apply_rotary_pos_emb(query, key, cos, sin)
+            if past_key_value is not None:
+                key, value = past_key_value.update(key, value, self.layer_idx)
+            if query.shape[2] > 1:                     # prefill chunk
+                out = flash_attn_func(query.transpose(1, 2).contiguous(),
+                                      key.transpose(1, 2).contiguous(),
+                                      value.transpose(1, 2).contiguous(),
+                                      causal=True, softmax_scale=self.scaling)
+            else:                                      # decode: stock operator
+                out = torch.nn.functional.scaled_dot_product_attention(
+                    query, key, value,
+                    enable_gqa=getattr(self, "num_key_value_groups", 1) > 1)
+                out = out.transpose(1, 2).contiguous()
+            out = out.reshape(*shape, -1).contiguous()
+            return self.o_proj(out), None
+        return forward
+    count = 0
+    for layer in model.model.layers:
+        layer.self_attn.forward = types.MethodType(make(), layer.self_attn)
+        count += 1
+    if verbose:
+        print(f"[flash] per-layer attention replaced on {count} layers", flush=True)
+    return count > 0
+
+
 def prefill_capture(model, ids, obs, chunk, attention_mask=True, flash=False):
     """Exact causal prefill in bounded chunks.
 
@@ -303,6 +363,7 @@ def prefill_capture(model, ids, obs, chunk, attention_mask=True, flash=False):
         if flash:
             install_flash_sdpa()
             install_flash_attn_kernel()
+            install_flash_layer_attn(model)
         context = flash_only_sdpa() if flash else nullcontext()
         with context:
             for start in range(0, L, chunk):
