@@ -2284,6 +2284,39 @@ The honest summary of the quality rows on today's baseline is therefore:
 * **worst task >= 97%: not met**, best configuration found 0.912 (`union_lex`, `narrativeqa`),
   and the residual failure is record-level degeneration rather than systematic loss: three of
   twenty records in one task.
+### 3.44 How far the one-configuration claim reaches
+
+A8's generality claim - four checkpoints, three families, one configuration, no per-model
+tuning - was measured in the earlier campaign, so it was cross-checked the way 3.42 and 3.43
+cross-checked the quality rows, and the answer bounds the claim in two directions.
+
+**One checkpoint cannot be re-run here at all.** Phi-3.5-mini (A8's weakest row at 0.972
+aggregate / 0.889 worst task) loads through its own remote code, and transformers 5.16 refuses
+that class on SDPA - `Phi3ForCausalLM does not support an attention implementation through
+torch.nn.functional.scaled_dot_product_attention yet` - while eager attention cannot hold the
+16K-65K-token contexts of the RULER subset on a 24 GiB card (a 16K context is already ~34 GiB
+of attention matrix for 32 heads).  The row therefore stands as recorded, un-re-verified, and
+the reason is environmental rather than a property of the method.
+
+**A fifth, smaller checkpoint does not hold.** Qwen2.5-1.5B, same configuration (4,096 + 512
+slots, 126.0 MiB of decode state), against its own Full-KV arm:
+
+| task | Full-KV | bounded | retention |
+|---|---:|---:|---:|
+| `niah_multikey_2` | 0.750 | 0.750 | **1.000** |
+| `niah_single_1` | 1.000 | 0.900 | **0.900** |
+| `niah_multikey_3` | 0.500 | 0.200 | **0.400** |
+| `vt` | 0.690 | 0.640 | **1.0875** |
+| **all (65 matched records)** | | | **0.8469**, worst task **0.4000** |
+
+The two failures are the tasks that name the most items at once, which is exactly the capacity
+3.27 identified as binding: the policy serves `min(names inside the observation window, item
+spans the anchor budget reaches)`, and a smaller checkpoint at the same slot budget serves
+fewer of them.  So the honest form of the generality claim is the narrower one: **the shipped
+configuration reproduces on the four checkpoints it was measured on - and on Llama-3.2-1B
+re-verified today - but it is not universal; the budget has to be sized to the task's item
+count, which is what the 8,704-slot rows of 3.28 also show.**
+
 
 ## 4. What this establishes, and what it does not
 
