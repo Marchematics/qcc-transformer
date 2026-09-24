@@ -92,7 +92,8 @@ def run_record(model, rec, args, eos_ids, row_id):
     torch.cuda.reset_peak_memory_stats()
     torch.cuda.synchronize()
     t0 = time.time()
-    accumulated = [p for p in args.policies if p in ("h2o", "tova", "h2o_lex")]
+    accumulated = [p for p in args.policies
+                   if p in ("h2o", "tova", "h2o_lex", "blend_lex")]
     if accumulated:
         # H2O and TOVA rank keys by attention accumulated over the whole prefill,
         # which the exact prefill can report without a second pass.
@@ -114,7 +115,16 @@ def run_record(model, rec, args, eos_ids, row_id):
 
     def get_scores(policy):
         if policy not in score_cache:
-            if policy in ("h2o", "h2o_lex"):
+            if policy == "blend_lex":
+                # half of each ranking: the final query's attention (which preserves
+                # retrieval) and the attention accumulated over the prefill (which
+                # preserves summarisation).  Rank-blended, because the two signals have
+                # different magnitudes.
+                score_cache[policy] = L.blend_scores(
+                    L.obs_scores(model, captured, cache, Lc, args.obs, "last",
+                                 args.key_chunk),
+                    mass, args.blend_alpha)
+            elif policy in ("h2o", "h2o_lex"):
                 score_cache[policy] = mass
             elif policy == "tova":
                 score_cache[policy] = top1
@@ -206,6 +216,8 @@ def main():
     ap.add_argument("--lex-cap", type=int, default=128)
     ap.add_argument("--hops", type=int, default=0)
     ap.add_argument("--key-chunk", type=int, default=4096)
+    ap.add_argument("--blend-alpha", type=float, default=0.5,
+                    help="weight of the accumulated-attention ranking in `blend_lex`")
     ap.add_argument("--accumulate-stride", type=int, default=1,
                     help="accumulate the H2O/TOVA statistics from every n-th "
                          "query (both are means over queries, so a stride "

@@ -58,6 +58,9 @@ class RetentionConfig:
     """Retention budget and selection settings."""
 
     budget: int = 4096
+    # weight of the accumulated-attention ranking in the `blend_lex` filler signal; unused
+    # by the shipped policy, which ranks with the observation window alone
+    blend_alpha: float = 0.5
     observation_window: int = 64
     attention_sinks: int = 4
     recent_fraction: float = 0.25

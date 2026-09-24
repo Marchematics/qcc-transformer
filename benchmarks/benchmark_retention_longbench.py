@@ -78,7 +78,7 @@ TRUNCATION_POLICIES = ("head_tail", "skip")
 POLICIES = ("full", "bounded", "obs_mean", "obs_max", "obs_last", "quest",
             "pyramid", "h2o", "tova",
             # anchor channel held fixed, filler signal varied
-            "mean_lex", "h2o_lex")
+            "mean_lex", "h2o_lex", "blend_lex")
 
 
 def parse_args(argv=None):
@@ -99,6 +99,8 @@ def parse_args(argv=None):
     parser.add_argument("--max-new", type=int, default=None,
                         help="greedy decode length; default: the official "
                              "dataset2maxlen.json value of each task (128/512/32/64)")
+    parser.add_argument("--blend-alpha", type=float, default=0.5,
+                        help="weight of the accumulated-attention ranking in `blend_lex`")
     parser.add_argument("--max-input-tokens", type=int, default=32768,
                         help="prompts above this are truncated or skipped "
                              "(see --truncation); default 32768")
@@ -253,7 +255,7 @@ def main(argv=None):
         budget=args.budget, observation_window=args.obs, attention_sinks=args.nsink,
         pool=args.pool, dilate=args.dilate, lex_cap=args.lex_cap,
         chain_hops=args.hops, prefill_chunk=args.prefill_chunk,
-        key_chunk=args.key_chunk, scoring=args.scoring)
+        key_chunk=args.key_chunk, scoring=args.scoring, blend_alpha=args.blend_alpha)
     eos_ids = eos_token_ids(model)
     kwargs_names = forward_kwargs_of(model)
     print(f"[model] {args.model} device={device} records={len(records)} "
@@ -307,7 +309,7 @@ def main(argv=None):
                         if frontier is None:
                             raise SystemExit("published-family arms need benchmarks/ "
                                              "on sys.path")
-                        if arm in ("h2o", "tova", "h2o_lex"):
+                        if arm in ("h2o", "tova", "h2o_lex", "blend_lex"):
                             cache, logits, captured, mass, top1 = frontier.prefill_accumulate(
                                 model, ids, config.observation_window,
                                 config.prefill_chunk, config.key_chunk)
@@ -321,7 +323,13 @@ def main(argv=None):
                     prefill_seconds = time.time() - start
                     kept = int(cache.get_seq_length())
                     if arm not in ("full", "bounded"):
-                        if arm in ("h2o", "h2o_lex"):
+                        if arm == "blend_lex":
+                            scores = frontier.blend_scores(
+                                frontier.obs_scores(model, captured, cache, length,
+                                                    config.observation_window, "last",
+                                                    config.key_chunk),
+                                mass, config.blend_alpha)
+                        elif arm in ("h2o", "h2o_lex"):
                             scores = mass
                         elif arm == "tova":
                             scores = top1

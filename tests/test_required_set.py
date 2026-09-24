@@ -746,3 +746,72 @@ def test_greedy_decode_from_a_compiled_cache_matches_full_kv():
                                       compiled_logits[:, -1:].argmax(-1), length, 4,
                                       set(), kwargs_names)
     assert full_tokens == bounded_tokens
+
+
+# --------------------------------------------------------------------------- #
+# filler-signal blending (the `blend_lex` policy)
+# --------------------------------------------------------------------------- #
+
+def test_rank_normalize_is_a_scale_free_ordering():
+    from benchmarks.benchmark_bounded_decode_frontier import rank_normalize
+
+    scores = torch.tensor([[[[10.0, 20.0, 30.0, 40.0]]]])       # (layer, head, 1, keys)
+    ranks = rank_normalize(scores)
+    assert ranks.shape == scores.shape
+    assert float(ranks.min()) == 0.0 and float(ranks.max()) == 1.0
+    assert ranks.flatten().tolist() == pytest.approx([0.0, 1 / 3, 2 / 3, 1.0])
+    # a linear rescaling of one signal must not change its ranking at all
+    assert torch.equal(rank_normalize(scores * 1000 + 7), ranks)
+
+
+def test_blend_endpoints_select_each_signal_alone():
+    from benchmarks.benchmark_bounded_decode_frontier import blend_scores
+
+    primary = torch.tensor([[[[3.0, 1.0, 2.0, 0.0]]]])
+    secondary = torch.tensor([[[[0.0, 5.0, 1.0, 4.0]]]])
+    only_primary = blend_scores(primary, secondary, alpha=0.0)
+    only_secondary = blend_scores(primary, secondary, alpha=1.0)
+    assert only_primary.argmax().item() == primary.argmax().item() == 0
+    assert only_secondary.argmax().item() == secondary.argmax().item() == 1
+    half = blend_scores(primary, secondary, alpha=0.5)
+    assert half.shape == primary.shape
+    assert torch.all(half >= 0) and torch.all(half <= 1)
+
+
+def test_build_idxs_accepts_the_blend_policy_and_keeps_the_anchors():
+    """The blended arm must go through the same anchor-forcing path as the shipped one."""
+    from benchmarks.benchmark_bounded_decode_frontier import build_idxs
+    from test_required_set import tiny_model                      # noqa: F401  (fixture style)
+
+    model = tiny_model()
+    ids = torch.randint(0, 100, (1, 64))
+    cache, _logits, _tails = prefill_capture(model, ids, 8, 64)   # model, ids, obs, chunk
+    length = cache.get_seq_length()
+    scores = torch.randn(cache.layers[0].keys.shape[1], length).unsqueeze(0)
+    scores = scores.expand(len(cache.layers), -1, -1).contiguous()
+
+    class Record:
+        lexical_positions = [5, 17]
+
+    idxs = build_idxs("blend_lex", scores, cache, Record(), 16, 2, 4, length, 7,
+                      cache.layers[0].keys.device, 0, 8)
+    assert len(idxs) == len(cache.layers)
+    for slots in idxs:
+        for position in Record.lexical_positions:
+            assert position in slots.flatten().tolist()
+
+
+def test_blend_scores_accepts_per_layer_lists():
+    """The harnesses pass per-layer lists; blending must keep that container shape."""
+    from benchmarks.benchmark_bounded_decode_frontier import blend_scores
+
+    primary = [torch.tensor([[3.0, 1.0, 2.0]]), torch.tensor([[0.0, 1.0, 2.0]])]
+    secondary = [torch.tensor([[0.0, 5.0, 1.0]]), torch.tensor([[2.0, 1.0, 0.0]])]
+    out = blend_scores(primary, secondary, 0.5)
+    assert isinstance(out, list) and len(out) == 2
+    assert all(t.shape == p.shape for t, p in zip(out, primary))
+    # a single tensor on one side broadcasts across the other side's layers
+    out2 = blend_scores(primary, secondary[0], 0.25)
+    assert isinstance(out2, list) and len(out2) == 2
+    with pytest.raises(ValueError):
+        blend_scores(primary, secondary * 3, 0.5)

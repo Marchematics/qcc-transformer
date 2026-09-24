@@ -895,6 +895,55 @@ def selection_stats(idxs, positions, L):
             "all_answer_unit_fraction": units_all / len(fracs)}
 
 
+def _as_layer_list(signal):
+    """Normalise a signal to a list of per-layer tensors.
+
+    The harnesses carry two shapes of score signal: one tensor per policy (the capture
+    path) and a list with one tensor per layer (`obs_scores`, `prefill_accumulate`).  A
+    blend has to accept both, and returns the same container it was given.
+    """
+    if isinstance(signal, (list, tuple)):
+        return list(signal), True
+    return [signal], False
+
+
+def rank_normalize(scores: torch.Tensor) -> torch.Tensor:
+    """Map each (layer, head) row of a score signal to its ranks in [0, 1].
+
+    Two filler signals - the final query's attention and the attention accumulated over
+    the prefill - have different magnitudes and distribution shapes, so blending them
+    directly would let one dominate by scale.  Ranks are scale-free, and a blend of ranks
+    is what "half of each ranking" should mean.
+    """
+    order = scores.argsort(dim=-1)
+    ranks = torch.empty_like(order, dtype=torch.float32)
+    positions = torch.arange(scores.shape[-1], device=scores.device, dtype=torch.float32)
+    positions = positions / max(1, scores.shape[-1] - 1)
+    ranks.scatter_(-1, order, positions.expand_as(order))
+    return ranks
+
+
+def blend_scores(primary, secondary, alpha: float):
+    """`alpha` of the secondary ranking and `1 - alpha` of the primary one.
+
+    Accepts a tensor or a list of per-layer tensors for either side (the two signals come
+    from different code paths in the harnesses) and returns the same container shape as
+    the primary signal.
+    """
+    primaries, was_list = _as_layer_list(primary)
+    secondaries, _ = _as_layer_list(secondary)
+    if len(secondaries) == 1 and len(primaries) > 1:
+        secondaries = secondaries * len(primaries)
+    if len(primaries) == 1 and len(secondaries) > 1:
+        primaries = primaries * len(secondaries)
+    if len(primaries) != len(secondaries):
+        raise ValueError(f"cannot blend {len(primaries)} primary layers with "
+                         f"{len(secondaries)} secondary ones")
+    blended = [(1.0 - alpha) * rank_normalize(a) + alpha * rank_normalize(b)
+               for a, b in zip(primaries, secondaries)]
+    return blended if was_list else blended[0]
+
+
 def build_idxs(policy, scores, cache, record, budget, nsink, nrecent, L, pool, device, dilate=0,
                lex_cap=128):
     if policy == "full":
@@ -913,7 +962,7 @@ def build_idxs(policy, scores, cache, record, budget, nsink, nrecent, L, pool, d
         forced = sorted(set(list(range(min(nsink, L))) + list(range(max(0, L - nrecent), L))))
         sel = sorted(set(anchors) | set(forced))
         return [torch.tensor([sel] * sc.shape[0], device=device, dtype=torch.long) for sc in scores]
-    if policy in ("lex_obs", "mean_lex", "h2o_lex"):
+    if policy in ("lex_obs", "mean_lex", "h2o_lex", "blend_lex"):
         # Each head keeps its own attention ranking and additionally receives the
         # question's rare strings found in the context.  The three names differ
         # only in the *filler* signal handed in as `scores`: the final query
