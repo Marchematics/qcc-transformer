@@ -2374,6 +2374,32 @@ The two harnesses disagree slightly in the bounded arm's favour at batch 1-4 (th
 to 16% faster than the record), which is the same kind of campaign-to-campaign drift 3.42
 found in the other direction; the ratios are what the rows claim and they hold.
 
+### 3.46 The 1M retrieval row is closed
+
+The row needed one thing: an exact Full-KV arm that can answer at 1M, so a retention ratio can
+be formed. It does not exist on this hardware, and that is now established by exhaustion rather
+than by one failure - four rope mechanisms, same checkpoint, same protocol (one needle at a
+random depth, 2-digit values, answer prefix), both arms:
+
+| rope scaling at 1M | exact arm | bounded arm (4,632 slots, needle force-retained) |
+|---|---|---|
+| YaRN, factor 32 | hallucinates (`53` for `97`) | hallucinates |
+| none | degenerates into repetition | degenerates into repetition |
+| dynamic NTK, factor 32 | degenerates | degenerates |
+| **linear position interpolation, factor 32** | **degenerates (`the record the for the record ...`)** | **degenerates (`The answer is 10.`)** |
+
+Linear PI was the last mechanism with a story - it compresses the relative distances of a 1M
+context by 32x instead of distorting attention temperatures (YaRN) or rescaling theta (dynamic
+NTK) - and it fails the same way, including for the *bounded* arm whose 4,632-slot view contains
+the needle and the question and is therefore a short context in every respect except the
+relative distances it encodes. So the limit is the checkpoint's usable context, not the cache
+policy, and the row is **closed**: it is reported as not measurable on this hardware rather than
+unmeasured, and no further rope mechanism will be tried.
+
+What the 1M length *does* establish is unaffected and already reported: the exact prefill fits
+(850.65 s, 14.06 GiB peak), the state is 54.0 MiB against 12,288.0 MiB (**227.6x**, growth
+1.00x), and the launch-free TPOT ratio is 6.31x (3.40).
+
 
 ## 4. What this establishes, and what it does not
 
@@ -2522,7 +2548,7 @@ holds the full KV transiently. Two candidate directions:
 |---|---|---|---|
 | Full-KV task quality, aggregate | >= 99% | **met**: RULER **1.0102** re-measured on the current code, and **LongBench 0.9939** with the rank-blend filler over the same nine tasks and 123 matched records (0.9660 with the shipped filler, 3.43). The earlier campaign's 1.0049 is incomparable: its Full-KV arm scored 0.2932 where this stack stably gives 0.2808 on identical inputs (3.42) |
 | Full-KV task quality, worst task | >= 97% | **met for RULER (1.0000, re-verified)**; **not met for LongBench**: the best worst-case configuration measured is **0.964** (shipped filler, 16,896 kept: `gov_report` 1.002, `narrativeqa` 0.964), and at the shipped budget the fillers trade the weakest task between the two (`gov_report` 0.784 shipped vs 0.972-1.020 union; `narrativeqa` 1.030 shipped vs 0.912-0.944 union). The residual is answer sensitivity - fluent answers that are not the reference - not repetition: a no-repeat n-gram guard changes the ratios by less than 0.001 (3.43). The published 0.897/1.020/1.032 ladder is incomparable: its Full-KV arm scored 0.2932 where this stack stably gives 0.2808 on identical inputs (3.42) |
-| 1M retrieval | >= 99.5% | **measured, not met, and not by the cache**: at 1M the exact Full-KV arm itself scores 0 - with post-hoc YaRN it answers `53` for `97`, and **with no rope scaling at all, and with dynamic-NTK scaling (`factor=32`), it degenerates into repetition instead** (`to the change the change the change`), so three rope mechanisms agree that the limit is the checkpoint rather than the rope setting; the single-needle protocol is at parity one length down (128K: exact 2 of 2, bounded 1 of 2). A 12 KiB/token checkpoint is the only 1M-feasible Full-KV configuration on this card (3.40, A24) |
+| 1M retrieval | >= 99.5% | **closed as not measurable on this hardware, with four rope mechanisms measured**: post-hoc YaRN (`factor=32`) answers `53` for `97`; no scaling, dynamic-NTK and **linear position interpolation** all degenerate into repetition (`to the change the change the change`; with linear PI the bounded arm repeats `The answer is 10.` and the exact arm repeats the filler). The exact Full-KV oracle itself therefore cannot retrieve at 1M on the only 1M-feasible geometry here (Qwen2.5-0.5B, 12 KiB/token, 12.0 GiB of cache), so no retention policy can be scored against it; one length down the protocol is at parity (128K: exact 2 of 2, bounded 1 of 2). **No fifth mechanism will be tried** (3.40, 3.46, A24) |
 | History state | O(1) / bounded | **met** | 4,608 slots and 144 MiB at every length (A7); 4,632 slots and **54.0 MiB** at 1M under the 1M harness's budget (A23) |
 | 128K -> 1M state growth | <= 1.25x, ideally ~1x | **met at the ideal value: 1.00x** - 54.0 MiB at 128K and at 1M, against 1,500.0 MiB and 12,288.0 MiB for the exact cache (A23); the earlier 1.00x to 256K is superseded by the measurement at 1M |
 | 128K TPOT | >= 5x Full-KV | **met in the speed configuration: 5.37x** at batch 8 launch-free (1,152 slots per request: 24.54 vs 4.57 ms/step, the configuration the serving rows use). Not met in the quality configuration: 4.65x at 4,632 slots, where the exact arm cannot be batched past 8 (25.8 GiB of cache at batch 16 against a 23.55 GiB card); a heavier checkpoint (Llama-3.2-1B, 32 KiB/token) reaches 3.04x at batch 2 before its exact cache needs 16.0 GiB at batch 4. Wall-clock ratios are 0.98-1.21x because the step is host-bound (A25, 3.40) |
