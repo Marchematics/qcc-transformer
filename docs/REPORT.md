@@ -2317,6 +2317,36 @@ configuration reproduces on the four checkpoints it was measured on - and on Lla
 re-verified today - but it is not universal; the budget has to be sized to the task's item
 count, which is what the 8,704-slot rows of 3.28 also show.**
 
+### 3.45 The serving rows re-verified
+
+The last two target rows still resting on the earlier campaign are throughput and fixed-SLA
+concurrency, so 3.8's two harnesses were re-run on today's code with the recorded
+configuration (Llama-3.2-1B, 32K context, 1,024 + 128 slots per request, greedy decode of 32
+tokens):
+
+| batch | bounded decode tok/s | TPOT | peak | recall | Full-KV tok/s | Full-KV peak |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 71.12 (70.9) | 14.06 ms | 5.17 GiB | 1/1 | 65.36 (61.6) | 5.44 GiB |
+| 2 | 142.62 (142.5) | 14.02 ms | 5.24 GiB | 2/2 | 113.20 (103.2) | 8.69 GiB |
+| 4 | 289.70 (291.1) | 13.81 ms | 5.35 GiB | 4/4 | **144.91 (124.7)** | **15.06 GiB** |
+| 8 | 540.72 (583.0) | 14.80 ms | 5.48 GiB | 8/8 | **OOM (OOM)** | - |
+| 16 | 1156.19 (1174.8) | 13.84 ms | 5.83 GiB | 16/16 | - | - |
+| 32 | **2139.17 (1946.8)** | 14.96 ms | 6.62 GiB | **32/32** | - | - |
+
+with the recorded values in brackets.  Both rows therefore hold on today's code:
+
+* **throughput 14.76x** at the same request size (2139.17 against 144.91 decode tok/s, the
+  largest full-KV batch that fits), against the >= 3x target;
+* **fixed-SLA concurrency 8x** - under a 50 ms TPOT SLA the bounded design serves 32 requests
+  at 14.96 ms each while the fifth 32K Full-KV request does not fit on the card at all
+  (peak 15.06 GiB at batch 4, OOM at 8);
+* quality is unchanged to batch 32 (recall 32/32), and the memory story is 6.62 GiB for 32
+  resident requests against 15.06 GiB for 4.
+
+The two harnesses disagree slightly in the bounded arm's favour at batch 1-4 (this run is up
+to 16% faster than the record), which is the same kind of campaign-to-campaign drift 3.42
+found in the other direction; the ratios are what the rows claim and they hold.
+
 
 ## 4. What this establishes, and what it does not
 

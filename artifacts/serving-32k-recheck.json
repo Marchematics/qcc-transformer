@@ -1,0 +1,90 @@
+{
+ "model": "/root/qcc/models/Llama-3.2-1B-Instruct",
+ "config": {
+  "model": "/root/qcc/models/Llama-3.2-1B-Instruct",
+  "length": 32768,
+  "batches": [
+   1,
+   2,
+   4,
+   8
+  ],
+  "policies": [
+   "full"
+  ],
+  "budget": 1024,
+  "obs": 64,
+  "nsink": 4,
+  "pool": 7,
+  "max_new": 32,
+  "prefill_chunk": 8192,
+  "seed": 4242,
+  "load_in_4bit": false,
+  "out": "artifacts/serving-32k-recheck.json"
+ },
+ "results": [
+  {
+   "policy": "full",
+   "batch": 1,
+   "context_tokens": 32741,
+   "budget": null,
+   "prefill_s": 4.498,
+   "kept_slots": 32741,
+   "decode_s": 0.49,
+   "decode_tokens_per_s": 65.36,
+   "tpot_ms": 15.301,
+   "peak_cuda_gib": 5.436,
+   "recall": [
+    1.0
+   ],
+   "sample": "7547540.?\n\nThere is no special magic num",
+   "status": "ok"
+  },
+  {
+   "policy": "full",
+   "batch": 2,
+   "context_tokens": 32741,
+   "budget": null,
+   "prefill_s": 8.704,
+   "kept_slots": 32741,
+   "decode_s": 0.565,
+   "decode_tokens_per_s": 113.2,
+   "tpot_ms": 17.667,
+   "peak_cuda_gib": 8.686,
+   "recall": [
+    1.0,
+    1.0
+   ],
+   "sample": "7547540.?\n\nThere is no special magic num",
+   "status": "ok"
+  },
+  {
+   "policy": "full",
+   "batch": 4,
+   "context_tokens": 32741,
+   "budget": null,
+   "prefill_s": 18.006,
+   "kept_slots": 32741,
+   "decode_s": 0.883,
+   "decode_tokens_per_s": 144.91,
+   "tpot_ms": 27.604,
+   "peak_cuda_gib": 15.058,
+   "recall": [
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "sample": "7547540.?\n\nThere is no special magic num",
+   "status": "ok"
+  },
+  {
+   "policy": "full",
+   "batch": 8,
+   "context_tokens": 32741,
+   "budget": null,
+   "status": "oom",
+   "error": "CUDA out of memory. Tried to allocate 3.00 GiB. GPU 0 has a total capacity of 23.55 GiB of which 446.25 MiB is free. Process 887926 has 23.11 GiB memory in use."
+  }
+ ]
+}
