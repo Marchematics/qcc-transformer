@@ -2170,6 +2170,49 @@ What this does *not* do is meet the worst-task target at the shipped budget: 0.9
 The requirement is met by budget instead - 1.020 at 8,704 slots (3.28) - and the honest
 summary of the row is "met at 8,704 slots, 0.964 at 4,608 with the best filler signal
 found, 0.897 with the shipped one".
+### 3.42 Re-measuring the headline rows: what reproduces and what does not
+
+Everything in this report was produced by code that has changed since - the shipped compile
+path now writes into a preallocated buffer, the frontier library gained blend helpers, and
+the 1M harness gained rope-scaling options.  Re-running the two headline claims on today's
+code separates what is stable from what was configuration-dependent, and the answer is not
+uniform.
+
+**RULER reproduces.** The 80-record run over `niah_single_1`, `niah_multikey_2`,
+`niah_multikey_3` and `vt` at 4,096 + 512 slots, Llama-3.2-1B, matched records only:
+
+| | published (A2) | re-measured |
+|---|---:|---:|
+| aggregate retention | 1.0071 | **1.0102** |
+| worst task | 1.000 | **1.0000** |
+| decode state | 4,608 slots / 144 MiB | 4,608 slots / 144.0 MiB |
+
+**LongBench's worst task does not.** `gov_report` at the same budget flags, on the current
+code, with the Full-KV arm at 0.2808 in every row (the value A17/A20/A21 quote):
+
+| `--budget` (+512 anchors) | kept slots | bounded | retention | losing records |
+|---:|---:|---:|---:|---:|
+| 4,096 | 4,608 | 0.2308 | 0.829 | - |
+| 4,608 | 5,120 | 0.2538 | 0.893 | 13 / 20 |
+| 8,192 | 8,704 | 0.2634 | 0.941 | 7 / 20 |
+| 8,704 | 9,216 | 0.2497 | 0.895 | 10 / 20 |
+| 16,384 | 16,896 | 0.2809 | **1.002** | 1 / 20 (18 byte-identical) |
+
+3.28 published 0.897 / 1.020 / 1.032 for the first, second and fifth of those rows, but its
+Full-KV arm scored **0.2932**, not 0.2808: it is a different measurement configuration, and
+its numbers cannot be compared with the A13/A17/A20/A21 lineage this table belongs to.  In
+that lineage the worst task is **0.893 at the shipped 4,608 kept slots and does not reach
+0.97 until the view holds essentially the whole document** (16,896 kept, where 18 of 20
+prompts fit entirely and the arms are byte-identical) - so 3.28's structural finding stands
+(parity arrives when the document fits) while its intermediate numbers do not.
+
+Two things this session's changes are *exonerated* of, by direct measurement on a
+representative prompt: compiling through the preallocated buffer selects **bit-identical
+slots** and produces **bit-identical last-token logits** to the `DynamicCache` path (max
+absolute logit difference 0.0, same argmax).  The LongBench difference is therefore not a
+regression from the cache switch; it is a configuration difference in the published run, and
+the table above is the current one.
+
 
 ## 4. What this establishes, and what it does not
 
@@ -2317,7 +2360,7 @@ holds the full KV transiently. Two candidate directions:
 | target | value | status | evidence |
 |---|---|---|---|
 | Full-KV task quality, aggregate | >= 99% | **met** | RULER 1.0071 (A2), LongBench 1.0049 (A13) |
-| Full-KV task quality, worst task | >= 97% | **met for RULER (1.000)**; **met at 8,704 slots for LongBench (1.020)**, and at the 4,608-slot budget the worst task is 0.897 with the shipped filler, **0.964 with the best filler signal found** (`blend_lex`, a rank-blend of the two filler signals, which beats both of its endpoints: 3.41, A26) |
+| Full-KV task quality, worst task | >= 97% | **met for RULER (1.000)**; for LongBench's worst task (`gov_report`) the re-measured ladder on the current code is 0.829 at 4,608 kept slots, 0.893 at 5,120, 0.941 at 8,704, 0.895 at 9,216 and **1.002 at 16,896 - where 18 of 20 documents fit entirely and the two arms are byte-identical**, so the requirement is met by fitting the document rather than by selection. The previously published 1.020 at "8,704 slots" came from a run whose Full-KV arm scored 0.2932 against this configuration's 0.2808 and does not reproduce (3.42) |
 | 1M retrieval | >= 99.5% | **measured, not met, and not by the cache**: at 1M the exact Full-KV arm itself scores 0 - with post-hoc YaRN it answers `53` for `97`, and **with no rope scaling at all, and with dynamic-NTK scaling (`factor=32`), it degenerates into repetition instead** (`to the change the change the change`), so three rope mechanisms agree that the limit is the checkpoint rather than the rope setting; the single-needle protocol is at parity one length down (128K: exact 2 of 2, bounded 1 of 2). A 12 KiB/token checkpoint is the only 1M-feasible Full-KV configuration on this card (3.40, A24) |
 | History state | O(1) / bounded | **met** | 4,608 slots and 144 MiB at every length (A7); 4,632 slots and **54.0 MiB** at 1M under the 1M harness's budget (A23) |
 | 128K -> 1M state growth | <= 1.25x, ideally ~1x | **met at the ideal value: 1.00x** - 54.0 MiB at 128K and at 1M, against 1,500.0 MiB and 12,288.0 MiB for the exact cache (A23); the earlier 1.00x to 256K is superseded by the measurement at 1M |
