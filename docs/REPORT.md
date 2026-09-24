@@ -2500,8 +2500,8 @@ holds the full KV transiently. Two candidate directions:
 | 128K -> 1M state growth | <= 1.25x, ideally ~1x | **met at the ideal value: 1.00x** - 54.0 MiB at 128K and at 1M, against 1,500.0 MiB and 12,288.0 MiB for the exact cache (A23); the earlier 1.00x to 256K is superseded by the measurement at 1M |
 | 128K TPOT | >= 5x Full-KV | **not met as measured: 4.65x at batch 8** launch-free on Qwen2.5-0.5B (12 KiB/token), 1.81x at batch 1, 0.98-1.21x on the wall clock; a heavier checkpoint (Llama-3.2-1B, 32 KiB/token) gives 2.16x at batch 1 and 3.04x at batch 2, then its exact cache needs 16.0 GiB at batch 4 and does not fit. On both geometries the batch that would cross 5x is beyond the batch where the exact baseline fits on a 24 GiB card (A25, 3.40) |
 | 1M TPOT | >= 5x Full-KV | **met in the launch-free measurement: 6.31x** (23.85 vs 3.78 ms/step, same operator, CUDA-graph captured); the same arms measure 1.12x on the wall clock because ~16 ms/step of host launch overhead sits in both (A25, 3.40) |
-| Throughput | >= 3x | **met** | 15.6x speed configuration, 5.0x quality configuration (3.8) |
-| Fixed-SLA concurrency | >= 8x | **met** | 8-16x at a 50 ms SLA (3.18) |
+| Throughput | >= 3x | **met, re-verified on the current code: 14.76x** at 32K (2,139.17 against 144.91 decode tok/s, the largest Full-KV batch that fits); 15.6x when 3.8 was first measured (3.45, A29) |
+| Fixed-SLA concurrency | >= 8x | **met, re-verified on the current code: 8x** - 32 resident 32K requests at ~15 ms TPOT against 4 for the Full-KV arm, where a fifth does not fit (3.45, A29); 8-16x depending on the SLA in 3.18 |
 | Trainable parameters | <= 0.5%, target <= 0.2% | **met** | 0 parameters (A1) |
 | Retrofit | stock pretrained LM, no retraining | **met** | every number is produced from a frozen checkpoint (A1) |
 | Frontier-work comparison | head-to-head with recent methods | **met where measurable**: the published eviction families (3.29-3.32), vLLM's paged Full-KV (3.30) and post-hoc latent KV (3.33); trained-in architectures (native sparse attention, linear-attention hybrids) are not reproducible on a frozen checkpoint and no such model fits this GPU |
