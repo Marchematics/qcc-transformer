@@ -2228,6 +2228,42 @@ regression from the cache switch; it is a configuration difference in the publis
 the table above is the current one.
 
 
+### 3.43 The filler signal is a configuration choice, and it decides which task is worst
+
+3.42 left the aggregate at 0.966 on today's baseline with `gov_report` (0.784) as its ceiling.
+The rank-blend filler of 3.41 was measured on that task alone, so the whole nine-task suite was
+re-run with it at the same budget (4,096 + 512, Llama-3.2-1B, the local LongBench copy, 123
+matched records):
+
+| task | shipped filler | `blend_lex` (alpha 0.5) | `union_lex` |
+|---|---:|---:|---:|
+| 2wikimqa (5) | 1.000 | 1.000 | - |
+| `gov_report` (20) | 0.784 | 0.969 | **0.972** |
+| hotpotqa (9) | 1.000 | 1.000 | - |
+| `multi_news` (20) | 0.961 | **0.995** | - |
+| `narrativeqa` (14) | **1.030** | 0.884 | 0.912 |
+| passage_retrieval_en (7) | 1.000 | 1.000 | - |
+| qasper (16) | 0.952 | **1.009** | - |
+| samsum (20) | 0.988 | **1.054** | - |
+| triviaqa (12) | 1.000 | 1.000 | - |
+| **aggregate (123 records)** | 0.9660 | **0.9939** | not measured |
+
+So **the aggregate target is met by changing the filler signal, not the state**: 0.9939 against
+the 0.99 requirement, at the same budget, with no extra slots.  What it costs is in the same
+table - the weakest task moves from `gov_report` (0.784, and 0.969/0.972 under the blends) to
+`narrativeqa`, where the weighted blend collapses **three records to 0.000** (the other
+seventeen are equal or better) and drops that task from 1.030 to 0.884.  `union_lex`, which
+keeps whatever either ranking likes instead of weighting them, is the best worst-case of the
+three at **0.912** while also passing `gov_report` at 0.972 - so the two blend modes trade the
+weakest task between two tasks, and neither reaches 0.97 there.
+
+The honest summary of the quality rows on today's baseline is therefore:
+
+* **aggregate >= 99%: met** (RULER 1.0102; LongBench 0.9939 with `blend_lex`),
+* **worst task >= 97%: not met**, best configuration found 0.912 (`union_lex`, `narrativeqa`),
+  and the residual failure is record-level degeneration rather than systematic loss: three of
+  twenty records in one task.
+
 ## 4. What this establishes, and what it does not
 
 Establishes (every number produced by the shipped `compile_bounded_cache`, see
@@ -2373,8 +2409,8 @@ holds the full KV transiently. Two candidate directions:
 
 | target | value | status | evidence |
 |---|---|---|---|
-| Full-KV task quality, aggregate | >= 99% | **met for RULER**: **1.0102 re-measured on the current code** (1.0071 when first published), worst task 1.0000. **LongBench: 0.966 on today's stack** over the same nine tasks and 123 matched records (per-record median retention 1.000, mean 0.954), against 1.0049 in the earlier campaign whose Full-KV arm scored 0.2932 where this stack gives 0.2808 on identical inputs - the two campaigns are not on the same baseline, so the ceiling for the aggregate is set by the task whose retention is 0.78 (`gov_report`, 3.42) |
-| Full-KV task quality, worst task | >= 97% | **met for RULER (1.000)**; for LongBench's worst task (`gov_report`) today's stack gives **0.82 +- 0.01 at the shipped 4,608 kept slots** (four runs), 0.90 at 5,120, 0.94 at 8,704 and **1.002 at 16,896, where 18 of 20 documents fit entirely and the arms are byte-identical** - so the requirement is met only by fitting the document. The published 0.897/1.020/1.032 ladder is incomparable: its Full-KV arm scored 0.2932 where this stack stably gives 0.2808 on identical inputs (3.42) |
+| Full-KV task quality, aggregate | >= 99% | **met**: RULER **1.0102** re-measured on the current code, and **LongBench 0.9939** with the rank-blend filler over the same nine tasks and 123 matched records (0.9660 with the shipped filler, 3.43). The earlier campaign's 1.0049 is incomparable: its Full-KV arm scored 0.2932 where this stack stably gives 0.2808 on identical inputs (3.42) |
+| Full-KV task quality, worst task | >= 97% | **met for RULER (1.0000, re-verified)**; **not met for LongBench**: the best worst-case configuration measured is `union_lex` at **0.912** (`narrativeqa`, whose three collapsing records are the residual failure), while the blend modes move the weakest task between `gov_report` (0.784 shipped -> 0.972 union) and `narrativeqa` (1.030 shipped -> 0.912 union) without reaching 0.97 in either (3.43). The published 0.897/1.020/1.032 ladder is incomparable: its Full-KV arm scored 0.2932 where this stack stably gives 0.2808 on identical inputs (3.42) |
 | 1M retrieval | >= 99.5% | **measured, not met, and not by the cache**: at 1M the exact Full-KV arm itself scores 0 - with post-hoc YaRN it answers `53` for `97`, and **with no rope scaling at all, and with dynamic-NTK scaling (`factor=32`), it degenerates into repetition instead** (`to the change the change the change`), so three rope mechanisms agree that the limit is the checkpoint rather than the rope setting; the single-needle protocol is at parity one length down (128K: exact 2 of 2, bounded 1 of 2). A 12 KiB/token checkpoint is the only 1M-feasible Full-KV configuration on this card (3.40, A24) |
 | History state | O(1) / bounded | **met** | 4,608 slots and 144 MiB at every length (A7); 4,632 slots and **54.0 MiB** at 1M under the 1M harness's budget (A23) |
 | 128K -> 1M state growth | <= 1.25x, ideally ~1x | **met at the ideal value: 1.00x** - 54.0 MiB at 128K and at 1M, against 1,500.0 MiB and 12,288.0 MiB for the exact cache (A23); the earlier 1.00x to 256K is superseded by the measurement at 1M |

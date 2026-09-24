@@ -815,3 +815,18 @@ def test_blend_scores_accepts_per_layer_lists():
     assert isinstance(out2, list) and len(out2) == 2
     with pytest.raises(ValueError):
         blend_scores(primary, secondary * 3, 0.5)
+
+
+def test_blend_union_mode_keeps_what_either_ranking_likes():
+    """`union` is for the case where the two signals fail on different records."""
+    from benchmarks.benchmark_bounded_decode_frontier import blend_scores
+
+    primary = torch.tensor([[[[9.0, 5.0, 1.0, 0.0]]]])      # likes slot 0
+    secondary = torch.tensor([[[[0.0, 1.0, 5.0, 9.0]]]])    # likes slot 3
+    mean = blend_scores(primary, secondary, alpha=0.5)
+    union = blend_scores(primary, secondary, alpha=0.5, mode="union")
+    assert union.argmin().item() in (0, 3)                  # one of the two favourites
+    assert union[0, 0, 0, 0] == 0.0 and union[0, 0, 0, 3] == 0.0
+    assert mean[0, 0, 0, 0] > 0.0                           # the mean dilutes both
+    with pytest.raises(ValueError):
+        blend_scores(primary, secondary, 0.5, mode="nope")

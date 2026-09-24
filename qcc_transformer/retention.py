@@ -61,6 +61,9 @@ class RetentionConfig:
     # weight of the accumulated-attention ranking in the `blend_lex` filler signal; unused
     # by the shipped policy, which ranks with the observation window alone
     blend_alpha: float = 0.5
+    # how `blend_lex` combines the two filler rankings: `mean` weights them, `union` keeps
+    # whatever either signal ranks highly
+    blend_mode: str = "mean"
     observation_window: int = 64
     attention_sinks: int = 4
     recent_fraction: float = 0.25

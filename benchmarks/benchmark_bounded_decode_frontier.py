@@ -923,13 +923,22 @@ def rank_normalize(scores: torch.Tensor) -> torch.Tensor:
     return ranks
 
 
-def blend_scores(primary, secondary, alpha: float):
-    """`alpha` of the secondary ranking and `1 - alpha` of the primary one.
+def blend_scores(primary, secondary, alpha: float, mode: str = "mean"):
+    """Combine two rankings: `mean` weights them, `union` keeps what either likes.
+
+    `mean` is `(1 - alpha) * rank(primary) + alpha * rank(secondary)`.  `union` takes
+    `min(rank_primary, rank_secondary)` instead, i.e. a slot is good if *either* signal
+    ranks it highly - which is the right reading when the two signals fail on different
+    records rather than on different positions (measured: the weighted blend lifts
+    `gov_report` from 0.784 to 0.969 and drops `narrativeqa` from 1.030 to 0.884 by
+    collapsing three of its records to 0.000).
 
     Accepts a tensor or a list of per-layer tensors for either side (the two signals come
     from different code paths in the harnesses) and returns the same container shape as
     the primary signal.
     """
+    if mode not in ("mean", "union"):
+        raise ValueError(f"unknown blend mode: {mode}")
     primaries, was_list = _as_layer_list(primary)
     secondaries, _ = _as_layer_list(secondary)
     if len(secondaries) == 1 and len(primaries) > 1:
@@ -939,8 +948,12 @@ def blend_scores(primary, secondary, alpha: float):
     if len(primaries) != len(secondaries):
         raise ValueError(f"cannot blend {len(primaries)} primary layers with "
                          f"{len(secondaries)} secondary ones")
-    blended = [(1.0 - alpha) * rank_normalize(a) + alpha * rank_normalize(b)
-               for a, b in zip(primaries, secondaries)]
+    if mode == "union":
+        blended = [torch.minimum(rank_normalize(a), rank_normalize(b))
+                   for a, b in zip(primaries, secondaries)]
+    else:
+        blended = [(1.0 - alpha) * rank_normalize(a) + alpha * rank_normalize(b)
+                   for a, b in zip(primaries, secondaries)]
     return blended if was_list else blended[0]
 
 
@@ -962,7 +975,7 @@ def build_idxs(policy, scores, cache, record, budget, nsink, nrecent, L, pool, d
         forced = sorted(set(list(range(min(nsink, L))) + list(range(max(0, L - nrecent), L))))
         sel = sorted(set(anchors) | set(forced))
         return [torch.tensor([sel] * sc.shape[0], device=device, dtype=torch.long) for sc in scores]
-    if policy in ("lex_obs", "mean_lex", "h2o_lex", "blend_lex"):
+    if policy in ("lex_obs", "mean_lex", "h2o_lex", "blend_lex", "union_lex"):
         # Each head keeps its own attention ranking and additionally receives the
         # question's rare strings found in the context.  The three names differ
         # only in the *filler* signal handed in as `scores`: the final query
