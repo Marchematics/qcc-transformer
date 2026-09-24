@@ -2088,10 +2088,22 @@ budget):
 
 The ratio is monotone in batch, and at batch 16 the exact arm cannot be run at all: its
 cache alone is 131,072 x 12,288 B x 16 = **25.8 GiB** against a 23.55 GiB card, while the
-bounded arm's whole batch is 0.85 GiB and costs 6.19 ms/step. So the 128K target is not
-met as measured (best 4.65x at batch 8, launch-free), and the batch where this checkpoint
-would cross 5x is the batch where the exact baseline stops fitting - which is the same
-capacity argument the 1M state rows make, arriving from the latency side.
+bounded arm's whole batch is 0.85 GiB and costs 6.19 ms/step.
+
+A *heavier* checkpoint raises the ratio at a fixed batch, and hits the same wall sooner -
+Llama-3.2-1B stores 32,768 B per token, so its exact cache is 4.0 GiB per row:
+
+| model (KV per token) | batch 1 | batch 2 | batch 4 | batch 8 | batch 16 |
+|---|---:|---:|---:|---:|---:|
+| Qwen2.5-0.5B (12 KiB) | 1.81x | 2.10x | 3.03x | **4.65x** | infeasible (25.8 GiB) |
+| Llama-3.2-1B (32 KiB) | 2.16x | **3.04x** | infeasible (16.0 GiB) | - | - |
+
+So the heavier geometry buys ratio at batch 1 (2.16x against 1.81x) and reaches the same
+conclusion from the other side: the batch where the ratio would cross 5x is the batch where
+the exact baseline stops fitting on a 24 GiB card. The 128K target is therefore **not met
+as measured** - best 4.65x on the light checkpoint at batch 8, 3.04x on the heavy one at
+batch 2 - and the reason is capacity rather than the retention law, which is the same
+argument the 1M state rows make arriving from the latency side.
 
 * **Capture is refused on the flash decode path but works on the SDPA one.**
   `torch.cuda.graph` raises "operation not permitted when stream is capturing" with the
@@ -2306,10 +2318,10 @@ holds the full KV transiently. Two candidate directions:
 |---|---|---|---|
 | Full-KV task quality, aggregate | >= 99% | **met** | RULER 1.0071 (A2), LongBench 1.0049 (A13) |
 | Full-KV task quality, worst task | >= 97% | **met for RULER (1.000)**; **met at 8,704 slots for LongBench (1.020)**, and at the 4,608-slot budget the worst task is 0.897 with the shipped filler, **0.964 with the best filler signal found** (`blend_lex`, a rank-blend of the two filler signals, which beats both of its endpoints: 3.41, A26) |
-| 1M retrieval | >= 99.5% | **measured, not met, and not by the cache**: at 1M the exact Full-KV arm itself scores 0 - with post-hoc YaRN it answers `53` for `97`, and **with no rope scaling at all it degenerates into repetition** (`to the change the change the change`), so the limit is the checkpoint rather than the rope setting; the single-needle protocol is at parity one length down (128K: exact 2 of 2, bounded 1 of 2). A 12 KiB/token checkpoint is the only 1M-feasible Full-KV configuration on this card (3.40, A24) |
+| 1M retrieval | >= 99.5% | **measured, not met, and not by the cache**: at 1M the exact Full-KV arm itself scores 0 - with post-hoc YaRN it answers `53` for `97`, and **with no rope scaling at all, and with dynamic-NTK scaling (`factor=32`), it degenerates into repetition instead** (`to the change the change the change`), so three rope mechanisms agree that the limit is the checkpoint rather than the rope setting; the single-needle protocol is at parity one length down (128K: exact 2 of 2, bounded 1 of 2). A 12 KiB/token checkpoint is the only 1M-feasible Full-KV configuration on this card (3.40, A24) |
 | History state | O(1) / bounded | **met** | 4,608 slots and 144 MiB at every length (A7); 4,632 slots and **54.0 MiB** at 1M under the 1M harness's budget (A23) |
 | 128K -> 1M state growth | <= 1.25x, ideally ~1x | **met at the ideal value: 1.00x** - 54.0 MiB at 128K and at 1M, against 1,500.0 MiB and 12,288.0 MiB for the exact cache (A23); the earlier 1.00x to 256K is superseded by the measurement at 1M |
-| 128K TPOT | >= 5x Full-KV | **not met as measured: 4.65x at batch 8** launch-free (24.58 vs 5.28 ms/step), 1.81x at batch 1, and 0.98-1.21x on the wall clock. The ratio is monotone in batch, but at batch 16 the exact arm's cache alone needs 25.8 GiB against a 23.55 GiB card while the bounded arm runs at 6.19 ms/step in 0.85 GiB - the batch where this checkpoint would cross 5x is the batch where the exact baseline stops fitting (A25, 3.40) |
+| 128K TPOT | >= 5x Full-KV | **not met as measured: 4.65x at batch 8** launch-free on Qwen2.5-0.5B (12 KiB/token), 1.81x at batch 1, 0.98-1.21x on the wall clock; a heavier checkpoint (Llama-3.2-1B, 32 KiB/token) gives 2.16x at batch 1 and 3.04x at batch 2, then its exact cache needs 16.0 GiB at batch 4 and does not fit. On both geometries the batch that would cross 5x is beyond the batch where the exact baseline fits on a 24 GiB card (A25, 3.40) |
 | 1M TPOT | >= 5x Full-KV | **met in the launch-free measurement: 6.31x** (23.85 vs 3.78 ms/step, same operator, CUDA-graph captured); the same arms measure 1.12x on the wall clock because ~16 ms/step of host launch overhead sits in both (A25, 3.40) |
 | Throughput | >= 3x | **met** | 15.6x speed configuration, 5.0x quality configuration (3.8) |
 | Fixed-SLA concurrency | >= 8x | **met** | 8-16x at a 50 ms SLA (3.18) |

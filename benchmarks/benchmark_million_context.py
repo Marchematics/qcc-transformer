@@ -198,9 +198,15 @@ def main(argv=None):
                         help="flash_attention_2 makes the exact long-context prefill "
                              "affordable: the fused kernel is what keeps a 128K-1M "
                              "prefill at hundreds of MiB instead of tens of GiB (3.34)")
-    parser.add_argument("--yarn", default="auto", choices=["auto", "off"],
-                        help="`auto` applies YaRN rope scaling with "
-                             "factor = length / trained window, identically to both arms")
+    parser.add_argument("--yarn", default="auto",
+                        choices=["auto", "off", "yarn", "linear", "dynamic"],
+                        help="`auto` applies YaRN with factor = length / trained window, "
+                             "identically to both arms; `linear` and `dynamic` are the "
+                             "other position-interpolation mechanisms (dynamic NTK "
+                             "rescales theta with the sequence length instead of "
+                             "distorting attention temperatures, which is the variant "
+                             "worth trying on a checkpoint that was never trained with "
+                             "any scaling)")
     parser.add_argument("--value-style", default="digits", choices=["words", "digits"],
                         help="what the needle holds; `digits` is what this checkpoint "
                              "answers (see build_haystack for the width argument)")
@@ -228,11 +234,12 @@ def main(argv=None):
         config = AutoConfig.from_pretrained(args.model)
         trained = int(getattr(config, "max_position_embeddings", 32768))
         factor = max(1.0, length / trained)
-        if args.yarn == "auto" and factor > 1.0:
-            config.rope_scaling = {"type": "yarn", "factor": factor,
+        scaling = "yarn" if args.yarn == "auto" else args.yarn
+        if scaling != "off" and factor > 1.0:
+            config.rope_scaling = {"type": scaling, "factor": factor,
                                    "original_max_position_embeddings": trained}
             # transformers 5 exposes the resolved form as `rope_parameters`
-            config.rope_parameters = {"rope_type": "yarn", "factor": factor,
+            config.rope_parameters = {"rope_type": scaling, "factor": factor,
                                       "original_max_position_embeddings": trained,
                                       "rope_theta": getattr(config, "rope_theta", 1e6)}
         config.max_position_embeddings = max(length + 1024, trained)

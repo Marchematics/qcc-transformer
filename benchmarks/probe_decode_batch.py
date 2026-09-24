@@ -34,6 +34,21 @@ from benchmarks import benchmark_bounded_decode_frontier as L  # noqa: E402
 from qcc_transformer.preallocated_cache import preallocated_cache_for  # noqa: E402
 
 
+def kv_bytes_per_token(model) -> int:
+    """Bytes of KV per token for this checkpoint: layers x kv-heads x head_dim x 2 x 2.
+
+    Read from the config rather than assumed - an earlier version of this probe recorded
+    Qwen2.5-0.5B's 12,288 B/token for Llama-3.2-1B's 32,768, which understated the
+    infeasible batch's footprint by 2.7x.
+    """
+    config = model.config
+    head_dim = int(getattr(config, "head_dim", 0)
+                   or config.hidden_size // config.num_attention_heads)
+    heads = int(getattr(config, "num_key_value_heads", None)
+                or config.num_attention_heads)
+    return int(config.num_hidden_layers) * heads * head_dim * 2 * 2
+
+
 @torch.no_grad()
 def build_cache(model, size, batch, chunk, device):
     """A preallocated cache holding exactly `size` keys for each of `batch` rows."""
@@ -132,7 +147,7 @@ def main(argv=None) -> int:
                 except torch.OutOfMemoryError:
                     rows.append({"context": context, "arm": arm, "batch": batch,
                                  "status": "infeasible",
-                                 "cache_bytes": size * 12288 * batch})
+                                 "cache_bytes": size * kv_bytes_per_token(model) * batch})
                     print(f"   ctx {context:>8} {arm:<8} batch {batch}  infeasible",
                           flush=True)
                     torch.cuda.empty_cache()
