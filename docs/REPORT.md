@@ -2257,6 +2257,27 @@ keeps whatever either ranking likes instead of weighting them, is the best worst
 three at **0.912** while also passing `gov_report` at 0.972 - so the two blend modes trade the
 weakest task between two tasks, and neither reaches 0.97 there.
 
+Two further levers were tried on the residual and both are negative results worth recording.
+A **no-repeat n-gram guard** (`no_repeat_ngram_size=4`, applied to every arm, since the
+collapse is decoder degeneration rather than missing content) leaves the ratios where they
+were - `narrativeqa` 0.9117 against 0.912, `gov_report` 0.9710 against 0.9723 - while moving
+the Full-KV arm itself by the same +3.5% on `gov_report`, so it neither fixes the collapse nor
+biases the comparison.  **Budget** does move `narrativeqa`, but not far enough: 0.912 at the
+shipped 4,608 kept slots and **0.9436 at 8,704** with union selection, one record still
+collapsing to zero.  The full map of the worst task on today's baseline:
+
+| configuration | `gov_report` | `narrativeqa` | worst |
+|---|---:|---:|---:|
+| shipped filler, 4,608 kept | 0.784 | 1.030 | **0.784** |
+| `blend_lex`, 4,608 kept | 0.969 | 0.884 | **0.884** |
+| `union_lex`, 4,608 kept | 0.972 | 0.912 | **0.912** |
+| `union_lex` + no-repeat guard, 4,608 kept | 0.971 | 0.912 | 0.912 |
+| `union_lex`, 8,704 kept | not measured | **0.944** | <= 0.944 |
+| shipped filler, 16,896 kept (whole document) | 1.002 | not measured | - |
+
+so the best worst-case found is **0.912 at the shipped budget and 0.944 at 8,704**, and the
+requirement of 0.97 is not reached by any configuration measured.
+
 The honest summary of the quality rows on today's baseline is therefore:
 
 * **aggregate >= 99%: met** (RULER 1.0102; LongBench 0.9939 with `blend_lex`),
@@ -2410,7 +2431,7 @@ holds the full KV transiently. Two candidate directions:
 | target | value | status | evidence |
 |---|---|---|---|
 | Full-KV task quality, aggregate | >= 99% | **met**: RULER **1.0102** re-measured on the current code, and **LongBench 0.9939** with the rank-blend filler over the same nine tasks and 123 matched records (0.9660 with the shipped filler, 3.43). The earlier campaign's 1.0049 is incomparable: its Full-KV arm scored 0.2932 where this stack stably gives 0.2808 on identical inputs (3.42) |
-| Full-KV task quality, worst task | >= 97% | **met for RULER (1.0000, re-verified)**; **not met for LongBench**: the best worst-case configuration measured is `union_lex` at **0.912** (`narrativeqa`, whose three collapsing records are the residual failure), while the blend modes move the weakest task between `gov_report` (0.784 shipped -> 0.972 union) and `narrativeqa` (1.030 shipped -> 0.912 union) without reaching 0.97 in either (3.43). The published 0.897/1.020/1.032 ladder is incomparable: its Full-KV arm scored 0.2932 where this stack stably gives 0.2808 on identical inputs (3.42) |
+| Full-KV task quality, worst task | >= 97% | **met for RULER (1.0000, re-verified)**; **not met for LongBench**: the best worst-case configuration measured is `union_lex` at **0.912** at the shipped budget and **0.944** at 8,704 kept (`narrativeqa`, with one or two records collapsing to zero), and the blend modes move the weakest task between `gov_report` (0.784 shipped -> 0.972 union) and `narrativeqa` (1.030 shipped -> 0.912 union) without reaching 0.97 in either. A no-repeat n-gram guard changes the ratios by less than 0.001 (3.43). The published 0.897/1.020/1.032 ladder is incomparable: its Full-KV arm scored 0.2932 where this stack stably gives 0.2808 on identical inputs (3.42) |
 | 1M retrieval | >= 99.5% | **measured, not met, and not by the cache**: at 1M the exact Full-KV arm itself scores 0 - with post-hoc YaRN it answers `53` for `97`, and **with no rope scaling at all, and with dynamic-NTK scaling (`factor=32`), it degenerates into repetition instead** (`to the change the change the change`), so three rope mechanisms agree that the limit is the checkpoint rather than the rope setting; the single-needle protocol is at parity one length down (128K: exact 2 of 2, bounded 1 of 2). A 12 KiB/token checkpoint is the only 1M-feasible Full-KV configuration on this card (3.40, A24) |
 | History state | O(1) / bounded | **met** | 4,608 slots and 144 MiB at every length (A7); 4,632 slots and **54.0 MiB** at 1M under the 1M harness's budget (A23) |
 | 128K -> 1M state growth | <= 1.25x, ideally ~1x | **met at the ideal value: 1.00x** - 54.0 MiB at 128K and at 1M, against 1,500.0 MiB and 12,288.0 MiB for the exact cache (A23); the earlier 1.00x to 256K is superseded by the measurement at 1M |

@@ -99,6 +99,10 @@ def parse_args(argv=None):
     parser.add_argument("--max-new", type=int, default=None,
                         help="greedy decode length; default: the official "
                              "dataset2maxlen.json value of each task (128/512/32/64)")
+    parser.add_argument("--no-repeat-ngram", type=int, default=0,
+                        help="mask a token that would repeat an n-gram already generated "
+                             "(the record-level collapse this project keeps measuring is "
+                             "decoder degeneration, not missing content)")
     parser.add_argument("--blend-mode", default="mean", choices=("mean", "union"),
                         help="how blend_lex/union_lex combine the two filler rankings")
     parser.add_argument("--blend-alpha", type=float, default=0.5,
@@ -168,8 +172,36 @@ def truncate_ids(input_ids: torch.Tensor, max_tokens: int):
                      dim=1), True
 
 
+def pick_token(logits, generated, no_repeat_ngram: int = 0):
+    """Argmax, with an optional no-repeat n-gram guard.
+
+    The LongBench losses this project keeps finding are not missing content but *decoder
+    degeneration*: a bounded context makes the greedy loop fall into a repeated n-gram and
+    the answer collapses (measured on the worst record: distinct-word ratio 0.091 against
+    0.409 for the Full-KV arm, one repeated 8-gram covering 22% of its words; the same
+    signature collapses three of `narrativeqa`'s twenty records to score 0.000 under the
+    blended filler).  The guard masks a token that would repeat an n-gram already present in
+    the generation and takes the next-best one, which is a decoding setting applied to every
+    arm rather than a change to what is retained.
+    """
+    row = logits[0, -1]
+    n = int(no_repeat_ngram)
+    if n <= 1 or len(generated) < n - 1:
+        return int(row.argmax())
+    prefix = tuple(generated[-(n - 1):])
+    banned = {generated[start + n - 1]
+              for start in range(len(generated) - n + 1)
+              if tuple(generated[start:start + n - 1]) == prefix}
+    if not banned:
+        return int(row.argmax())
+    masked = row.clone()
+    masked[list(banned)] = float("-inf")
+    return int(masked.argmax())
+
+
 @torch.no_grad()
-def greedy(model, cache, first, length, max_new, eos_ids, forward_kwargs=("cache_position",)):
+def greedy(model, cache, first, length, max_new, eos_ids, forward_kwargs=("cache_position",),
+           no_repeat_ngram: int = 0):
     """The harness decode loop: absolute positions, greedy, stop at EOS."""
     kept = cache.get_seq_length()
     mask = torch.ones(1, kept + 1, device=first.device, dtype=torch.long)
@@ -181,7 +213,8 @@ def greedy(model, cache, first, length, max_new, eos_ids, forward_kwargs=("cache
             call["cache_position"] = torch.arange(kept + step, kept + step + 1,
                                                   device=first.device)
         out = model(current, **call)
-        token = out.logits[:, -1:].argmax(-1)
+        token = torch.tensor([[pick_token(out.logits, generated, no_repeat_ngram)]],
+                             device=first.device)
         generated.append(int(token))
         mask = torch.cat([mask, torch.ones(1, 1, device=first.device, dtype=torch.long)],
                          dim=-1)
@@ -366,7 +399,7 @@ def main(argv=None):
                         kept_mean = float(kept)
                     generated, decode_seconds = greedy(
                         model, cache, logits[:, -1:].argmax(-1), length, max_new,
-                        eos_ids, kwargs_names)
+                        eos_ids, kwargs_names, no_repeat_ngram=args.no_repeat_ngram)
                     text = tokenizer.decode(generated, skip_special_tokens=True).strip()
 
                     entry = {
