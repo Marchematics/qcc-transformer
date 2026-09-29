@@ -10,10 +10,10 @@ indexed in [`EVIDENCE.md`](EVIDENCE.md).
 
 ## 1. Decode complexity
 
-Let (L) denote the prefilled context length and (B) the retained KV budget.
+Let `L` denote the prefilled context length and `B` the retained KV budget.
 
-For conventional Full-KV decoding, KV state scales as (O(L)), and each
-generated token attends over an (O(L)) historical KV working set.
+For conventional Full-KV decoding, KV state scales as `O(L)`, and each
+generated token attends over an `O(L)` historical KV working set.
 
 After cache compilation, QCC retains (B) entries per configured unit:
 
@@ -22,7 +22,7 @@ After cache compilation, QCC retains (B) entries per configured unit:
 	ext{historical KV working set per token} = O(B).
 ]
 
-For fixed (B), both are **O(1) with respect to (L)**.
+For fixed `B`, both are **O(1) with respect to `L`**.
 
 This is the primary scaling property: increasing the original prompt length does
 not require a proportional increase in live decode state.
