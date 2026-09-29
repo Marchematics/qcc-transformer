@@ -1,0 +1,28 @@
+name: repository maintenance
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  remove-obsolete-refs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Remove obsolete branches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          for ref in \
+            "cleanup/public-facing-repo" \
+            "codex/direct-qcc-exact-runtime-20260903" \
+            "codex/qcc-exact-tier-20260903" \
+            "codex/strict-99-gates-20260903"
+          do
+            gh api -X DELETE "repos/$REPO/git/refs/heads/$ref" || true
+          done
