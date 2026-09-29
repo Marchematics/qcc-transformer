@@ -27,7 +27,7 @@ cache, logits = compile_bounded_cache(
 
 ## Core advantage
 
-Let (L) be the prefilled context length and (B) the configured retained KV
+Let `L` be the prefilled context length and `B` the configured retained KV
 budget.
 
 | Decode property | Full-KV | QCC |
@@ -205,7 +205,7 @@ tests/             unit and regression tests
 - [`docs/NOVELTY.md`](docs/NOVELTY.md) — relation to prior bounded-memory attention work
 
 > **Complexity convention.** The O(1) statements above are with respect to
-> prefilled context length (L) at fixed retained budget (B), and refer to
+> prefilled context length `L` at fixed retained budget `B`, and refer to
 > decode state and the historical KV working set used per generated token.
 > Prefill still processes the input sequence.
 
