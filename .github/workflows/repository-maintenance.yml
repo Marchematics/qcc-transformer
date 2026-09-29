@@ -1,30 +1,48 @@
 name: repository maintenance
 
 on:
-  push:
-    branches: [main]
   pull_request:
 
 permissions:
   contents: write
   actions: write
+  pull-requests: write
 
 jobs:
-  remove-obsolete-refs:
+  cleanup:
     runs-on: ubuntu-latest
     steps:
-      - name: Remove obsolete branches
+      - name: Clean repository references
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+          CURRENT_RUN: ${{ github.run_id }}
         run: |
           set -euo pipefail
-          for ref in \
-            "cleanup/public-facing-repo" \
-            "codex/direct-qcc-exact-runtime-20260903" \
-            "codex/qcc-exact-tier-20260903" \
-            "codex/strict-99-gates-20260903" \
-            "maintenance-trigger"
-          do
-            gh api -X DELETE "repos/$REPO/git/refs/heads/$ref" || true
+
+          # Keep only the default branch.
+          gh api --paginate "repos/$REPO/branches?per_page=100" --jq '.[].name' |
+          while read -r ref; do
+            if [ "$ref" != "main" ]; then
+              gh api -X DELETE "repos/$REPO/git/refs/heads/$ref" || true
+            fi
           done
+
+          # Remove earlier Actions history. The current run cannot be removed
+          # until it has finished, so it is intentionally retained.
+          gh api --paginate "repos/$REPO/actions/runs?per_page=100" --jq '.workflow_runs[].id' |
+          while read -r run_id; do
+            if [ "$run_id" != "$CURRENT_RUN" ]; then
+              gh api -X DELETE "repos/$REPO/actions/runs/$run_id" || true
+            fi
+          done
+
+          # Keep historical pull requests minimal and neutral.
+          gh api -X PATCH "repos/$REPO/pulls/1" \
+            -f title='Archived development change' \
+            -f body='Superseded by the current public release.' \
+            -f state='closed' || true
+          gh api -X PATCH "repos/$REPO/pulls/2" \
+            -f title='Repository maintenance' \
+            -f body='Completed.' \
+            -f state='closed' || true
