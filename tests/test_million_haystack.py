@@ -111,8 +111,12 @@ def test_word_values_are_single_tokens_on_the_real_tokenizer():
     """The whole point of the `words` style: one token per value, so the metric is
     not decided by multi-token digit generation."""
     checkpoint = "/root/qcc/models/Qwen2.5-0.5B-Instruct"
-    if not Path(checkpoint).exists():
-        pytest.skip("checkpoint not present")
+    try:
+        checkpoint_available = Path(checkpoint).is_dir()
+    except OSError:
+        checkpoint_available = False
+    if not checkpoint_available:
+        pytest.skip("local Qwen checkpoint is not available")
     from transformers import AutoTokenizer
     from benchmarks.benchmark_million_context import _VALUE_WORDS
     tokenizer = AutoTokenizer.from_pretrained(checkpoint)
