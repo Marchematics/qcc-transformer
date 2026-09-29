@@ -3,6 +3,7 @@ name: repository maintenance
 on:
   push:
     branches: [main]
+  pull_request:
 
 permissions:
   contents: write
@@ -22,7 +23,8 @@ jobs:
             "cleanup/public-facing-repo" \
             "codex/direct-qcc-exact-runtime-20260903" \
             "codex/qcc-exact-tier-20260903" \
-            "codex/strict-99-gates-20260903"
+            "codex/strict-99-gates-20260903" \
+            "maintenance-trigger"
           do
             gh api -X DELETE "repos/$REPO/git/refs/heads/$ref" || true
           done
