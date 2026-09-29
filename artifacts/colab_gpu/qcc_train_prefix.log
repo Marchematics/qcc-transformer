@@ -1,0 +1,27 @@
+step=1 loss=29.895594 accuracy=0.0000
+step=100 loss=3.820120 accuracy=0.1250
+step=200 loss=0.130630 accuracy=1.0000
+step=300 loss=0.000006 accuracy=1.0000
+step=400 loss=0.000017 accuracy=1.0000
+step=500 loss=4.897636 accuracy=0.3750
+step=600 loss=0.000009 accuracy=1.0000
+step=700 loss=0.022660 accuracy=1.0000
+step=800 loss=0.000002 accuracy=1.0000
+{
+  "device": "cuda",
+  "checkpoint": "artifacts/qcc_prefix_1m.pt",
+  "dataset": "artifacts/retrieval_qcc_prefix_1m.jsonl",
+  "examples": 40,
+  "eval_lengths": [
+    128,
+    128000
+  ],
+  "train": {
+    "steps": 800.0,
+    "final_loss": 2.473588210705202e-06,
+    "final_accuracy": 1.0,
+    "best_loss": 1.4901160305669237e-08,
+    "best_accuracy": 1.0,
+    "train_seconds": 18.38181699100005
+  }
+}

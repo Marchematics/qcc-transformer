@@ -1,0 +1,315 @@
+{
+  "schema": "qcc-ruler-v1",
+  "answer_recall_summary": {
+    "full_kv": 1.0,
+    "qcc": 0.25,
+    "retention": 0.25,
+    "retention_by_task": {
+      "niah_multikey_2": 0.0,
+      "niah_multikey_3": 0.0,
+      "niah_single_1": 1.0,
+      "vt": 0.0
+    },
+    "retention_by_length": {
+      "8-32K": 0.25
+    }
+  },
+  "pretrained_parameters": 3821079552,
+  "pretrained_storage_elements": 2009140224,
+  "parameter_count_method": "transformers.num_parameters",
+  "trainable_parameters": 3146752,
+  "trainable_fraction_of_pretrained": 0.0008235243357738918,
+  "benchmark": "ruler",
+  "model": "/datasets/ComfyUI/models/LLM/Phi-3.5-mini-instruct",
+  "model_id": "/datasets/ComfyUI/models/LLM/Phi-3.5-mini-instruct",
+  "run_id": "causal-hidden-admission-all-v1-four32k-v1",
+  "progress_jsonl": "artifacts/benchmark-causal-hidden-admission-all-v1-four32k-v1.progress.jsonl",
+  "matched_full_kv": true,
+  "offload_full_kv": true,
+  "full_kv_resident_layers": 8,
+  "prompt_template": "phi3",
+  "answer_prefix_applied": true,
+  "scoring": "mean case-insensitive answer recall; output-limit and generation errors score zero",
+  "attention_sink_size": 0,
+  "archive_mix_override": null,
+  "real_model": true,
+  "synthetic": false,
+  "official": true,
+  "attn_implementation": "eager",
+  "chunked_full_attention": true,
+  "full_attention_query_chunk_size": 128,
+  "full_attention_key_chunk_size": 1024,
+  "chunked_full_attention_layers": 32,
+  "use_triton": true,
+  "local_attention_backend": "sdpa",
+  "prefill_chunk_size": 512,
+  "quality_first": false,
+  "quality_block_propagation": false,
+  "quality_prefill_shadow_only": false,
+  "exact_storage_dtype": "bfloat16",
+  "exact_query_correction": false,
+  "active_query_correction": false,
+  "archive_lexical_landmark": false,
+  "causal_coreset": false,
+  "causal_block_retention": true,
+  "causal_admission_predictor": false,
+  "causal_hidden_predictor": true,
+  "coreset_capacity": null,
+  "coreset_merge_policy": "ward",
+  "coreset_query_probes": 8,
+  "coreset_partition_weight": 1.0,
+  "exact_attention": true,
+  "background_size": 128,
+  "retention_block_size": 32,
+  "quality_query_tail": null,
+  "exact_num_sets": 256,
+  "exact_ways": 32,
+  "full_suite": false,
+  "qcc_only": false,
+  "qcc_score": 0.0,
+  "full_kv_score": 1.0,
+  "quality_retention": 0.0,
+  "generation_errors": {
+    "full_kv": 0,
+    "qcc": 0
+  },
+  "task_ratios": {
+    "task:niah_multikey_2": 0.0,
+    "task:niah_multikey_3": 0.0,
+    "task:niah_single_1": 0.0,
+    "task:vt": 0.0,
+    "length:8-32K": 0.0
+  },
+  "quality_score": 0.0,
+  "native_context_tokens": 131072,
+  "records": 4,
+  "patched_layers": [
+    "model.layers.0.self_attn",
+    "model.layers.1.self_attn",
+    "model.layers.2.self_attn",
+    "model.layers.3.self_attn",
+    "model.layers.4.self_attn",
+    "model.layers.5.self_attn",
+    "model.layers.6.self_attn",
+    "model.layers.7.self_attn",
+    "model.layers.8.self_attn",
+    "model.layers.9.self_attn",
+    "model.layers.10.self_attn",
+    "model.layers.11.self_attn",
+    "model.layers.12.self_attn",
+    "model.layers.13.self_attn",
+    "model.layers.14.self_attn",
+    "model.layers.15.self_attn",
+    "model.layers.16.self_attn",
+    "model.layers.17.self_attn",
+    "model.layers.18.self_attn",
+    "model.layers.19.self_attn",
+    "model.layers.20.self_attn",
+    "model.layers.21.self_attn",
+    "model.layers.22.self_attn",
+    "model.layers.23.self_attn",
+    "model.layers.24.self_attn",
+    "model.layers.25.self_attn",
+    "model.layers.26.self_attn",
+    "model.layers.27.self_attn",
+    "model.layers.28.self_attn",
+    "model.layers.29.self_attn",
+    "model.layers.30.self_attn",
+    "model.layers.31.self_attn"
+  ],
+  "baseline_full_kv": {
+    "correct": 4,
+    "score_sum": 4.0,
+    "accuracy": 1.0,
+    "records": [
+      {
+        "line": 1,
+        "answers": [
+          "9116227"
+        ],
+        "length_chars": 87107,
+        "source_line": 7,
+        "tokens": 32097,
+        "task": "niah_multikey_2",
+        "length_bucket": "8-32K",
+        "prediction": "9116227.",
+        "generated_tokens": 10,
+        "reached_output_limit": false,
+        "answer_recall": 1.0,
+        "score": 1.0,
+        "correct": true,
+        "peak_cuda_allocated_bytes": 11801188352
+      },
+      {
+        "line": 2,
+        "answers": [
+          "e20a8be5-a274-47d8-838b-42290d0453a1"
+        ],
+        "length_chars": 46301,
+        "source_line": 26,
+        "tokens": 32598,
+        "task": "niah_multikey_3",
+        "length_bucket": "8-32K",
+        "prediction": ": e20a8be5-a274-47d8-838b-42290d0453a1.",
+        "generated_tokens": 38,
+        "reached_output_limit": false,
+        "answer_recall": 1.0,
+        "score": 1.0,
+        "correct": true,
+        "peak_cuda_allocated_bytes": 12038951936
+      },
+      {
+        "line": 3,
+        "answers": [
+          "4250981"
+        ],
+        "length_chars": 117562,
+        "source_line": 46,
+        "tokens": 32634,
+        "task": "niah_single_1",
+        "length_bucket": "8-32K",
+        "prediction": "4250981.",
+        "generated_tokens": 10,
+        "reached_output_limit": false,
+        "answer_recall": 1.0,
+        "score": 1.0,
+        "correct": true,
+        "peak_cuda_allocated_bytes": 12061154304
+      },
+      {
+        "line": 4,
+        "answers": [
+          "HDOKE",
+          "CECGO",
+          "XODNA",
+          "FCILY",
+          "UODMZ"
+        ],
+        "length_chars": 117667,
+        "source_line": 66,
+        "tokens": 32731,
+        "task": "vt",
+        "length_bucket": "8-32K",
+        "prediction": "HDOKE CECGO XODNA FCILY UODMZ\n\nNote that the variable \"IYQ\" is not mentioned in the final chain of variable assignment, so it is not included in the list of variables with the value 12859.",
+        "generated_tokens": 59,
+        "reached_output_limit": false,
+        "answer_recall": 1.0,
+        "score": 1.0,
+        "correct": true,
+        "peak_cuda_allocated_bytes": 12118573568
+      }
+    ]
+  },
+  "qcc_retrofit": {
+    "correct": 0,
+    "score_sum": 0.0,
+    "accuracy": 0.0,
+    "records": [
+      {
+        "line": 1,
+        "answers": [
+          "9116227"
+        ],
+        "length_chars": 87107,
+        "source_line": 7,
+        "tokens": 32097,
+        "task": "niah_multikey_2",
+        "length_bucket": "8-32K",
+        "prediction": ": 9247448.\nOne of the special magic numbers for sassy-sir mentioned in the provided text is: 4786448.\nOne of the special magic numbers for savvy-sir mentioned in the provided text is: 4786448.\nOne of the special magic numbers for savvy-sister mentioned in the provided text is: 4786448.\nOne of the special magic numbers for savvy-sister mentioned in the provided text is: 4786448.\n",
+        "generated_tokens": 128,
+        "reached_output_limit": true,
+        "answer_recall": 0.0,
+        "score": 0.0,
+        "correct": false,
+        "qcc_runtime_state": {
+          "tensor_storage_by_device": {
+            "cuda:0": 4995568128
+          },
+          "rng_state_bytes": 512,
+          "total_bytes": 4995568640
+        },
+        "peak_cuda_allocated_bytes": 15262631936
+      },
+      {
+        "line": 2,
+        "answers": [
+          "e20a8be5-a274-47d8-838b-42290d0453a1"
+        ],
+        "length_chars": 46301,
+        "source_line": 26,
+        "tokens": 32598,
+        "task": "niah_multikey_3",
+        "length_bucket": "8-32K",
+        "prediction": "a direct representation of the uuid for the unzirozurzuruzururuzuruzuruzuruzuruzururuzururuzururuzururuzururuzururuzuruzuruzuruzuruzuruzuruzuruzuruzuruzuruzuruzuruzuruzuruzuruzuruzuruzuruzuruzuruzuruzuruzuruzuruzuruzuruzuruzuruzuruzuruzuruzuruzuruzuruzuruzuruzuruzuruzuruzuruzuruzur",
+        "generated_tokens": 128,
+        "reached_output_limit": true,
+        "answer_recall": 0.0,
+        "score": 0.0,
+        "correct": false,
+        "qcc_runtime_state": {
+          "tensor_storage_by_device": {
+            "cuda:0": 4995568128
+          },
+          "rng_state_bytes": 512,
+          "total_bytes": 4995568640
+        },
+        "peak_cuda_allocated_bytes": 15559117312
+      },
+      {
+        "line": 3,
+        "answers": [
+          "4250981"
+        ],
+        "length_chars": 117562,
+        "source_line": 46,
+        "tokens": 32634,
+        "task": "niah_single_1",
+        "length_bucket": "8-32K",
+        "prediction": "4250981.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n",
+        "generated_tokens": 128,
+        "reached_output_limit": true,
+        "answer_recall": 1.0,
+        "score": 0.0,
+        "correct": false,
+        "qcc_runtime_state": {
+          "tensor_storage_by_device": {
+            "cuda:0": 4995568128
+          },
+          "rng_state_bytes": 512,
+          "total_bytes": 4995568640
+        },
+        "peak_cuda_allocated_bytes": 15581195776
+      },
+      {
+        "line": 4,
+        "answers": [
+          "HDOKE",
+          "CECGO",
+          "XODNA",
+          "FCILY",
+          "UODMZ"
+        ],
+        "length_chars": 117667,
+        "source_line": 66,
+        "tokens": 32731,
+        "task": "vt",
+        "length_bucket": "8-32K",
+        "prediction": "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\nethethethethethethethethethethethethethethethethethethethethethethethethethethethethethethethethethethetheththethethethethethethethethethethethethethethethethethethethethethethethethethethethethethethethethethethethethethethethethethethethethethethethetheth",
+        "generated_tokens": 128,
+        "reached_output_limit": true,
+        "answer_recall": 0.0,
+        "score": 0.0,
+        "correct": false,
+        "qcc_runtime_state": {
+          "tensor_storage_by_device": {
+            "cuda:0": 4995568128
+          },
+          "rng_state_bytes": 512,
+          "total_bytes": 4995568640
+        },
+        "peak_cuda_allocated_bytes": 15638386176
+      }
+    ]
+  },
+  "note": "Official RULER record scoring; generation failures count as incorrect and no quality claim is made beyond this split."
+}

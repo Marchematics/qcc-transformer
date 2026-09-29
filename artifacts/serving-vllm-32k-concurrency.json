@@ -1,0 +1,36 @@
+{
+ "model": "/root/qcc/models/Llama-3.2-1B-Instruct",
+ "length": 32768,
+ "max_new": 128,
+ "engine": "vllm",
+ "config": {
+  "model": "/root/qcc/models/Llama-3.2-1B-Instruct",
+  "length": 32768,
+  "batches": [
+   16
+  ],
+  "max_new": 128,
+  "gpu_memory_utilization": 0.85,
+  "max_num_seqs": 16,
+  "out": "artifacts/serving-vllm-32k-concurrency.json"
+ },
+ "rows": [
+  {
+   "batch": 16,
+   "prompt_tokens": 32768,
+   "metrics_attrs": null,
+   "decode_only_tokens_per_s": 372.7,
+   "decode_only_tpot_ms": 42.93,
+   "engine_load_s": 19.7,
+   "wall_s": 5.45,
+   "generated_tokens": 2048,
+   "metrics_available": false,
+   "prefill_s": null,
+   "decode_s": null,
+   "decode_tokens_per_s": null,
+   "tpot_ms": null,
+   "e2e_tokens_per_s": 375.6,
+   "ok": true
+  }
+ ]
+}

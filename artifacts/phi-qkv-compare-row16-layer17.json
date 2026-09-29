@@ -1,0 +1,32 @@
+{
+  "model": "/datasets/ComfyUI/models/LLM/Phi-3.5-mini-instruct",
+  "record": 15,
+  "layer": 17,
+  "tokens": 7422,
+  "raw_q": {
+    "cos": 0.9999999403953552,
+    "max": 0.0,
+    "rmse": 0.0
+  },
+  "rot_q": {
+    "cos": 1.0000001192092896,
+    "max": 0.03125,
+    "rmse": 4.417807940626517e-05
+  },
+  "raw_k_expanded": {
+    "cos": 1.0000001192092896,
+    "max": 0.0,
+    "rmse": 0.0
+  },
+  "rot_k": {
+    "cos": 1.0,
+    "max": 0.03125,
+    "rmse": 4.62386742583476e-05
+  },
+  "v": {
+    "cos": 0.9999999403953552,
+    "max": 0.0,
+    "rmse": 0.0
+  },
+  "note": "Projection/RoPE isolation at one real Phi layer; no task score."
+}

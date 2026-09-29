@@ -1,0 +1,5 @@
+device=cpu steps=2000 length=64 query_position=48
+qcc_train_loss=0.528085 qcc_train_accuracy=0.750 qcc_train_seconds=113.58
+qcc_eval_loss=0.020814 qcc_eval_accuracy=1.000
+full_train_loss=0.000474 full_train_accuracy=1.000 full_train_seconds=45.58
+full_eval_loss=0.000779 full_eval_accuracy=1.000

@@ -1,0 +1,21 @@
+{
+ "length": 32768,
+ "budget": 8192,
+ "suffix": 256,
+ "prefix_len": 32512,
+ "variants": {
+  "full_kv": {
+   "kept_slots": 32512,
+   "nll": 3.18775,
+   "perplexity": 24.2337,
+   "is_reference": true
+  },
+  "obs_last": {
+   "kept_slots": 8192,
+   "nll": 3.17072,
+   "perplexity": 23.8246,
+   "nll_ratio_to_full": 0.99466,
+   "ppl_ratio_to_full": 0.98312
+  }
+ }
+}

@@ -1,0 +1,49 @@
+# Novelty Boundary
+
+QCC-Transformer is a research hypothesis, not a claim that bounded-memory
+attention has never been studied. A review of recent arXiv work found direct
+overlap with the following families:
+
+- [Infini-attention (2024)](https://arxiv.org/abs/2404.07143): local attention plus a bounded recurrent memory and gated mixing.
+- [ABC (2021)](https://arxiv.org/abs/2110.02488) and [GSA (2024)](https://arxiv.org/abs/2409.07146): softmax-routed bounded memory slots.
+- [Trellis (COLM 2025)](https://arxiv.org/abs/2512.23852): fixed-size recurrent KV compression.
+- [Key-Value Means (2026)](https://arxiv.org/abs/2605.09877): block sliding window plus compressed KV state.
+- [HOLA (2026)](https://arxiv.org/abs/2607.02303) and [GLIDE (2026)](https://arxiv.org/abs/2607.24788): hybrid exact-window/recurrent long-context attention.
+- [Kimi Linear/KDA (2025)](https://arxiv.org/abs/2510.26692): recurrent KV replacement with fine-grained decay.
+
+The review also found especially close 2026 overlap in [PCAF
+(2026)](https://arxiv.org/abs/2606.10435), which writes bounded causal
+successor records and retrieves successor-token distributions, and in [HiLS
+Attention (2026)](https://arxiv.org/abs/2607.02980), [MARCH
+(2026)](https://arxiv.org/abs/2608.12435), and [DASC
+(2026)](https://arxiv.org/abs/2608.30386), which cover hierarchical/content
+landmarks, compact anchor states, and decay-aware recurrent compression. These
+papers make the individual ideas of content-routed landmarks, successor
+binding, and multi-timescale decay low-novelty claims.
+
+The narrow technical delta tested by this repository is a fixed learned
+landmark codebook per KV head. Each landmark maintains numerator and
+denominator responses at several decay rates, and the current query performs
+soft routing over landmarks. The optional sparse variant adds top-k routing
+and lazy per-slot decay: an overcomplete bank is kept for capacity, while only
+the selected slots are touched at inference. This is best described as a
+**sparse multi-timescale learned-landmark memory**. It should not be described
+as exact global softmax attention, since each landmark/scale is normalized
+before the responses are mixed. A separate serving knob (`archive_read_stride`)
+reuses a remote response for several consecutive queries while continuing to
+update the archive; this temporal read memoization is exposed as an
+approximation trade-off, not claimed as a new attention primitive.
+An additional optional knob (`archive_query_cosine_threshold`) makes that
+memoization adaptive: a refresh is skipped only when all heads' queries remain
+cosine-close to the last refreshed query. This is a serving-policy hypothesis
+and may overlap with generic query/result caching, so it is not counted as an
+independent novelty claim.
+The implementation also exposes optional RoPE with a long-context theta for
+relative-position stability. RoPE is established prior art and is included
+only as a quality/compatibility control, not as a novelty claim.
+
+The assessment is therefore cautious. A publishable contribution would need a
+matched recall/latency/memory Pareto comparison against Infini, ABC/GSA, PCAF,
+KVM, KDA and HOLA, plus a strong full-KV baseline, plus fused GPU kernels. The
+lazy sparse update is an implementation hypothesis, not evidence of a new
+algorithmic class or a universal speedup.

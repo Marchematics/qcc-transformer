@@ -1,0 +1,55 @@
+{
+  "config": {
+    "compare_full": true,
+    "device": "cuda",
+    "lengths": [
+      131072
+    ],
+    "quality_lengths": [
+      1024
+    ],
+    "run_latency": true
+  },
+  "elapsed_seconds": 8.139122630935162,
+  "latency": {
+    "131072": {
+      "full": {
+        "prefill_seconds": 5.176911801798269,
+        "tpot_ms": 43.196807033382356,
+        "tpot_speedup": 22.200879209455792,
+        "ttft_speedup": 2.6023454185213297
+      },
+      "qcc_prefill_seconds": 1.9893253850750625,
+      "qcc_tpot_ms": 1.9457250600680709
+    }
+  },
+  "quality": {
+    "1024": {
+      "gate": {
+        "status": "pass",
+        "threshold": 0.99,
+        "value": 0.998955488204956
+      },
+      "mean_logit_cosine": 0.998955488204956,
+      "per_logit_mse": 2269.2216796875
+    }
+  },
+  "retrieval": {
+    "reason": "--checkpoint and --dataset are both required",
+    "status": "missing"
+  },
+  "state": {
+    "131072": {
+      "report": {
+        "full_kv_bytes": 536870912.0,
+        "full_kv_elements": 134217728.0,
+        "qcc_bytes": 659456.0,
+        "qcc_elements": 164864.0,
+        "reduction": 814.111801242236,
+        "state_fraction_percent": 0.122833251953125
+      },
+      "under_0.1pct": false,
+      "under_0.5pct": true
+    }
+  }
+}

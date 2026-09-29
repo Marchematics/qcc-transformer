@@ -1,0 +1,7 @@
+device=cuda mode=prefill lengths=[1024, 2048, 4096, 8192] threads=1
+length=1024 qcc_seconds=0.004703 full_seconds=0.002653 speedup=0.56x
+length=2048 qcc_seconds=0.007287 full_seconds=0.006513 speedup=0.89x
+length=4096 qcc_seconds=0.012548 full_seconds=0.020368 speedup=1.62x
+length=8192 qcc_seconds=0.022610 full_seconds=0.065834 speedup=2.91x
+qcc_loglog_slope=0.758
+full_loglog_slope=1.554

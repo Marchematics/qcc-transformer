@@ -1,0 +1,868 @@
+{
+ "model": "/root/qcc/models/Qwen2.5-3B-Instruct",
+ "label": "Qwen2.5-3B-Instruct",
+ "config": {
+  "family": [
+   "needles"
+  ],
+  "items": [
+   16
+  ],
+  "distractors": null,
+  "seeds": 3,
+  "length": 32768,
+  "lengths": [
+   32768
+  ],
+  "budgets": [
+   4096
+  ],
+  "aggregate": "sum",
+  "placement": "scatter",
+  "obs": 128,
+  "nsink": 4,
+  "pool": 7,
+  "dilate": 9,
+  "lex_cap": 1024,
+  "hops": 6,
+  "anchor_mode": "pattern",
+  "min_anchor_len": 3,
+  "scoring": "last",
+  "prefill_chunk": 8192,
+  "key_chunk": 4096,
+  "max_new": null,
+  "required_tol": 0.0,
+  "model": "/root/qcc/models/Qwen2.5-3B-Instruct",
+  "tokenizer": null,
+  "dtype": "bfloat16",
+  "device": "cuda",
+  "attn_impl": "sdpa",
+  "load_4bit": false,
+  "trust_remote_code": false,
+  "shared_prefill": true,
+  "label": null,
+  "out": "artifacts/prediction-knee-k16-lc1024-qwen3b.json"
+ },
+ "summary": {
+  "rows": 6,
+  "lengths": [
+   32768
+  ],
+  "budgets": [
+   4096
+  ],
+  "required_budget_rule": "smallest tested budget whose mean accuracy on the record set is within `required_tol` of the Full-KV arm's mean accuracy and strictly positive; null when Full-KV scores zero (see `full_kv_unsolved`) or no tested budget reaches it",
+  "required_tol": 0.0,
+  "accuracy": {
+   "needles": {
+    "16": {
+     "full": 0.6667,
+     "4096": 0.3333
+    }
+   }
+  },
+  "partial_recall": {
+   "needles": {
+    "16": {
+     "full": 0.9583,
+     "4096": 0.9375
+    }
+   }
+  },
+  "required_budget": {
+   "needles": {
+    "16": null
+   }
+  },
+  "accuracy_by_distractors": {},
+  "required_budget_by_distractors": {},
+  "full_kv_unsolved": {
+   "rule": "cells whose Full-KV accuracy is 0; required_budget stays null for them and they must not be read as bounded-retention failures",
+   "count": 0,
+   "cells": {}
+  },
+  "by_length": {
+   "32768": {
+    "accuracy": {
+     "needles": {
+      "16": {
+       "full": 0.6667,
+       "4096": 0.3333
+      }
+     }
+    },
+    "required_budget": {
+     "needles": {
+      "16": null
+     }
+    },
+    "accuracy_by_distractors": {},
+    "required_budget_by_distractors": {},
+    "full_kv_unsolved": {
+     "rule": "cells whose Full-KV accuracy is 0; required_budget stays null for them and they must not be read as bounded-retention failures",
+     "count": 0,
+     "cells": {}
+    }
+   }
+  },
+  "cells": {
+   "needles": {
+    "16": {
+     "seeds": 3,
+     "records": 3,
+     "distractors": null,
+     "statement_tokens": 351.0,
+     "tokens_per_item": 21.94,
+     "mean_item_spacing": 2026.1,
+     "required_set_tokens": 351.03,
+     "required_set_tokens_rule": "items x mean tokens per item statement (the tokens the item statements occupy); `statement_tokens` is the whole block",
+     "mean_kept_slots_bounded": 5120.0,
+     "mean_kept_slots_full": 32768.67,
+     "full_kv_accuracy": 0.6667,
+     "mean_partial_recall_bounded": 0.9375,
+     "mean_partial_recall_full": 0.9583,
+     "truncation_rate_bounded": 1.0,
+     "truncation_rate_full": 1.0,
+     "mean_anchor_sites": 14.33,
+     "lex_cap": [
+      1024
+     ],
+     "placement": [
+      "scatter"
+     ],
+     "full_kv_unsolved": false,
+     "budgets": {
+      "4096": {
+       "covered": {
+        "rows": 3,
+        "cells": 1,
+        "mean_accuracy": 0.3333,
+        "mean_partial_recall": 0.9375,
+        "mean_kept_slots": 5120.0,
+        "mean_required_set_tokens": 351.03
+       },
+       "not_covered": {
+        "rows": 0,
+        "cells": 0,
+        "mean_accuracy": null,
+        "mean_partial_recall": null,
+        "mean_kept_slots": null,
+        "mean_required_set_tokens": null
+       },
+       "mean_kept_slots": 5120.0,
+       "mean_partial_recall": 0.9375,
+       "truncation_rate": 1.0,
+       "mean_required_coverage": 0.9555,
+       "mean_items_covered": 14.33
+      }
+     }
+    }
+   }
+  },
+  "budget_covers_required_set": {
+   "rule": "a bounded row's budget covers its required set when required_set_tokens <= kept_slots, where kept_slots is the measured retained width of the bounded arm (not the nominal budget) and required_set_tokens is the mean tokens per item statement times the number of items the answer needs",
+   "prediction": "prediction 2 of docs/MECHANISM.md: accuracy is high when the budget covers the required set and collapses when it does not; `separation` is the measured size of the cliff",
+   "covered": {
+    "rows": 3,
+    "cells": 1,
+    "mean_accuracy": 0.3333,
+    "mean_partial_recall": 0.9375,
+    "mean_kept_slots": 5120.0,
+    "mean_required_set_tokens": 351.03
+   },
+   "not_covered": {
+    "rows": 0,
+    "cells": 0,
+    "mean_accuracy": null,
+    "mean_partial_recall": null,
+    "mean_kept_slots": null,
+    "mean_required_set_tokens": null
+   },
+   "separation": {
+    "accuracy": null,
+    "partial_recall": null
+   },
+   "by_family": {
+    "needles": {
+     "covered": {
+      "rows": 3,
+      "cells": 1,
+      "mean_accuracy": 0.3333,
+      "mean_partial_recall": 0.9375,
+      "mean_kept_slots": 5120.0,
+      "mean_required_set_tokens": 351.03
+     },
+     "not_covered": {
+      "rows": 0,
+      "cells": 0,
+      "mean_accuracy": null,
+      "mean_partial_recall": null,
+      "mean_kept_slots": null,
+      "mean_required_set_tokens": null
+     },
+     "separation": {
+      "accuracy": null,
+      "partial_recall": null
+     }
+    }
+   },
+   "by_cell": {
+    "needles": {
+     "16": {
+      "covered": {
+       "rows": 3,
+       "cells": 1,
+       "mean_accuracy": 0.3333,
+       "mean_partial_recall": 0.9375,
+       "mean_kept_slots": 5120.0,
+       "mean_required_set_tokens": 351.03
+      },
+      "not_covered": {
+       "rows": 0,
+       "cells": 0,
+       "mean_accuracy": null,
+       "mean_partial_recall": null,
+       "mean_kept_slots": null,
+       "mean_required_set_tokens": null
+      },
+      "separation": {
+       "accuracy": null,
+       "partial_recall": null
+      }
+     }
+    }
+   },
+   "by_budget": {
+    "4096": {
+     "covered": {
+      "rows": 3,
+      "cells": 1,
+      "mean_accuracy": 0.3333,
+      "mean_partial_recall": 0.9375,
+      "mean_kept_slots": 5120.0,
+      "mean_required_set_tokens": 351.03
+     },
+     "not_covered": {
+      "rows": 0,
+      "cells": 0,
+      "mean_accuracy": null,
+      "mean_partial_recall": null,
+      "mean_kept_slots": null,
+      "mean_required_set_tokens": null
+     },
+     "separation": {
+      "accuracy": null,
+      "partial_recall": null
+     }
+    }
+   }
+  },
+  "required_span_coverage": {
+   "rule": "`required_coverage` is the share of the item statements' own tokens that survived selection, measured against the kept index set of the bounded arm; a row is fully covered when every statement kept every token",
+   "prediction": "prediction 2 of docs/MECHANISM.md in its measured form: accuracy is high when the item statements are in the retained support, and the two means below are the cliff",
+   "covered": {
+    "rows": 0,
+    "cells": 0,
+    "mean_accuracy": null,
+    "mean_partial_recall": null,
+    "mean_kept_slots": null,
+    "mean_required_set_tokens": null
+   },
+   "not_covered": {
+    "rows": 3,
+    "cells": 1,
+    "mean_accuracy": 0.3333,
+    "mean_partial_recall": 0.9375,
+    "mean_kept_slots": 5120.0,
+    "mean_required_set_tokens": 351.03
+   },
+   "separation": {
+    "accuracy": null,
+    "partial_recall": null
+   },
+   "mean_coverage": 0.9555,
+   "by_cell": {
+    "needles": {
+     "16": {
+      "mean_coverage": 0.9555,
+      "mean_items_covered": 14.33,
+      "items_required": 16.0,
+      "covered": {
+       "rows": 0,
+       "cells": 0,
+       "mean_accuracy": null,
+       "mean_partial_recall": null,
+       "mean_kept_slots": null,
+       "mean_required_set_tokens": null
+      },
+      "not_covered": {
+       "rows": 3,
+       "cells": 1,
+       "mean_accuracy": 0.3333,
+       "mean_partial_recall": 0.9375,
+       "mean_kept_slots": 5120.0,
+       "mean_required_set_tokens": 351.03
+      },
+      "separation": {
+       "accuracy": null,
+       "partial_recall": null
+      }
+     }
+    }
+   },
+   "by_budget": {
+    "4096": {
+     "mean_coverage": 0.9555,
+     "mean_items_covered": 14.33,
+     "covered": {
+      "rows": 0,
+      "cells": 0,
+      "mean_accuracy": null,
+      "mean_partial_recall": null,
+      "mean_kept_slots": null,
+      "mean_required_set_tokens": null
+     },
+     "not_covered": {
+      "rows": 3,
+      "cells": 1,
+      "mean_accuracy": 0.3333,
+      "mean_partial_recall": 0.9375,
+      "mean_kept_slots": 5120.0,
+      "mean_required_set_tokens": 351.03
+     },
+     "separation": {
+      "accuracy": null,
+      "partial_recall": null
+     }
+    }
+   }
+  },
+  "prediction_checks": {
+   "required_budget_flat_in_length": null,
+   "required_budget_flat_cells": 0,
+   "required_budget_grows_with_items": null,
+   "required_budget_grows_cells": 0,
+   "required_budget_grows_with_distractors": null,
+   "required_budget_grows_with_distractors_cells": 0,
+   "cliff": {
+    "mean_accuracy_budget_covers_required_set": 0.3333,
+    "mean_accuracy_budget_below_required_set": null,
+    "cells_above": 3,
+    "cells_below": 0,
+    "required_set_tokens_rule": "items x mean tokens per item statement",
+    "budget_comparison": "nominal budget, not the measured kept slots",
+    "measured_kept_slots_block": "budget_covers_required_set",
+    "measured_separation_accuracy": null
+   }
+  }
+ },
+ "records": [
+  {
+   "family": "needles",
+   "items": 16,
+   "seed": 0,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": null,
+   "key_count": 16,
+   "arm": "full",
+   "budget": null,
+   "prompt_tokens": 32768,
+   "kept_slots": 32768,
+   "prediction": "493475,902255,978550,712849,371609,978550,109905,978550,618645,121752,399228,703407,822021,712849,135525,121752,303907,858569,12",
+   "expected": "303907, 109905, 473984, 712849, 978550, 618645, 121752, 858569, 135525, 399228, 603864, 902255, 703407, 822021, 493475, 371609",
+   "references": [
+    "303907",
+    "109905",
+    "473984",
+    "712849",
+    "978550",
+    "618645",
+    "121752",
+    "858569",
+    "135525",
+    "399228",
+    "603864",
+    "902255",
+    "703407",
+    "822021",
+    "493475",
+    "371609"
+   ],
+   "correct": false,
+   "parsed": "49347590225597855071284937160997855010990597855061864512175239922870340782202171284913552512175230390785856912",
+   "partial": 0.875,
+   "partial_recall": 0.875,
+   "exact_set_match": false,
+   "present": [
+    "303907",
+    "109905",
+    "712849",
+    "978550",
+    "618645",
+    "121752",
+    "858569",
+    "135525",
+    "399228",
+    "902255",
+    "703407",
+    "822021",
+    "493475",
+    "371609"
+   ],
+   "missing": [
+    "473984",
+    "603864"
+   ],
+   "distractor_hit": false,
+   "candidates": [
+    "49347590225597855071284937160997855010990597855061864512175239922870340782202171284913552512175230390785856912"
+   ],
+   "generated_tokens": 128,
+   "max_new": 128,
+   "statement_tokens": 348,
+   "placement": "scatter",
+   "anchor_sites": null,
+   "anchor_sites_total": null,
+   "lex_cap": 1024,
+   "required_span_tokens": 348,
+   "required_kept_tokens": null,
+   "required_coverage": null,
+   "items_covered": null,
+   "items_required": 16,
+   "tokens_per_item": 21.75,
+   "mean_item_spacing": 2026.2,
+   "required_set_tokens": 348.0,
+   "budget_covers_required_set": null,
+   "prefill_s": 7.92,
+   "decode_s": 6.48,
+   "peak_mib": 13554.5,
+   "peak_rss_mib": 4792.6,
+   "target_key": null,
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "needles",
+   "items": 16,
+   "seed": 0,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": null,
+   "key_count": 16,
+   "arm": "b4096",
+   "budget": 4096,
+   "prompt_tokens": 32768,
+   "kept_slots": 5120,
+   "prediction": "493473,902255,822021,712849,371609,978550,121752,858569,618645,135525,303907,109905,473984,712849,978550,399228,603864,121752,37",
+   "expected": "303907, 109905, 473984, 712849, 978550, 618645, 121752, 858569, 135525, 399228, 603864, 902255, 703407, 822021, 493475, 371609",
+   "references": [
+    "303907",
+    "109905",
+    "473984",
+    "712849",
+    "978550",
+    "618645",
+    "121752",
+    "858569",
+    "135525",
+    "399228",
+    "603864",
+    "902255",
+    "703407",
+    "822021",
+    "493475",
+    "371609"
+   ],
+   "correct": false,
+   "parsed": "49347390225582202171284937160997855012175285856961864513552530390710990547398471284997855039922860386412175237",
+   "partial": 0.875,
+   "partial_recall": 0.875,
+   "exact_set_match": false,
+   "present": [
+    "303907",
+    "109905",
+    "473984",
+    "712849",
+    "978550",
+    "618645",
+    "121752",
+    "858569",
+    "135525",
+    "399228",
+    "603864",
+    "902255",
+    "822021",
+    "371609"
+   ],
+   "missing": [
+    "703407",
+    "493475"
+   ],
+   "distractor_hit": false,
+   "candidates": [
+    "49347390225582202171284937160997855012175285856961864513552530390710990547398471284997855039922860386412175237"
+   ],
+   "generated_tokens": 128,
+   "max_new": 128,
+   "statement_tokens": 348,
+   "placement": "scatter",
+   "anchor_sites": 15,
+   "anchor_sites_total": 16,
+   "lex_cap": 1024,
+   "required_span_tokens": 348,
+   "required_kept_tokens": 339,
+   "required_coverage": 0.9739,
+   "items_covered": 15,
+   "items_required": 16,
+   "tokens_per_item": 21.75,
+   "mean_item_spacing": 2026.2,
+   "required_set_tokens": 348.0,
+   "budget_covers_required_set": true,
+   "prefill_s": 7.92,
+   "decode_s": 6.22,
+   "peak_mib": 13554.5,
+   "peak_rss_mib": 4792.6,
+   "target_key": null,
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "needles",
+   "items": 16,
+   "seed": 1,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": null,
+   "key_count": 16,
+   "arm": "full",
+   "budget": null,
+   "prompt_tokens": 32769,
+   "kept_slots": 32769,
+   "prediction": "936256,601893,700063,743788,744818,256269,865120,246938,901571,381339,414837,301779,220195,805535,311283,725708,301779,220195,80",
+   "expected": "601893, 743788, 865120, 246938, 256269, 901571, 414837, 301779, 381339, 725708, 744818, 936256, 220195, 805535, 311283, 700063",
+   "references": [
+    "601893",
+    "743788",
+    "865120",
+    "246938",
+    "256269",
+    "901571",
+    "414837",
+    "301779",
+    "381339",
+    "725708",
+    "744818",
+    "936256",
+    "220195",
+    "805535",
+    "311283",
+    "700063"
+   ],
+   "correct": true,
+   "parsed": "93625660189370006374378874481825626986512024693890157138133941483730177922019580553531128372570830177922019580",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "601893",
+    "743788",
+    "865120",
+    "246938",
+    "256269",
+    "901571",
+    "414837",
+    "301779",
+    "381339",
+    "725708",
+    "744818",
+    "936256",
+    "220195",
+    "805535",
+    "311283",
+    "700063"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "93625660189370006374378874481825626986512024693890157138133941483730177922019580553531128372570830177922019580"
+   ],
+   "generated_tokens": 128,
+   "max_new": 128,
+   "statement_tokens": 350,
+   "placement": "scatter",
+   "anchor_sites": null,
+   "anchor_sites_total": null,
+   "lex_cap": 1024,
+   "required_span_tokens": 350,
+   "required_kept_tokens": null,
+   "required_coverage": null,
+   "items_covered": null,
+   "items_required": 16,
+   "tokens_per_item": 21.88,
+   "mean_item_spacing": 2026.2,
+   "required_set_tokens": 350.1,
+   "budget_covers_required_set": null,
+   "prefill_s": 9.71,
+   "decode_s": 6.52,
+   "peak_mib": 16115.8,
+   "peak_rss_mib": 4792.6,
+   "target_key": null,
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "needles",
+   "items": 16,
+   "seed": 1,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": null,
+   "key_count": 16,
+   "arm": "b4096",
+   "budget": 4096,
+   "prompt_tokens": 32769,
+   "kept_slots": 5120,
+   "prediction": "936256,601893,700063,743788,744818,256269,865120,246938,805535,311283,414837,301779,381339,901571,301779,220195,805535,865120,31",
+   "expected": "601893, 743788, 865120, 246938, 256269, 901571, 414837, 301779, 381339, 725708, 744818, 936256, 220195, 805535, 311283, 700063",
+   "references": [
+    "601893",
+    "743788",
+    "865120",
+    "246938",
+    "256269",
+    "901571",
+    "414837",
+    "301779",
+    "381339",
+    "725708",
+    "744818",
+    "936256",
+    "220195",
+    "805535",
+    "311283",
+    "700063"
+   ],
+   "correct": false,
+   "parsed": "93625660189370006374378874481825626986512024693880553531128341483730177938133990157130177922019580553586512031",
+   "partial": 0.9375,
+   "partial_recall": 0.9375,
+   "exact_set_match": false,
+   "present": [
+    "601893",
+    "743788",
+    "865120",
+    "246938",
+    "256269",
+    "901571",
+    "414837",
+    "301779",
+    "381339",
+    "744818",
+    "936256",
+    "220195",
+    "805535",
+    "311283",
+    "700063"
+   ],
+   "missing": [
+    "725708"
+   ],
+   "distractor_hit": false,
+   "candidates": [
+    "93625660189370006374378874481825626986512024693880553531128341483730177938133990157130177922019580553586512031"
+   ],
+   "generated_tokens": 128,
+   "max_new": 128,
+   "statement_tokens": 350,
+   "placement": "scatter",
+   "anchor_sites": 14,
+   "anchor_sites_total": 16,
+   "lex_cap": 1024,
+   "required_span_tokens": 350,
+   "required_kept_tokens": 335,
+   "required_coverage": 0.9573,
+   "items_covered": 14,
+   "items_required": 16,
+   "tokens_per_item": 21.88,
+   "mean_item_spacing": 2026.2,
+   "required_set_tokens": 350.1,
+   "budget_covers_required_set": true,
+   "prefill_s": 9.71,
+   "decode_s": 5.19,
+   "peak_mib": 16115.8,
+   "peak_rss_mib": 4792.6,
+   "target_key": null,
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "needles",
+   "items": 16,
+   "seed": 2,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": null,
+   "key_count": 16,
+   "arm": "full",
+   "budget": null,
+   "prompt_tokens": 32769,
+   "kept_slots": 32769,
+   "prediction": "824521,742532,425762,341805,591822,100570,987143,886524,833030,594523,683144,419893,241884,159989,684832,520336,425762,594523,59",
+   "expected": "425762, 591822, 594523, 684832, 341805, 520336, 742532, 824521, 241884, 833030, 100570, 886524, 159989, 683144, 419893, 987143",
+   "references": [
+    "425762",
+    "591822",
+    "594523",
+    "684832",
+    "341805",
+    "520336",
+    "742532",
+    "824521",
+    "241884",
+    "833030",
+    "100570",
+    "886524",
+    "159989",
+    "683144",
+    "419893",
+    "987143"
+   ],
+   "correct": true,
+   "parsed": "82452174253242576234180559182210057098714388652483303059452368314441989324188415998968483252033642576259452359",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "425762",
+    "591822",
+    "594523",
+    "684832",
+    "341805",
+    "520336",
+    "742532",
+    "824521",
+    "241884",
+    "833030",
+    "100570",
+    "886524",
+    "159989",
+    "683144",
+    "419893",
+    "987143"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "82452174253242576234180559182210057098714388652483303059452368314441989324188415998968483252033642576259452359"
+   ],
+   "generated_tokens": 128,
+   "max_new": 128,
+   "statement_tokens": 355,
+   "placement": "scatter",
+   "anchor_sites": null,
+   "anchor_sites_total": null,
+   "lex_cap": 1024,
+   "required_span_tokens": 355,
+   "required_kept_tokens": null,
+   "required_coverage": null,
+   "items_covered": null,
+   "items_required": 16,
+   "tokens_per_item": 22.19,
+   "mean_item_spacing": 2025.9,
+   "required_set_tokens": 355.0,
+   "budget_covers_required_set": null,
+   "prefill_s": 9.71,
+   "decode_s": 4.86,
+   "peak_mib": 13742.1,
+   "peak_rss_mib": 4792.6,
+   "target_key": null,
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "needles",
+   "items": 16,
+   "seed": 2,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": null,
+   "key_count": 16,
+   "arm": "b4096",
+   "budget": 4096,
+   "prompt_tokens": 32769,
+   "kept_slots": 5120,
+   "prediction": "824521,742532,594523,341805,684832,100570,987143,886524,833030,159989,683144,419893,520336,241884,425762,591822,594523,341805,52",
+   "expected": "425762, 591822, 594523, 684832, 341805, 520336, 742532, 824521, 241884, 833030, 100570, 886524, 159989, 683144, 419893, 987143",
+   "references": [
+    "425762",
+    "591822",
+    "594523",
+    "684832",
+    "341805",
+    "520336",
+    "742532",
+    "824521",
+    "241884",
+    "833030",
+    "100570",
+    "886524",
+    "159989",
+    "683144",
+    "419893",
+    "987143"
+   ],
+   "correct": true,
+   "parsed": "82452174253259452334180568483210057098714388652483303015998968314441989352033624188442576259182259452334180552",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "425762",
+    "591822",
+    "594523",
+    "684832",
+    "341805",
+    "520336",
+    "742532",
+    "824521",
+    "241884",
+    "833030",
+    "100570",
+    "886524",
+    "159989",
+    "683144",
+    "419893",
+    "987143"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "82452174253259452334180568483210057098714388652483303015998968314441989352033624188442576259182259452334180552"
+   ],
+   "generated_tokens": 128,
+   "max_new": 128,
+   "statement_tokens": 355,
+   "placement": "scatter",
+   "anchor_sites": 14,
+   "anchor_sites_total": 16,
+   "lex_cap": 1024,
+   "required_span_tokens": 355,
+   "required_kept_tokens": 332,
+   "required_coverage": 0.9353,
+   "items_covered": 14,
+   "items_required": 16,
+   "tokens_per_item": 22.19,
+   "mean_item_spacing": 2025.9,
+   "required_set_tokens": 355.0,
+   "budget_covers_required_set": true,
+   "prefill_s": 9.71,
+   "decode_s": 5.15,
+   "peak_mib": 13742.1,
+   "peak_rss_mib": 4792.6,
+   "target_key": null,
+   "target_status": null,
+   "shared_prefill": true
+  }
+ ]
+}
