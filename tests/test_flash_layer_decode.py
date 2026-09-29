@@ -17,6 +17,8 @@ patched forward - exactly the path under test.
 from __future__ import annotations
 
 import copy
+import sys
+import types
 
 import pytest
 import torch
@@ -24,6 +26,20 @@ import torch
 from benchmarks import benchmark_bounded_decode_frontier as L
 
 from test_required_set import tiny_model
+
+
+@pytest.fixture(autouse=True)
+def _flash_attn_stub(monkeypatch):
+    """Decode-delegation tests do not execute the fused prefill kernel."""
+    if "flash_attn" in sys.modules:
+        return
+    module = types.ModuleType("flash_attn")
+
+    def _unexpected_prefill(*args, **kwargs):
+        raise AssertionError("flash_attn_func should not run in CPU decode tests")
+
+    module.flash_attn_func = _unexpected_prefill
+    monkeypatch.setitem(sys.modules, "flash_attn", module)
 
 
 def _ids(model, length=32):
