@@ -1,0 +1,38 @@
+[
+ {
+  "task": "niah_multikey_2",
+  "L": 11795,
+  "kept": 4608,
+  "score": 1.0,
+  "pred": "7549132.assistant\n\nThe special magic num",
+  "seconds": 2.7,
+  "peak_gib": 6.22
+ },
+ {
+  "task": "niah_multikey_2",
+  "L": 11828,
+  "kept": 4608,
+  "score": 1.0,
+  "pred": "5528843.\n\nThe special magic number for w",
+  "seconds": 2.3,
+  "peak_gib": 7.24
+ },
+ {
+  "task": "niah_multikey_2",
+  "L": 11807,
+  "kept": 4608,
+  "score": 1.0,
+  "pred": "3539476.",
+  "seconds": 2.5,
+  "peak_gib": 7.24
+ },
+ {
+  "task": "niah_multikey_2",
+  "L": 11843,
+  "kept": 4608,
+  "score": 1.0,
+  "pred": "2326271.assistant |\n\nThe special magic n",
+  "seconds": 3.9,
+  "peak_gib": 7.25
+ }
+]

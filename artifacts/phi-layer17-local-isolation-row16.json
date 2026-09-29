@@ -1,0 +1,19 @@
+{
+  "model": "/datasets/ComfyUI/models/LLM/Phi-3.5-mini-instruct",
+  "record": 15,
+  "layer": 17,
+  "tokens": 7422,
+  "window": 8192,
+  "one_call": {
+    "cosine": 0.9999844431877136,
+    "max_abs": 0.0625,
+    "relative_rmse": 0.005574509501457214
+  },
+  "chunked_call": {
+    "cosine": 0.9999843835830688,
+    "max_abs": 0.0625,
+    "relative_rmse": 0.005580426659435034
+  },
+  "chunk_invariance": 0.0625,
+  "note": "Layer attention-output isolation using real Phi teacher hidden states; no task score."
+}

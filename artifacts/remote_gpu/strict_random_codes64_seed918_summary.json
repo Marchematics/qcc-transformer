@@ -1,0 +1,25 @@
+{
+  "device": "cuda:1",
+  "checkpoint": "runs/lexical_pair_random_codes64_seed917.pt",
+  "dataset": "runs/strict_random_codes64_seed918.jsonl",
+  "examples": 58,
+  "correct": 56,
+  "accuracy": 0.9655172413793104,
+  "target_accuracy": 0.98,
+  "passed": false,
+  "context_lengths": {
+    "128000": {"correct": 29, "total": 29, "accuracy": 1.0},
+    "1000000": {"correct": 27, "total": 29, "accuracy": 0.9310344827586207}
+  },
+  "query_position": 900000,
+  "value_ids": "3-31",
+  "random_marker": true,
+  "random_filler": true,
+  "num_codes": 64,
+  "training_steps": 8000,
+  "failures": [
+    {"line": 30, "answer": 3, "prediction": 17},
+    {"line": 58, "answer": 31, "prediction": 28}
+  ],
+  "note": "Synthetic strict retrieval diagnostic only; not RULER, LongBench, PG-19, or pretrained-LM quality evidence."
+}

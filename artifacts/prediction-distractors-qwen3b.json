@@ -1,0 +1,4365 @@
+{
+ "model": "/root/qcc/models/Qwen2.5-3B-Instruct",
+ "label": "Qwen2.5-3B-Instruct",
+ "config": {
+  "family": [
+   "multikey"
+  ],
+  "items": [
+   1
+  ],
+  "distractors": [
+   4,
+   32,
+   128,
+   512
+  ],
+  "seeds": 3,
+  "length": 32768,
+  "lengths": [
+   32768
+  ],
+  "budgets": [
+   512,
+   1024,
+   2048,
+   4096,
+   8192
+  ],
+  "aggregate": "sum",
+  "obs": 64,
+  "nsink": 4,
+  "pool": 7,
+  "dilate": 9,
+  "lex_cap": 512,
+  "hops": 6,
+  "anchor_mode": "pattern",
+  "min_anchor_len": 3,
+  "scoring": "last",
+  "prefill_chunk": 8192,
+  "key_chunk": 4096,
+  "max_new": null,
+  "required_tol": 0.0,
+  "model": "/root/qcc/models/Qwen2.5-3B-Instruct",
+  "tokenizer": null,
+  "dtype": "bfloat16",
+  "device": "cuda",
+  "attn_impl": "sdpa",
+  "load_4bit": false,
+  "trust_remote_code": false,
+  "shared_prefill": true,
+  "label": null,
+  "out": "artifacts/prediction-distractors-qwen3b.json"
+ },
+ "summary": {
+  "rows": 72,
+  "lengths": [
+   32768
+  ],
+  "budgets": [
+   512,
+   1024,
+   2048,
+   4096,
+   8192
+  ],
+  "required_budget_rule": "smallest tested budget whose mean accuracy on the record set is within `required_tol` of the Full-KV arm's mean accuracy and strictly positive; null when Full-KV scores zero (see `full_kv_unsolved`) or no tested budget reaches it",
+  "required_tol": 0.0,
+  "accuracy": {
+   "multikey": {
+    "5": {
+     "full": 1.0,
+     "512": 1.0,
+     "1024": 1.0,
+     "2048": 1.0,
+     "4096": 1.0,
+     "8192": 1.0
+    },
+    "33": {
+     "full": 1.0,
+     "512": 1.0,
+     "1024": 1.0,
+     "2048": 1.0,
+     "4096": 1.0,
+     "8192": 1.0
+    },
+    "129": {
+     "full": 1.0,
+     "512": 1.0,
+     "1024": 1.0,
+     "2048": 1.0,
+     "4096": 1.0,
+     "8192": 1.0
+    },
+    "513": {
+     "full": 1.0,
+     "512": 1.0,
+     "1024": 1.0,
+     "2048": 1.0,
+     "4096": 1.0,
+     "8192": 1.0
+    }
+   }
+  },
+  "required_budget": {
+   "multikey": {
+    "5": 512,
+    "33": 512,
+    "129": 512,
+    "513": 512
+   }
+  },
+  "accuracy_by_distractors": {
+   "multikey": {
+    "4": {
+     "full": 1.0,
+     "512": 1.0,
+     "1024": 1.0,
+     "2048": 1.0,
+     "4096": 1.0,
+     "8192": 1.0
+    },
+    "32": {
+     "full": 1.0,
+     "512": 1.0,
+     "1024": 1.0,
+     "2048": 1.0,
+     "4096": 1.0,
+     "8192": 1.0
+    },
+    "128": {
+     "full": 1.0,
+     "512": 1.0,
+     "1024": 1.0,
+     "2048": 1.0,
+     "4096": 1.0,
+     "8192": 1.0
+    },
+    "512": {
+     "full": 1.0,
+     "512": 1.0,
+     "1024": 1.0,
+     "2048": 1.0,
+     "4096": 1.0,
+     "8192": 1.0
+    }
+   }
+  },
+  "required_budget_by_distractors": {
+   "multikey": {
+    "4": 512,
+    "32": 512,
+    "128": 512,
+    "512": 512
+   }
+  },
+  "full_kv_unsolved": {
+   "rule": "cells whose Full-KV accuracy is 0; required_budget stays null for them and they must not be read as bounded-retention failures",
+   "count": 0,
+   "cells": {}
+  },
+  "by_length": {
+   "32768": {
+    "accuracy": {
+     "multikey": {
+      "5": {
+       "full": 1.0,
+       "512": 1.0,
+       "1024": 1.0,
+       "2048": 1.0,
+       "4096": 1.0,
+       "8192": 1.0
+      },
+      "33": {
+       "full": 1.0,
+       "512": 1.0,
+       "1024": 1.0,
+       "2048": 1.0,
+       "4096": 1.0,
+       "8192": 1.0
+      },
+      "129": {
+       "full": 1.0,
+       "512": 1.0,
+       "1024": 1.0,
+       "2048": 1.0,
+       "4096": 1.0,
+       "8192": 1.0
+      },
+      "513": {
+       "full": 1.0,
+       "512": 1.0,
+       "1024": 1.0,
+       "2048": 1.0,
+       "4096": 1.0,
+       "8192": 1.0
+      }
+     }
+    },
+    "required_budget": {
+     "multikey": {
+      "5": 512,
+      "33": 512,
+      "129": 512,
+      "513": 512
+     }
+    },
+    "accuracy_by_distractors": {
+     "multikey": {
+      "4": {
+       "full": 1.0,
+       "512": 1.0,
+       "1024": 1.0,
+       "2048": 1.0,
+       "4096": 1.0,
+       "8192": 1.0
+      },
+      "32": {
+       "full": 1.0,
+       "512": 1.0,
+       "1024": 1.0,
+       "2048": 1.0,
+       "4096": 1.0,
+       "8192": 1.0
+      },
+      "128": {
+       "full": 1.0,
+       "512": 1.0,
+       "1024": 1.0,
+       "2048": 1.0,
+       "4096": 1.0,
+       "8192": 1.0
+      },
+      "512": {
+       "full": 1.0,
+       "512": 1.0,
+       "1024": 1.0,
+       "2048": 1.0,
+       "4096": 1.0,
+       "8192": 1.0
+      }
+     }
+    },
+    "required_budget_by_distractors": {
+     "multikey": {
+      "4": 512,
+      "32": 512,
+      "128": 512,
+      "512": 512
+     }
+    },
+    "full_kv_unsolved": {
+     "rule": "cells whose Full-KV accuracy is 0; required_budget stays null for them and they must not be read as bounded-retention failures",
+     "count": 0,
+     "cells": {}
+    }
+   }
+  },
+  "cells": {
+   "multikey": {
+    "5": {
+     "seeds": 3,
+     "records": 3,
+     "distractors": 4.0,
+     "statement_tokens": 106.67,
+     "tokens_per_item": 21.33,
+     "mean_item_spacing": 6532.47,
+     "required_set_tokens": 106.67,
+     "required_set_tokens_rule": "items x mean tokens per item statement (the tokens the item statements occupy); `statement_tokens` is the whole block",
+     "mean_kept_slots_bounded": 3686.4,
+     "mean_kept_slots_full": 32769.0,
+     "full_kv_accuracy": 1.0,
+     "full_kv_unsolved": false,
+     "budgets": {
+      "512": {
+       "covered": {
+        "rows": 3,
+        "cells": 1,
+        "mean_accuracy": 1.0,
+        "mean_partial_recall": 1.0,
+        "mean_kept_slots": 1024.0,
+        "mean_required_set_tokens": 106.67
+       },
+       "not_covered": {
+        "rows": 0,
+        "cells": 0,
+        "mean_accuracy": null,
+        "mean_partial_recall": null,
+        "mean_kept_slots": null,
+        "mean_required_set_tokens": null
+       },
+       "mean_kept_slots": 1024.0
+      },
+      "1024": {
+       "covered": {
+        "rows": 3,
+        "cells": 1,
+        "mean_accuracy": 1.0,
+        "mean_partial_recall": 1.0,
+        "mean_kept_slots": 1536.0,
+        "mean_required_set_tokens": 106.67
+       },
+       "not_covered": {
+        "rows": 0,
+        "cells": 0,
+        "mean_accuracy": null,
+        "mean_partial_recall": null,
+        "mean_kept_slots": null,
+        "mean_required_set_tokens": null
+       },
+       "mean_kept_slots": 1536.0
+      },
+      "2048": {
+       "covered": {
+        "rows": 3,
+        "cells": 1,
+        "mean_accuracy": 1.0,
+        "mean_partial_recall": 1.0,
+        "mean_kept_slots": 2560.0,
+        "mean_required_set_tokens": 106.67
+       },
+       "not_covered": {
+        "rows": 0,
+        "cells": 0,
+        "mean_accuracy": null,
+        "mean_partial_recall": null,
+        "mean_kept_slots": null,
+        "mean_required_set_tokens": null
+       },
+       "mean_kept_slots": 2560.0
+      },
+      "4096": {
+       "covered": {
+        "rows": 3,
+        "cells": 1,
+        "mean_accuracy": 1.0,
+        "mean_partial_recall": 1.0,
+        "mean_kept_slots": 4608.0,
+        "mean_required_set_tokens": 106.67
+       },
+       "not_covered": {
+        "rows": 0,
+        "cells": 0,
+        "mean_accuracy": null,
+        "mean_partial_recall": null,
+        "mean_kept_slots": null,
+        "mean_required_set_tokens": null
+       },
+       "mean_kept_slots": 4608.0
+      },
+      "8192": {
+       "covered": {
+        "rows": 3,
+        "cells": 1,
+        "mean_accuracy": 1.0,
+        "mean_partial_recall": 1.0,
+        "mean_kept_slots": 8704.0,
+        "mean_required_set_tokens": 106.67
+       },
+       "not_covered": {
+        "rows": 0,
+        "cells": 0,
+        "mean_accuracy": null,
+        "mean_partial_recall": null,
+        "mean_kept_slots": null,
+        "mean_required_set_tokens": null
+       },
+       "mean_kept_slots": 8704.0
+      }
+     }
+    },
+    "33": {
+     "seeds": 3,
+     "records": 3,
+     "distractors": 32.0,
+     "statement_tokens": 727.67,
+     "tokens_per_item": 22.05,
+     "mean_item_spacing": 970.93,
+     "required_set_tokens": 727.63,
+     "required_set_tokens_rule": "items x mean tokens per item statement (the tokens the item statements occupy); `statement_tokens` is the whole block",
+     "mean_kept_slots_bounded": 3686.4,
+     "mean_kept_slots_full": 32769.0,
+     "full_kv_accuracy": 1.0,
+     "full_kv_unsolved": false,
+     "budgets": {
+      "512": {
+       "covered": {
+        "rows": 3,
+        "cells": 1,
+        "mean_accuracy": 1.0,
+        "mean_partial_recall": 1.0,
+        "mean_kept_slots": 1024.0,
+        "mean_required_set_tokens": 727.63
+       },
+       "not_covered": {
+        "rows": 0,
+        "cells": 0,
+        "mean_accuracy": null,
+        "mean_partial_recall": null,
+        "mean_kept_slots": null,
+        "mean_required_set_tokens": null
+       },
+       "mean_kept_slots": 1024.0
+      },
+      "1024": {
+       "covered": {
+        "rows": 3,
+        "cells": 1,
+        "mean_accuracy": 1.0,
+        "mean_partial_recall": 1.0,
+        "mean_kept_slots": 1536.0,
+        "mean_required_set_tokens": 727.63
+       },
+       "not_covered": {
+        "rows": 0,
+        "cells": 0,
+        "mean_accuracy": null,
+        "mean_partial_recall": null,
+        "mean_kept_slots": null,
+        "mean_required_set_tokens": null
+       },
+       "mean_kept_slots": 1536.0
+      },
+      "2048": {
+       "covered": {
+        "rows": 3,
+        "cells": 1,
+        "mean_accuracy": 1.0,
+        "mean_partial_recall": 1.0,
+        "mean_kept_slots": 2560.0,
+        "mean_required_set_tokens": 727.63
+       },
+       "not_covered": {
+        "rows": 0,
+        "cells": 0,
+        "mean_accuracy": null,
+        "mean_partial_recall": null,
+        "mean_kept_slots": null,
+        "mean_required_set_tokens": null
+       },
+       "mean_kept_slots": 2560.0
+      },
+      "4096": {
+       "covered": {
+        "rows": 3,
+        "cells": 1,
+        "mean_accuracy": 1.0,
+        "mean_partial_recall": 1.0,
+        "mean_kept_slots": 4608.0,
+        "mean_required_set_tokens": 727.63
+       },
+       "not_covered": {
+        "rows": 0,
+        "cells": 0,
+        "mean_accuracy": null,
+        "mean_partial_recall": null,
+        "mean_kept_slots": null,
+        "mean_required_set_tokens": null
+       },
+       "mean_kept_slots": 4608.0
+      },
+      "8192": {
+       "covered": {
+        "rows": 3,
+        "cells": 1,
+        "mean_accuracy": 1.0,
+        "mean_partial_recall": 1.0,
+        "mean_kept_slots": 8704.0,
+        "mean_required_set_tokens": 727.63
+       },
+       "not_covered": {
+        "rows": 0,
+        "cells": 0,
+        "mean_accuracy": null,
+        "mean_partial_recall": null,
+        "mean_kept_slots": null,
+        "mean_required_set_tokens": null
+       },
+       "mean_kept_slots": 8704.0
+      }
+     }
+    },
+    "129": {
+     "seeds": 3,
+     "records": 3,
+     "distractors": 128.0,
+     "statement_tokens": 2836.67,
+     "tokens_per_item": 21.99,
+     "mean_item_spacing": 232.03,
+     "required_set_tokens": 2836.73,
+     "required_set_tokens_rule": "items x mean tokens per item statement (the tokens the item statements occupy); `statement_tokens` is the whole block",
+     "mean_kept_slots_bounded": 3686.4,
+     "mean_kept_slots_full": 32769.0,
+     "full_kv_accuracy": 1.0,
+     "full_kv_unsolved": false,
+     "budgets": {
+      "512": {
+       "covered": {
+        "rows": 0,
+        "cells": 0,
+        "mean_accuracy": null,
+        "mean_partial_recall": null,
+        "mean_kept_slots": null,
+        "mean_required_set_tokens": null
+       },
+       "not_covered": {
+        "rows": 3,
+        "cells": 1,
+        "mean_accuracy": 1.0,
+        "mean_partial_recall": 1.0,
+        "mean_kept_slots": 1024.0,
+        "mean_required_set_tokens": 2836.73
+       },
+       "mean_kept_slots": 1024.0
+      },
+      "1024": {
+       "covered": {
+        "rows": 0,
+        "cells": 0,
+        "mean_accuracy": null,
+        "mean_partial_recall": null,
+        "mean_kept_slots": null,
+        "mean_required_set_tokens": null
+       },
+       "not_covered": {
+        "rows": 3,
+        "cells": 1,
+        "mean_accuracy": 1.0,
+        "mean_partial_recall": 1.0,
+        "mean_kept_slots": 1536.0,
+        "mean_required_set_tokens": 2836.73
+       },
+       "mean_kept_slots": 1536.0
+      },
+      "2048": {
+       "covered": {
+        "rows": 0,
+        "cells": 0,
+        "mean_accuracy": null,
+        "mean_partial_recall": null,
+        "mean_kept_slots": null,
+        "mean_required_set_tokens": null
+       },
+       "not_covered": {
+        "rows": 3,
+        "cells": 1,
+        "mean_accuracy": 1.0,
+        "mean_partial_recall": 1.0,
+        "mean_kept_slots": 2560.0,
+        "mean_required_set_tokens": 2836.73
+       },
+       "mean_kept_slots": 2560.0
+      },
+      "4096": {
+       "covered": {
+        "rows": 3,
+        "cells": 1,
+        "mean_accuracy": 1.0,
+        "mean_partial_recall": 1.0,
+        "mean_kept_slots": 4608.0,
+        "mean_required_set_tokens": 2836.73
+       },
+       "not_covered": {
+        "rows": 0,
+        "cells": 0,
+        "mean_accuracy": null,
+        "mean_partial_recall": null,
+        "mean_kept_slots": null,
+        "mean_required_set_tokens": null
+       },
+       "mean_kept_slots": 4608.0
+      },
+      "8192": {
+       "covered": {
+        "rows": 3,
+        "cells": 1,
+        "mean_accuracy": 1.0,
+        "mean_partial_recall": 1.0,
+        "mean_kept_slots": 8704.0,
+        "mean_required_set_tokens": 2836.73
+       },
+       "not_covered": {
+        "rows": 0,
+        "cells": 0,
+        "mean_accuracy": null,
+        "mean_partial_recall": null,
+        "mean_kept_slots": null,
+        "mean_required_set_tokens": null
+       },
+       "mean_kept_slots": 8704.0
+      }
+     }
+    },
+    "513": {
+     "seeds": 3,
+     "records": 3,
+     "distractors": 512.0,
+     "statement_tokens": 11302.33,
+     "tokens_per_item": 22.03,
+     "mean_item_spacing": 41.87,
+     "required_set_tokens": 11303.1,
+     "required_set_tokens_rule": "items x mean tokens per item statement (the tokens the item statements occupy); `statement_tokens` is the whole block",
+     "mean_kept_slots_bounded": 3686.4,
+     "mean_kept_slots_full": 32769.0,
+     "full_kv_accuracy": 1.0,
+     "full_kv_unsolved": false,
+     "budgets": {
+      "512": {
+       "covered": {
+        "rows": 0,
+        "cells": 0,
+        "mean_accuracy": null,
+        "mean_partial_recall": null,
+        "mean_kept_slots": null,
+        "mean_required_set_tokens": null
+       },
+       "not_covered": {
+        "rows": 3,
+        "cells": 1,
+        "mean_accuracy": 1.0,
+        "mean_partial_recall": 1.0,
+        "mean_kept_slots": 1024.0,
+        "mean_required_set_tokens": 11303.1
+       },
+       "mean_kept_slots": 1024.0
+      },
+      "1024": {
+       "covered": {
+        "rows": 0,
+        "cells": 0,
+        "mean_accuracy": null,
+        "mean_partial_recall": null,
+        "mean_kept_slots": null,
+        "mean_required_set_tokens": null
+       },
+       "not_covered": {
+        "rows": 3,
+        "cells": 1,
+        "mean_accuracy": 1.0,
+        "mean_partial_recall": 1.0,
+        "mean_kept_slots": 1536.0,
+        "mean_required_set_tokens": 11303.1
+       },
+       "mean_kept_slots": 1536.0
+      },
+      "2048": {
+       "covered": {
+        "rows": 0,
+        "cells": 0,
+        "mean_accuracy": null,
+        "mean_partial_recall": null,
+        "mean_kept_slots": null,
+        "mean_required_set_tokens": null
+       },
+       "not_covered": {
+        "rows": 3,
+        "cells": 1,
+        "mean_accuracy": 1.0,
+        "mean_partial_recall": 1.0,
+        "mean_kept_slots": 2560.0,
+        "mean_required_set_tokens": 11303.1
+       },
+       "mean_kept_slots": 2560.0
+      },
+      "4096": {
+       "covered": {
+        "rows": 0,
+        "cells": 0,
+        "mean_accuracy": null,
+        "mean_partial_recall": null,
+        "mean_kept_slots": null,
+        "mean_required_set_tokens": null
+       },
+       "not_covered": {
+        "rows": 3,
+        "cells": 1,
+        "mean_accuracy": 1.0,
+        "mean_partial_recall": 1.0,
+        "mean_kept_slots": 4608.0,
+        "mean_required_set_tokens": 11303.1
+       },
+       "mean_kept_slots": 4608.0
+      },
+      "8192": {
+       "covered": {
+        "rows": 0,
+        "cells": 0,
+        "mean_accuracy": null,
+        "mean_partial_recall": null,
+        "mean_kept_slots": null,
+        "mean_required_set_tokens": null
+       },
+       "not_covered": {
+        "rows": 3,
+        "cells": 1,
+        "mean_accuracy": 1.0,
+        "mean_partial_recall": 1.0,
+        "mean_kept_slots": 8704.0,
+        "mean_required_set_tokens": 11303.1
+       },
+       "mean_kept_slots": 8704.0
+      }
+     }
+    }
+   }
+  },
+  "budget_covers_required_set": {
+   "rule": "a bounded row's budget covers its required set when required_set_tokens <= kept_slots, where kept_slots is the measured retained width of the bounded arm (not the nominal budget) and required_set_tokens is the mean tokens per item statement times the number of items the answer needs",
+   "prediction": "prediction 2 of docs/MECHANISM.md: accuracy is high when the budget covers the required set and collapses when it does not; `separation` is the measured size of the cliff",
+   "covered": {
+    "rows": 36,
+    "cells": 12,
+    "mean_accuracy": 1.0,
+    "mean_partial_recall": 1.0,
+    "mean_kept_slots": 4181.33,
+    "mean_required_set_tokens": 820.41
+   },
+   "not_covered": {
+    "rows": 24,
+    "cells": 8,
+    "mean_accuracy": 1.0,
+    "mean_partial_recall": 1.0,
+    "mean_kept_slots": 2944.0,
+    "mean_required_set_tokens": 8128.21
+   },
+   "separation": {
+    "accuracy": 0.0,
+    "partial_recall": 0.0
+   },
+   "by_family": {
+    "multikey": {
+     "covered": {
+      "rows": 36,
+      "cells": 12,
+      "mean_accuracy": 1.0,
+      "mean_partial_recall": 1.0,
+      "mean_kept_slots": 4181.33,
+      "mean_required_set_tokens": 820.41
+     },
+     "not_covered": {
+      "rows": 24,
+      "cells": 8,
+      "mean_accuracy": 1.0,
+      "mean_partial_recall": 1.0,
+      "mean_kept_slots": 2944.0,
+      "mean_required_set_tokens": 8128.21
+     },
+     "separation": {
+      "accuracy": 0.0,
+      "partial_recall": 0.0
+     }
+    }
+   },
+   "by_cell": {
+    "multikey": {
+     "5": {
+      "covered": {
+       "rows": 15,
+       "cells": 5,
+       "mean_accuracy": 1.0,
+       "mean_partial_recall": 1.0,
+       "mean_kept_slots": 3686.4,
+       "mean_required_set_tokens": 106.67
+      },
+      "not_covered": {
+       "rows": 0,
+       "cells": 0,
+       "mean_accuracy": null,
+       "mean_partial_recall": null,
+       "mean_kept_slots": null,
+       "mean_required_set_tokens": null
+      },
+      "separation": {
+       "accuracy": null,
+       "partial_recall": null
+      }
+     },
+     "33": {
+      "covered": {
+       "rows": 15,
+       "cells": 5,
+       "mean_accuracy": 1.0,
+       "mean_partial_recall": 1.0,
+       "mean_kept_slots": 3686.4,
+       "mean_required_set_tokens": 727.63
+      },
+      "not_covered": {
+       "rows": 0,
+       "cells": 0,
+       "mean_accuracy": null,
+       "mean_partial_recall": null,
+       "mean_kept_slots": null,
+       "mean_required_set_tokens": null
+      },
+      "separation": {
+       "accuracy": null,
+       "partial_recall": null
+      }
+     },
+     "129": {
+      "covered": {
+       "rows": 6,
+       "cells": 2,
+       "mean_accuracy": 1.0,
+       "mean_partial_recall": 1.0,
+       "mean_kept_slots": 6656.0,
+       "mean_required_set_tokens": 2836.73
+      },
+      "not_covered": {
+       "rows": 9,
+       "cells": 3,
+       "mean_accuracy": 1.0,
+       "mean_partial_recall": 1.0,
+       "mean_kept_slots": 1706.67,
+       "mean_required_set_tokens": 2836.73
+      },
+      "separation": {
+       "accuracy": 0.0,
+       "partial_recall": 0.0
+      }
+     },
+     "513": {
+      "covered": {
+       "rows": 0,
+       "cells": 0,
+       "mean_accuracy": null,
+       "mean_partial_recall": null,
+       "mean_kept_slots": null,
+       "mean_required_set_tokens": null
+      },
+      "not_covered": {
+       "rows": 15,
+       "cells": 5,
+       "mean_accuracy": 1.0,
+       "mean_partial_recall": 1.0,
+       "mean_kept_slots": 3686.4,
+       "mean_required_set_tokens": 11303.1
+      },
+      "separation": {
+       "accuracy": null,
+       "partial_recall": null
+      }
+     }
+    }
+   },
+   "by_budget": {
+    "512": {
+     "covered": {
+      "rows": 6,
+      "cells": 2,
+      "mean_accuracy": 1.0,
+      "mean_partial_recall": 1.0,
+      "mean_kept_slots": 1024.0,
+      "mean_required_set_tokens": 417.15
+     },
+     "not_covered": {
+      "rows": 6,
+      "cells": 2,
+      "mean_accuracy": 1.0,
+      "mean_partial_recall": 1.0,
+      "mean_kept_slots": 1024.0,
+      "mean_required_set_tokens": 7069.92
+     },
+     "separation": {
+      "accuracy": 0.0,
+      "partial_recall": 0.0
+     }
+    },
+    "1024": {
+     "covered": {
+      "rows": 6,
+      "cells": 2,
+      "mean_accuracy": 1.0,
+      "mean_partial_recall": 1.0,
+      "mean_kept_slots": 1536.0,
+      "mean_required_set_tokens": 417.15
+     },
+     "not_covered": {
+      "rows": 6,
+      "cells": 2,
+      "mean_accuracy": 1.0,
+      "mean_partial_recall": 1.0,
+      "mean_kept_slots": 1536.0,
+      "mean_required_set_tokens": 7069.92
+     },
+     "separation": {
+      "accuracy": 0.0,
+      "partial_recall": 0.0
+     }
+    },
+    "2048": {
+     "covered": {
+      "rows": 6,
+      "cells": 2,
+      "mean_accuracy": 1.0,
+      "mean_partial_recall": 1.0,
+      "mean_kept_slots": 2560.0,
+      "mean_required_set_tokens": 417.15
+     },
+     "not_covered": {
+      "rows": 6,
+      "cells": 2,
+      "mean_accuracy": 1.0,
+      "mean_partial_recall": 1.0,
+      "mean_kept_slots": 2560.0,
+      "mean_required_set_tokens": 7069.92
+     },
+     "separation": {
+      "accuracy": 0.0,
+      "partial_recall": 0.0
+     }
+    },
+    "4096": {
+     "covered": {
+      "rows": 9,
+      "cells": 3,
+      "mean_accuracy": 1.0,
+      "mean_partial_recall": 1.0,
+      "mean_kept_slots": 4608.0,
+      "mean_required_set_tokens": 1223.68
+     },
+     "not_covered": {
+      "rows": 3,
+      "cells": 1,
+      "mean_accuracy": 1.0,
+      "mean_partial_recall": 1.0,
+      "mean_kept_slots": 4608.0,
+      "mean_required_set_tokens": 11303.1
+     },
+     "separation": {
+      "accuracy": 0.0,
+      "partial_recall": 0.0
+     }
+    },
+    "8192": {
+     "covered": {
+      "rows": 9,
+      "cells": 3,
+      "mean_accuracy": 1.0,
+      "mean_partial_recall": 1.0,
+      "mean_kept_slots": 8704.0,
+      "mean_required_set_tokens": 1223.68
+     },
+     "not_covered": {
+      "rows": 3,
+      "cells": 1,
+      "mean_accuracy": 1.0,
+      "mean_partial_recall": 1.0,
+      "mean_kept_slots": 8704.0,
+      "mean_required_set_tokens": 11303.1
+     },
+     "separation": {
+      "accuracy": 0.0,
+      "partial_recall": 0.0
+     }
+    }
+   }
+  },
+  "prediction_checks": {
+   "required_budget_flat_in_length": null,
+   "required_budget_flat_cells": 0,
+   "required_budget_grows_with_items": true,
+   "required_budget_grows_cells": 1,
+   "required_budget_grows_with_distractors": true,
+   "required_budget_grows_with_distractors_cells": 1,
+   "cliff": {
+    "mean_accuracy_budget_covers_required_set": 1.0,
+    "mean_accuracy_budget_below_required_set": 1.0,
+    "cells_above": 33,
+    "cells_below": 27,
+    "required_set_tokens_rule": "items x mean tokens per item statement",
+    "budget_comparison": "nominal budget, not the measured kept slots",
+    "measured_kept_slots_block": "budget_covers_required_set",
+    "measured_separation_accuracy": 0.0
+   }
+  }
+ },
+ "records": [
+  {
+   "family": "multikey",
+   "items": 5,
+   "seed": 0,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 4,
+   "key_count": 5,
+   "arm": "full",
+   "budget": null,
+   "prompt_tokens": 32769,
+   "kept_slots": 32769,
+   "prediction": "736522\n\nBased on the information provided in the passage, one of the magic numbers for trace-b",
+   "expected": "736522",
+   "references": [
+    "736522"
+   ],
+   "correct": true,
+   "parsed": "736522",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "736522"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "736522"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 107,
+   "tokens_per_item": 21.4,
+   "mean_item_spacing": 6532.4,
+   "required_set_tokens": 107.0,
+   "budget_covers_required_set": null,
+   "prefill_s": 10.02,
+   "decode_s": 0.71,
+   "peak_mib": 13554.5,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-b0ce2b",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 5,
+   "seed": 0,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 4,
+   "key_count": 5,
+   "arm": "b512",
+   "budget": 512,
+   "prompt_tokens": 32769,
+   "kept_slots": 1024,
+   "prediction": "736522\n\nCan you please provide the magic number for trace-c481a mentioned in the",
+   "expected": "736522",
+   "references": [
+    "736522"
+   ],
+   "correct": true,
+   "parsed": "736522",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "736522"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "736522",
+    "481"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 107,
+   "tokens_per_item": 21.4,
+   "mean_item_spacing": 6532.4,
+   "required_set_tokens": 107.0,
+   "budget_covers_required_set": true,
+   "prefill_s": 10.02,
+   "decode_s": 0.72,
+   "peak_mib": 13554.5,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-b0ce2b",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 5,
+   "seed": 0,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 4,
+   "key_count": 5,
+   "arm": "b1024",
+   "budget": 1024,
+   "prompt_tokens": 32769,
+   "kept_slots": 1536,
+   "prediction": "736522\n\nCan you please provide the magic number for trace-c481a4 mentioned in",
+   "expected": "736522",
+   "references": [
+    "736522"
+   ],
+   "correct": true,
+   "parsed": "736522",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "736522"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "736522",
+    "481",
+    "4"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 107,
+   "tokens_per_item": 21.4,
+   "mean_item_spacing": 6532.4,
+   "required_set_tokens": 107.0,
+   "budget_covers_required_set": true,
+   "prefill_s": 10.02,
+   "decode_s": 0.71,
+   "peak_mib": 13554.5,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-b0ce2b",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 5,
+   "seed": 0,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 4,
+   "key_count": 5,
+   "arm": "b2048",
+   "budget": 2048,
+   "prompt_tokens": 32769,
+   "kept_slots": 2560,
+   "prediction": "736522\n\nCan you please provide the magic number for trace-c481a4 mentioned in",
+   "expected": "736522",
+   "references": [
+    "736522"
+   ],
+   "correct": true,
+   "parsed": "736522",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "736522"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "736522",
+    "481",
+    "4"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 107,
+   "tokens_per_item": 21.4,
+   "mean_item_spacing": 6532.4,
+   "required_set_tokens": 107.0,
+   "budget_covers_required_set": true,
+   "prefill_s": 10.02,
+   "decode_s": 0.71,
+   "peak_mib": 13554.5,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-b0ce2b",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 5,
+   "seed": 0,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 4,
+   "key_count": 5,
+   "arm": "b4096",
+   "budget": 4096,
+   "prompt_tokens": 32769,
+   "kept_slots": 4608,
+   "prediction": "736522\n\nThe magic number for trace-b0ce2b mentioned above is 736",
+   "expected": "736522",
+   "references": [
+    "736522"
+   ],
+   "correct": true,
+   "parsed": "736522",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "736522"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "736522",
+    "0",
+    "2",
+    "736"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 107,
+   "tokens_per_item": 21.4,
+   "mean_item_spacing": 6532.4,
+   "required_set_tokens": 107.0,
+   "budget_covers_required_set": true,
+   "prefill_s": 10.02,
+   "decode_s": 0.71,
+   "peak_mib": 13554.5,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-b0ce2b",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 5,
+   "seed": 0,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 4,
+   "key_count": 5,
+   "arm": "b8192",
+   "budget": 8192,
+   "prompt_tokens": 32769,
+   "kept_slots": 8704,
+   "prediction": "736522\n\nThe magic number for trace-b0ce2b mentioned above is 736",
+   "expected": "736522",
+   "references": [
+    "736522"
+   ],
+   "correct": true,
+   "parsed": "736522",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "736522"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "736522",
+    "0",
+    "2",
+    "736"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 107,
+   "tokens_per_item": 21.4,
+   "mean_item_spacing": 6532.4,
+   "required_set_tokens": 107.0,
+   "budget_covers_required_set": true,
+   "prefill_s": 10.02,
+   "decode_s": 0.71,
+   "peak_mib": 13554.5,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-b0ce2b",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 5,
+   "seed": 1,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 4,
+   "key_count": 5,
+   "arm": "full",
+   "budget": null,
+   "prompt_tokens": 32769,
+   "kept_slots": 32769,
+   "prediction": "717208 The magic number for trace-33ad7b is 71720",
+   "expected": "717208",
+   "references": [
+    "717208"
+   ],
+   "correct": true,
+   "parsed": "717208",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "717208"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "717208",
+    "-33",
+    "7",
+    "71720"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 105,
+   "tokens_per_item": 21.0,
+   "mean_item_spacing": 6532.8,
+   "required_set_tokens": 105.0,
+   "budget_covers_required_set": null,
+   "prefill_s": 9.74,
+   "decode_s": 0.72,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-33ad7b",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 5,
+   "seed": 1,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 4,
+   "key_count": 5,
+   "arm": "b512",
+   "budget": 512,
+   "prompt_tokens": 32769,
+   "kept_slots": 1024,
+   "prediction": "717208 One of the magic numbers for trace-33ad7b is 717",
+   "expected": "717208",
+   "references": [
+    "717208"
+   ],
+   "correct": true,
+   "parsed": "717208",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "717208"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "717208",
+    "-33",
+    "7",
+    "717"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 105,
+   "tokens_per_item": 21.0,
+   "mean_item_spacing": 6532.8,
+   "required_set_tokens": 105.0,
+   "budget_covers_required_set": true,
+   "prefill_s": 9.74,
+   "decode_s": 0.72,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-33ad7b",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 5,
+   "seed": 1,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 4,
+   "key_count": 5,
+   "arm": "b1024",
+   "budget": 1024,
+   "prompt_tokens": 32769,
+   "kept_slots": 1536,
+   "prediction": "717208\n\nThe magic number for trace-33ad7b is 7172",
+   "expected": "717208",
+   "references": [
+    "717208"
+   ],
+   "correct": true,
+   "parsed": "717208",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "717208"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "717208",
+    "-33",
+    "7",
+    "7172"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 105,
+   "tokens_per_item": 21.0,
+   "mean_item_spacing": 6532.8,
+   "required_set_tokens": 105.0,
+   "budget_covers_required_set": true,
+   "prefill_s": 9.74,
+   "decode_s": 0.71,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-33ad7b",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 5,
+   "seed": 1,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 4,
+   "key_count": 5,
+   "arm": "b2048",
+   "budget": 2048,
+   "prompt_tokens": 32769,
+   "kept_slots": 2560,
+   "prediction": "717208 The magic number for trace-33ad7b is 71720",
+   "expected": "717208",
+   "references": [
+    "717208"
+   ],
+   "correct": true,
+   "parsed": "717208",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "717208"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "717208",
+    "-33",
+    "7",
+    "71720"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 105,
+   "tokens_per_item": 21.0,
+   "mean_item_spacing": 6532.8,
+   "required_set_tokens": 105.0,
+   "budget_covers_required_set": true,
+   "prefill_s": 9.74,
+   "decode_s": 0.71,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-33ad7b",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 5,
+   "seed": 1,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 4,
+   "key_count": 5,
+   "arm": "b4096",
+   "budget": 4096,
+   "prompt_tokens": 32769,
+   "kept_slots": 4608,
+   "prediction": "717208 The magic number for trace-33ad7b is 71720",
+   "expected": "717208",
+   "references": [
+    "717208"
+   ],
+   "correct": true,
+   "parsed": "717208",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "717208"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "717208",
+    "-33",
+    "7",
+    "71720"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 105,
+   "tokens_per_item": 21.0,
+   "mean_item_spacing": 6532.8,
+   "required_set_tokens": 105.0,
+   "budget_covers_required_set": true,
+   "prefill_s": 9.74,
+   "decode_s": 0.71,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-33ad7b",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 5,
+   "seed": 1,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 4,
+   "key_count": 5,
+   "arm": "b8192",
+   "budget": 8192,
+   "prompt_tokens": 32769,
+   "kept_slots": 8704,
+   "prediction": "717208 The magic number for trace-33ad7b is 71720",
+   "expected": "717208",
+   "references": [
+    "717208"
+   ],
+   "correct": true,
+   "parsed": "717208",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "717208"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "717208",
+    "-33",
+    "7",
+    "71720"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 105,
+   "tokens_per_item": 21.0,
+   "mean_item_spacing": 6532.8,
+   "required_set_tokens": 105.0,
+   "budget_covers_required_set": true,
+   "prefill_s": 9.74,
+   "decode_s": 0.71,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-33ad7b",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 5,
+   "seed": 2,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 4,
+   "key_count": 5,
+   "arm": "full",
+   "budget": null,
+   "prompt_tokens": 32769,
+   "kept_slots": 32769,
+   "prediction": "174252\nTo determine the magic number for trace-bdcf01, we need to identify",
+   "expected": "174252",
+   "references": [
+    "174252"
+   ],
+   "correct": true,
+   "parsed": "174252",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "174252"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "174252",
+    "1"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 108,
+   "tokens_per_item": 21.6,
+   "mean_item_spacing": 6532.2,
+   "required_set_tokens": 108.0,
+   "budget_covers_required_set": null,
+   "prefill_s": 9.74,
+   "decode_s": 0.72,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-bdcf01",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 5,
+   "seed": 2,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 4,
+   "key_count": 5,
+   "arm": "b512",
+   "budget": 512,
+   "prompt_tokens": 32769,
+   "kept_slots": 1024,
+   "prediction": "174252\n\nNow, with the additional information that one of the magic numbers for trace-e45",
+   "expected": "174252",
+   "references": [
+    "174252"
+   ],
+   "correct": true,
+   "parsed": "174252",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "174252"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "174252",
+    "45"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 108,
+   "tokens_per_item": 21.6,
+   "mean_item_spacing": 6532.2,
+   "required_set_tokens": 108.0,
+   "budget_covers_required_set": true,
+   "prefill_s": 9.74,
+   "decode_s": 0.71,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-bdcf01",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 5,
+   "seed": 2,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 4,
+   "key_count": 5,
+   "arm": "b1024",
+   "budget": 1024,
+   "prompt_tokens": 32769,
+   "kept_slots": 1536,
+   "prediction": "174252\n\nNow, identify the magic number for trace-e45c10. Based on",
+   "expected": "174252",
+   "references": [
+    "174252"
+   ],
+   "correct": true,
+   "parsed": "174252",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "174252"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "174252",
+    "45",
+    "10"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 108,
+   "tokens_per_item": 21.6,
+   "mean_item_spacing": 6532.2,
+   "required_set_tokens": 108.0,
+   "budget_covers_required_set": true,
+   "prefill_s": 9.74,
+   "decode_s": 0.73,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-bdcf01",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 5,
+   "seed": 2,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 4,
+   "key_count": 5,
+   "arm": "b2048",
+   "budget": 2048,
+   "prompt_tokens": 32769,
+   "kept_slots": 2560,
+   "prediction": "174252\n\nThe magic number for trace-bdcf01 mentioned above is 174",
+   "expected": "174252",
+   "references": [
+    "174252"
+   ],
+   "correct": true,
+   "parsed": "174252",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "174252"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "174252",
+    "1",
+    "174"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 108,
+   "tokens_per_item": 21.6,
+   "mean_item_spacing": 6532.2,
+   "required_set_tokens": 108.0,
+   "budget_covers_required_set": true,
+   "prefill_s": 9.74,
+   "decode_s": 0.71,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-bdcf01",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 5,
+   "seed": 2,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 4,
+   "key_count": 5,
+   "arm": "b4096",
+   "budget": 4096,
+   "prompt_tokens": 32769,
+   "kept_slots": 4608,
+   "prediction": "174252 One of the magic numbers for trace-bdcf01 is 1742",
+   "expected": "174252",
+   "references": [
+    "174252"
+   ],
+   "correct": true,
+   "parsed": "174252",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "174252"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "174252",
+    "1",
+    "1742"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 108,
+   "tokens_per_item": 21.6,
+   "mean_item_spacing": 6532.2,
+   "required_set_tokens": 108.0,
+   "budget_covers_required_set": true,
+   "prefill_s": 9.74,
+   "decode_s": 0.73,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-bdcf01",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 5,
+   "seed": 2,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 4,
+   "key_count": 5,
+   "arm": "b8192",
+   "budget": 8192,
+   "prompt_tokens": 32769,
+   "kept_slots": 8704,
+   "prediction": "174252 One of the magic numbers for trace-bdcf01 is 1742",
+   "expected": "174252",
+   "references": [
+    "174252"
+   ],
+   "correct": true,
+   "parsed": "174252",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "174252"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "174252",
+    "1",
+    "1742"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 108,
+   "tokens_per_item": 21.6,
+   "mean_item_spacing": 6532.2,
+   "required_set_tokens": 108.0,
+   "budget_covers_required_set": true,
+   "prefill_s": 9.74,
+   "decode_s": 0.71,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-bdcf01",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 33,
+   "seed": 0,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 32,
+   "key_count": 33,
+   "arm": "full",
+   "budget": null,
+   "prompt_tokens": 32769,
+   "kept_slots": 32769,
+   "prediction": "506070 The magic number for trace-ec87d0 mentioned above is 506",
+   "expected": "506070",
+   "references": [
+    "506070"
+   ],
+   "correct": true,
+   "parsed": "506070",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "506070"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "506070",
+    "87",
+    "0",
+    "506"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 721,
+   "tokens_per_item": 21.85,
+   "mean_item_spacing": 971.2,
+   "required_set_tokens": 721.1,
+   "budget_covers_required_set": null,
+   "prefill_s": 9.74,
+   "decode_s": 0.71,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-ec87d0",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 33,
+   "seed": 0,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 32,
+   "key_count": 33,
+   "arm": "b512",
+   "budget": 512,
+   "prompt_tokens": 32769,
+   "kept_slots": 1024,
+   "prediction": "506070 One of the magic numbers for trace-ec87d0 is 506",
+   "expected": "506070",
+   "references": [
+    "506070"
+   ],
+   "correct": true,
+   "parsed": "506070",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "506070"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "506070",
+    "87",
+    "0",
+    "506"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 721,
+   "tokens_per_item": 21.85,
+   "mean_item_spacing": 971.2,
+   "required_set_tokens": 721.1,
+   "budget_covers_required_set": true,
+   "prefill_s": 9.74,
+   "decode_s": 0.7,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-ec87d0",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 33,
+   "seed": 0,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 32,
+   "key_count": 33,
+   "arm": "b1024",
+   "budget": 1024,
+   "prompt_tokens": 32769,
+   "kept_slots": 1536,
+   "prediction": "506070 One of the magic numbers for trace-ec87d0 is 506",
+   "expected": "506070",
+   "references": [
+    "506070"
+   ],
+   "correct": true,
+   "parsed": "506070",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "506070"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "506070",
+    "87",
+    "0",
+    "506"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 721,
+   "tokens_per_item": 21.85,
+   "mean_item_spacing": 971.2,
+   "required_set_tokens": 721.1,
+   "budget_covers_required_set": true,
+   "prefill_s": 9.74,
+   "decode_s": 0.7,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-ec87d0",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 33,
+   "seed": 0,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 32,
+   "key_count": 33,
+   "arm": "b2048",
+   "budget": 2048,
+   "prompt_tokens": 32769,
+   "kept_slots": 2560,
+   "prediction": "506070 One of the magic numbers for trace-ec87d0 is 506",
+   "expected": "506070",
+   "references": [
+    "506070"
+   ],
+   "correct": true,
+   "parsed": "506070",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "506070"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "506070",
+    "87",
+    "0",
+    "506"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 721,
+   "tokens_per_item": 21.85,
+   "mean_item_spacing": 971.2,
+   "required_set_tokens": 721.1,
+   "budget_covers_required_set": true,
+   "prefill_s": 9.74,
+   "decode_s": 0.71,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-ec87d0",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 33,
+   "seed": 0,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 32,
+   "key_count": 33,
+   "arm": "b4096",
+   "budget": 4096,
+   "prompt_tokens": 32769,
+   "kept_slots": 4608,
+   "prediction": "506070 One of the magic numbers for trace-ec87d0 is 506",
+   "expected": "506070",
+   "references": [
+    "506070"
+   ],
+   "correct": true,
+   "parsed": "506070",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "506070"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "506070",
+    "87",
+    "0",
+    "506"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 721,
+   "tokens_per_item": 21.85,
+   "mean_item_spacing": 971.2,
+   "required_set_tokens": 721.1,
+   "budget_covers_required_set": true,
+   "prefill_s": 9.74,
+   "decode_s": 0.7,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-ec87d0",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 33,
+   "seed": 0,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 32,
+   "key_count": 33,
+   "arm": "b8192",
+   "budget": 8192,
+   "prompt_tokens": 32769,
+   "kept_slots": 8704,
+   "prediction": "506070 One of the magic numbers for trace-ec87d0 is 506",
+   "expected": "506070",
+   "references": [
+    "506070"
+   ],
+   "correct": true,
+   "parsed": "506070",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "506070"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "506070",
+    "87",
+    "0",
+    "506"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 721,
+   "tokens_per_item": 21.85,
+   "mean_item_spacing": 971.2,
+   "required_set_tokens": 721.1,
+   "budget_covers_required_set": true,
+   "prefill_s": 9.74,
+   "decode_s": 0.71,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-ec87d0",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 33,
+   "seed": 1,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 32,
+   "key_count": 33,
+   "arm": "full",
+   "budget": null,
+   "prompt_tokens": 32769,
+   "kept_slots": 32769,
+   "prediction": "304421 One of the magic numbers for trace-c07647 is 304",
+   "expected": "304421",
+   "references": [
+    "304421"
+   ],
+   "correct": true,
+   "parsed": "304421",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "304421"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "304421",
+    "7647",
+    "304"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 731,
+   "tokens_per_item": 22.15,
+   "mean_item_spacing": 970.8,
+   "required_set_tokens": 730.9,
+   "budget_covers_required_set": null,
+   "prefill_s": 9.72,
+   "decode_s": 0.73,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-c07647",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 33,
+   "seed": 1,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 32,
+   "key_count": 33,
+   "arm": "b512",
+   "budget": 512,
+   "prompt_tokens": 32769,
+   "kept_slots": 1024,
+   "prediction": "304421 One of the magic numbers for trace-c07647 is 304",
+   "expected": "304421",
+   "references": [
+    "304421"
+   ],
+   "correct": true,
+   "parsed": "304421",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "304421"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "304421",
+    "7647",
+    "304"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 731,
+   "tokens_per_item": 22.15,
+   "mean_item_spacing": 970.8,
+   "required_set_tokens": 730.9,
+   "budget_covers_required_set": true,
+   "prefill_s": 9.72,
+   "decode_s": 0.74,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-c07647",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 33,
+   "seed": 1,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 32,
+   "key_count": 33,
+   "arm": "b1024",
+   "budget": 1024,
+   "prompt_tokens": 32769,
+   "kept_slots": 1536,
+   "prediction": "304421 One of the magic numbers for trace-c07647 is 304",
+   "expected": "304421",
+   "references": [
+    "304421"
+   ],
+   "correct": true,
+   "parsed": "304421",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "304421"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "304421",
+    "7647",
+    "304"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 731,
+   "tokens_per_item": 22.15,
+   "mean_item_spacing": 970.8,
+   "required_set_tokens": 730.9,
+   "budget_covers_required_set": true,
+   "prefill_s": 9.72,
+   "decode_s": 0.73,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-c07647",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 33,
+   "seed": 1,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 32,
+   "key_count": 33,
+   "arm": "b2048",
+   "budget": 2048,
+   "prompt_tokens": 32769,
+   "kept_slots": 2560,
+   "prediction": "304421 One of the magic numbers for trace-c07647 is 304",
+   "expected": "304421",
+   "references": [
+    "304421"
+   ],
+   "correct": true,
+   "parsed": "304421",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "304421"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "304421",
+    "7647",
+    "304"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 731,
+   "tokens_per_item": 22.15,
+   "mean_item_spacing": 970.8,
+   "required_set_tokens": 730.9,
+   "budget_covers_required_set": true,
+   "prefill_s": 9.72,
+   "decode_s": 0.74,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-c07647",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 33,
+   "seed": 1,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 32,
+   "key_count": 33,
+   "arm": "b4096",
+   "budget": 4096,
+   "prompt_tokens": 32769,
+   "kept_slots": 4608,
+   "prediction": "304421 One of the magic numbers for trace-c07647 is 304",
+   "expected": "304421",
+   "references": [
+    "304421"
+   ],
+   "correct": true,
+   "parsed": "304421",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "304421"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "304421",
+    "7647",
+    "304"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 731,
+   "tokens_per_item": 22.15,
+   "mean_item_spacing": 970.8,
+   "required_set_tokens": 730.9,
+   "budget_covers_required_set": true,
+   "prefill_s": 9.72,
+   "decode_s": 0.73,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-c07647",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 33,
+   "seed": 1,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 32,
+   "key_count": 33,
+   "arm": "b8192",
+   "budget": 8192,
+   "prompt_tokens": 32769,
+   "kept_slots": 8704,
+   "prediction": "304421 One of the magic numbers for trace-c07647 is 304",
+   "expected": "304421",
+   "references": [
+    "304421"
+   ],
+   "correct": true,
+   "parsed": "304421",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "304421"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "304421",
+    "7647",
+    "304"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 731,
+   "tokens_per_item": 22.15,
+   "mean_item_spacing": 970.8,
+   "required_set_tokens": 730.9,
+   "budget_covers_required_set": true,
+   "prefill_s": 9.72,
+   "decode_s": 0.73,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-c07647",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 33,
+   "seed": 2,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 32,
+   "key_count": 33,
+   "arm": "full",
+   "budget": null,
+   "prompt_tokens": 32769,
+   "kept_slots": 32769,
+   "prediction": "505678 The magic number for trace-9dd132 mentioned in the text is 5",
+   "expected": "505678",
+   "references": [
+    "505678"
+   ],
+   "correct": true,
+   "parsed": "505678",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "505678"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "505678",
+    "-9",
+    "132",
+    "5"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 731,
+   "tokens_per_item": 22.15,
+   "mean_item_spacing": 970.8,
+   "required_set_tokens": 730.9,
+   "budget_covers_required_set": null,
+   "prefill_s": 9.77,
+   "decode_s": 0.73,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-9dd132",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 33,
+   "seed": 2,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 32,
+   "key_count": 33,
+   "arm": "b512",
+   "budget": 512,
+   "prompt_tokens": 32769,
+   "kept_slots": 1024,
+   "prediction": "505678 One of the magic numbers for trace-9dd132 is 505",
+   "expected": "505678",
+   "references": [
+    "505678"
+   ],
+   "correct": true,
+   "parsed": "505678",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "505678"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "505678",
+    "-9",
+    "132",
+    "505"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 731,
+   "tokens_per_item": 22.15,
+   "mean_item_spacing": 970.8,
+   "required_set_tokens": 730.9,
+   "budget_covers_required_set": true,
+   "prefill_s": 9.77,
+   "decode_s": 0.73,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-9dd132",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 33,
+   "seed": 2,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 32,
+   "key_count": 33,
+   "arm": "b1024",
+   "budget": 1024,
+   "prompt_tokens": 32769,
+   "kept_slots": 1536,
+   "prediction": "505678 One of the magic numbers for trace-9dd132 is 505",
+   "expected": "505678",
+   "references": [
+    "505678"
+   ],
+   "correct": true,
+   "parsed": "505678",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "505678"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "505678",
+    "-9",
+    "132",
+    "505"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 731,
+   "tokens_per_item": 22.15,
+   "mean_item_spacing": 970.8,
+   "required_set_tokens": 730.9,
+   "budget_covers_required_set": true,
+   "prefill_s": 9.77,
+   "decode_s": 0.75,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-9dd132",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 33,
+   "seed": 2,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 32,
+   "key_count": 33,
+   "arm": "b2048",
+   "budget": 2048,
+   "prompt_tokens": 32769,
+   "kept_slots": 2560,
+   "prediction": "505678 One of the magic numbers for trace-9dd132 is 505",
+   "expected": "505678",
+   "references": [
+    "505678"
+   ],
+   "correct": true,
+   "parsed": "505678",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "505678"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "505678",
+    "-9",
+    "132",
+    "505"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 731,
+   "tokens_per_item": 22.15,
+   "mean_item_spacing": 970.8,
+   "required_set_tokens": 730.9,
+   "budget_covers_required_set": true,
+   "prefill_s": 9.77,
+   "decode_s": 0.74,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-9dd132",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 33,
+   "seed": 2,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 32,
+   "key_count": 33,
+   "arm": "b4096",
+   "budget": 4096,
+   "prompt_tokens": 32769,
+   "kept_slots": 4608,
+   "prediction": "505678 One of the magic numbers for trace-9dd132 is 505",
+   "expected": "505678",
+   "references": [
+    "505678"
+   ],
+   "correct": true,
+   "parsed": "505678",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "505678"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "505678",
+    "-9",
+    "132",
+    "505"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 731,
+   "tokens_per_item": 22.15,
+   "mean_item_spacing": 970.8,
+   "required_set_tokens": 730.9,
+   "budget_covers_required_set": true,
+   "prefill_s": 9.77,
+   "decode_s": 0.73,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-9dd132",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 33,
+   "seed": 2,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 32,
+   "key_count": 33,
+   "arm": "b8192",
+   "budget": 8192,
+   "prompt_tokens": 32769,
+   "kept_slots": 8704,
+   "prediction": "505678 One of the magic numbers for trace-9dd132 is 505",
+   "expected": "505678",
+   "references": [
+    "505678"
+   ],
+   "correct": true,
+   "parsed": "505678",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "505678"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "505678",
+    "-9",
+    "132",
+    "505"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 731,
+   "tokens_per_item": 22.15,
+   "mean_item_spacing": 970.8,
+   "required_set_tokens": 730.9,
+   "budget_covers_required_set": true,
+   "prefill_s": 9.77,
+   "decode_s": 0.73,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-9dd132",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 129,
+   "seed": 0,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 128,
+   "key_count": 129,
+   "arm": "full",
+   "budget": null,
+   "prompt_tokens": 32769,
+   "kept_slots": 32769,
+   "prediction": "492711 The magic number for trace-a1837f is 49271",
+   "expected": "492711",
+   "references": [
+    "492711"
+   ],
+   "correct": true,
+   "parsed": "492711",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "492711"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "492711",
+    "1837",
+    "49271"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 2844,
+   "tokens_per_item": 22.05,
+   "mean_item_spacing": 232.0,
+   "required_set_tokens": 2844.5,
+   "budget_covers_required_set": null,
+   "prefill_s": 9.74,
+   "decode_s": 0.72,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-a1837f",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 129,
+   "seed": 0,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 128,
+   "key_count": 129,
+   "arm": "b512",
+   "budget": 512,
+   "prompt_tokens": 32769,
+   "kept_slots": 1024,
+   "prediction": "492711 The magic number for trace-a1837f is 49271",
+   "expected": "492711",
+   "references": [
+    "492711"
+   ],
+   "correct": true,
+   "parsed": "492711",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "492711"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "492711",
+    "1837",
+    "49271"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 2844,
+   "tokens_per_item": 22.05,
+   "mean_item_spacing": 232.0,
+   "required_set_tokens": 2844.5,
+   "budget_covers_required_set": false,
+   "prefill_s": 9.74,
+   "decode_s": 0.73,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-a1837f",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 129,
+   "seed": 0,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 128,
+   "key_count": 129,
+   "arm": "b1024",
+   "budget": 1024,
+   "prompt_tokens": 32769,
+   "kept_slots": 1536,
+   "prediction": "492711 The magic number for trace-a1837f, as mentioned in the text,",
+   "expected": "492711",
+   "references": [
+    "492711"
+   ],
+   "correct": true,
+   "parsed": "492711",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "492711"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "492711",
+    "1837"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 2844,
+   "tokens_per_item": 22.05,
+   "mean_item_spacing": 232.0,
+   "required_set_tokens": 2844.5,
+   "budget_covers_required_set": false,
+   "prefill_s": 9.74,
+   "decode_s": 0.73,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-a1837f",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 129,
+   "seed": 0,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 128,
+   "key_count": 129,
+   "arm": "b2048",
+   "budget": 2048,
+   "prompt_tokens": 32769,
+   "kept_slots": 2560,
+   "prediction": "492711 The magic number for trace-a1837f is 49271",
+   "expected": "492711",
+   "references": [
+    "492711"
+   ],
+   "correct": true,
+   "parsed": "492711",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "492711"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "492711",
+    "1837",
+    "49271"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 2844,
+   "tokens_per_item": 22.05,
+   "mean_item_spacing": 232.0,
+   "required_set_tokens": 2844.5,
+   "budget_covers_required_set": false,
+   "prefill_s": 9.74,
+   "decode_s": 0.7,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-a1837f",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 129,
+   "seed": 0,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 128,
+   "key_count": 129,
+   "arm": "b4096",
+   "budget": 4096,
+   "prompt_tokens": 32769,
+   "kept_slots": 4608,
+   "prediction": "492711 The magic number for trace-a1837f is 49271",
+   "expected": "492711",
+   "references": [
+    "492711"
+   ],
+   "correct": true,
+   "parsed": "492711",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "492711"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "492711",
+    "1837",
+    "49271"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 2844,
+   "tokens_per_item": 22.05,
+   "mean_item_spacing": 232.0,
+   "required_set_tokens": 2844.5,
+   "budget_covers_required_set": true,
+   "prefill_s": 9.74,
+   "decode_s": 0.73,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-a1837f",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 129,
+   "seed": 0,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 128,
+   "key_count": 129,
+   "arm": "b8192",
+   "budget": 8192,
+   "prompt_tokens": 32769,
+   "kept_slots": 8704,
+   "prediction": "492711 The magic number for trace-a1837f is 49271",
+   "expected": "492711",
+   "references": [
+    "492711"
+   ],
+   "correct": true,
+   "parsed": "492711",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "492711"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "492711",
+    "1837",
+    "49271"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 2844,
+   "tokens_per_item": 22.05,
+   "mean_item_spacing": 232.0,
+   "required_set_tokens": 2844.5,
+   "budget_covers_required_set": true,
+   "prefill_s": 9.74,
+   "decode_s": 0.71,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-a1837f",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 129,
+   "seed": 1,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 128,
+   "key_count": 129,
+   "arm": "full",
+   "budget": null,
+   "prompt_tokens": 32769,
+   "kept_slots": 32769,
+   "prediction": "576648 The magic number for trace-96386d is 5766",
+   "expected": "576648",
+   "references": [
+    "576648"
+   ],
+   "correct": true,
+   "parsed": "576648",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "576648"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "576648",
+    "-96386",
+    "5766"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 2841,
+   "tokens_per_item": 22.02,
+   "mean_item_spacing": 232.0,
+   "required_set_tokens": 2840.6,
+   "budget_covers_required_set": null,
+   "prefill_s": 9.73,
+   "decode_s": 0.73,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-96386d",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 129,
+   "seed": 1,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 128,
+   "key_count": 129,
+   "arm": "b512",
+   "budget": 512,
+   "prompt_tokens": 32769,
+   "kept_slots": 1024,
+   "prediction": "576648\n\nThe passage mentions that one of the magic numbers for trace-96386",
+   "expected": "576648",
+   "references": [
+    "576648"
+   ],
+   "correct": true,
+   "parsed": "576648",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "576648"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "576648",
+    "-96386"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 2841,
+   "tokens_per_item": 22.02,
+   "mean_item_spacing": 232.0,
+   "required_set_tokens": 2840.6,
+   "budget_covers_required_set": false,
+   "prefill_s": 9.73,
+   "decode_s": 0.73,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-96386d",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 129,
+   "seed": 1,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 128,
+   "key_count": 129,
+   "arm": "b1024",
+   "budget": 1024,
+   "prompt_tokens": 32769,
+   "kept_slots": 1536,
+   "prediction": "576648 The magic number for trace-96386d is 5766",
+   "expected": "576648",
+   "references": [
+    "576648"
+   ],
+   "correct": true,
+   "parsed": "576648",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "576648"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "576648",
+    "-96386",
+    "5766"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 2841,
+   "tokens_per_item": 22.02,
+   "mean_item_spacing": 232.0,
+   "required_set_tokens": 2840.6,
+   "budget_covers_required_set": false,
+   "prefill_s": 9.73,
+   "decode_s": 0.73,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-96386d",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 129,
+   "seed": 1,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 128,
+   "key_count": 129,
+   "arm": "b2048",
+   "budget": 2048,
+   "prompt_tokens": 32769,
+   "kept_slots": 2560,
+   "prediction": "576648 The magic number for trace-96386d is 5766",
+   "expected": "576648",
+   "references": [
+    "576648"
+   ],
+   "correct": true,
+   "parsed": "576648",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "576648"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "576648",
+    "-96386",
+    "5766"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 2841,
+   "tokens_per_item": 22.02,
+   "mean_item_spacing": 232.0,
+   "required_set_tokens": 2840.6,
+   "budget_covers_required_set": false,
+   "prefill_s": 9.73,
+   "decode_s": 0.73,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-96386d",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 129,
+   "seed": 1,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 128,
+   "key_count": 129,
+   "arm": "b4096",
+   "budget": 4096,
+   "prompt_tokens": 32769,
+   "kept_slots": 4608,
+   "prediction": "576648 The magic number for trace-96386d is 5766",
+   "expected": "576648",
+   "references": [
+    "576648"
+   ],
+   "correct": true,
+   "parsed": "576648",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "576648"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "576648",
+    "-96386",
+    "5766"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 2841,
+   "tokens_per_item": 22.02,
+   "mean_item_spacing": 232.0,
+   "required_set_tokens": 2840.6,
+   "budget_covers_required_set": true,
+   "prefill_s": 9.73,
+   "decode_s": 0.73,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-96386d",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 129,
+   "seed": 1,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 128,
+   "key_count": 129,
+   "arm": "b8192",
+   "budget": 8192,
+   "prompt_tokens": 32769,
+   "kept_slots": 8704,
+   "prediction": "576648 The magic number for trace-96386d is 5766",
+   "expected": "576648",
+   "references": [
+    "576648"
+   ],
+   "correct": true,
+   "parsed": "576648",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "576648"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "576648",
+    "-96386",
+    "5766"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 2841,
+   "tokens_per_item": 22.02,
+   "mean_item_spacing": 232.0,
+   "required_set_tokens": 2840.6,
+   "budget_covers_required_set": true,
+   "prefill_s": 9.73,
+   "decode_s": 0.73,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-96386d",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 129,
+   "seed": 2,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 128,
+   "key_count": 129,
+   "arm": "full",
+   "budget": null,
+   "prompt_tokens": 32769,
+   "kept_slots": 32769,
+   "prediction": "519210 The magic number for trace-f78d32 is 51921",
+   "expected": "519210",
+   "references": [
+    "519210"
+   ],
+   "correct": true,
+   "parsed": "519210",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "519210"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "519210",
+    "78",
+    "32",
+    "51921"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 2825,
+   "tokens_per_item": 21.9,
+   "mean_item_spacing": 232.1,
+   "required_set_tokens": 2825.1,
+   "budget_covers_required_set": null,
+   "prefill_s": 9.76,
+   "decode_s": 0.73,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-f78d32",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 129,
+   "seed": 2,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 128,
+   "key_count": 129,
+   "arm": "b512",
+   "budget": 512,
+   "prompt_tokens": 32769,
+   "kept_slots": 1024,
+   "prediction": "519210 The magic number for trace-f78d32 mentioned above is 519",
+   "expected": "519210",
+   "references": [
+    "519210"
+   ],
+   "correct": true,
+   "parsed": "519210",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "519210"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "519210",
+    "78",
+    "32",
+    "519"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 2825,
+   "tokens_per_item": 21.9,
+   "mean_item_spacing": 232.1,
+   "required_set_tokens": 2825.1,
+   "budget_covers_required_set": false,
+   "prefill_s": 9.76,
+   "decode_s": 0.75,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-f78d32",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 129,
+   "seed": 2,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 128,
+   "key_count": 129,
+   "arm": "b1024",
+   "budget": 1024,
+   "prompt_tokens": 32769,
+   "kept_slots": 1536,
+   "prediction": "519210 The magic number for trace-f78d32 mentioned above is 519",
+   "expected": "519210",
+   "references": [
+    "519210"
+   ],
+   "correct": true,
+   "parsed": "519210",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "519210"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "519210",
+    "78",
+    "32",
+    "519"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 2825,
+   "tokens_per_item": 21.9,
+   "mean_item_spacing": 232.1,
+   "required_set_tokens": 2825.1,
+   "budget_covers_required_set": false,
+   "prefill_s": 9.76,
+   "decode_s": 0.75,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-f78d32",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 129,
+   "seed": 2,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 128,
+   "key_count": 129,
+   "arm": "b2048",
+   "budget": 2048,
+   "prompt_tokens": 32769,
+   "kept_slots": 2560,
+   "prediction": "519210 The magic number for trace-f78d32 is 51921",
+   "expected": "519210",
+   "references": [
+    "519210"
+   ],
+   "correct": true,
+   "parsed": "519210",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "519210"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "519210",
+    "78",
+    "32",
+    "51921"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 2825,
+   "tokens_per_item": 21.9,
+   "mean_item_spacing": 232.1,
+   "required_set_tokens": 2825.1,
+   "budget_covers_required_set": false,
+   "prefill_s": 9.76,
+   "decode_s": 0.74,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-f78d32",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 129,
+   "seed": 2,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 128,
+   "key_count": 129,
+   "arm": "b4096",
+   "budget": 4096,
+   "prompt_tokens": 32769,
+   "kept_slots": 4608,
+   "prediction": "519210 The magic number for trace-f78d32, as mentioned in the text,",
+   "expected": "519210",
+   "references": [
+    "519210"
+   ],
+   "correct": true,
+   "parsed": "519210",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "519210"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "519210",
+    "78",
+    "32"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 2825,
+   "tokens_per_item": 21.9,
+   "mean_item_spacing": 232.1,
+   "required_set_tokens": 2825.1,
+   "budget_covers_required_set": true,
+   "prefill_s": 9.76,
+   "decode_s": 0.74,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-f78d32",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 129,
+   "seed": 2,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 128,
+   "key_count": 129,
+   "arm": "b8192",
+   "budget": 8192,
+   "prompt_tokens": 32769,
+   "kept_slots": 8704,
+   "prediction": "519210 The magic number for trace-f78d32 is 51921",
+   "expected": "519210",
+   "references": [
+    "519210"
+   ],
+   "correct": true,
+   "parsed": "519210",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "519210"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "519210",
+    "78",
+    "32",
+    "51921"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 2825,
+   "tokens_per_item": 21.9,
+   "mean_item_spacing": 232.1,
+   "required_set_tokens": 2825.1,
+   "budget_covers_required_set": true,
+   "prefill_s": 9.76,
+   "decode_s": 0.74,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-f78d32",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 513,
+   "seed": 0,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 512,
+   "key_count": 513,
+   "arm": "full",
+   "budget": null,
+   "prompt_tokens": 32769,
+   "kept_slots": 32769,
+   "prediction": "160086 The magic number for trace-bbbbd3 mentioned above is 16008",
+   "expected": "160086",
+   "references": [
+    "160086"
+   ],
+   "correct": true,
+   "parsed": "160086",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "160086"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "160086",
+    "3",
+    "16008"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 11336,
+   "tokens_per_item": 22.1,
+   "mean_item_spacing": 41.8,
+   "required_set_tokens": 11337.3,
+   "budget_covers_required_set": null,
+   "prefill_s": 9.74,
+   "decode_s": 0.75,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-bbbbd3",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 513,
+   "seed": 0,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 512,
+   "key_count": 513,
+   "arm": "b512",
+   "budget": 512,
+   "prompt_tokens": 32769,
+   "kept_slots": 1024,
+   "prediction": "160086\n\nBased on the information provided in the passage, the magic number for trace-bbbbd",
+   "expected": "160086",
+   "references": [
+    "160086"
+   ],
+   "correct": true,
+   "parsed": "160086",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "160086"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "160086"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 11336,
+   "tokens_per_item": 22.1,
+   "mean_item_spacing": 41.8,
+   "required_set_tokens": 11337.3,
+   "budget_covers_required_set": false,
+   "prefill_s": 9.74,
+   "decode_s": 0.74,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-bbbbd3",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 513,
+   "seed": 0,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 512,
+   "key_count": 513,
+   "arm": "b1024",
+   "budget": 1024,
+   "prompt_tokens": 32769,
+   "kept_slots": 1536,
+   "prediction": "160086\n\nBased on the information provided in the passage, the magic number for trace-bbbbd",
+   "expected": "160086",
+   "references": [
+    "160086"
+   ],
+   "correct": true,
+   "parsed": "160086",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "160086"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "160086"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 11336,
+   "tokens_per_item": 22.1,
+   "mean_item_spacing": 41.8,
+   "required_set_tokens": 11337.3,
+   "budget_covers_required_set": false,
+   "prefill_s": 9.74,
+   "decode_s": 0.74,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-bbbbd3",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 513,
+   "seed": 0,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 512,
+   "key_count": 513,
+   "arm": "b2048",
+   "budget": 2048,
+   "prompt_tokens": 32769,
+   "kept_slots": 2560,
+   "prediction": "160086\nYou are an AI assistant. Please go through the instructions carefully and answer the question accordingly",
+   "expected": "160086",
+   "references": [
+    "160086"
+   ],
+   "correct": true,
+   "parsed": "160086",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "160086"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "160086"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 11336,
+   "tokens_per_item": 22.1,
+   "mean_item_spacing": 41.8,
+   "required_set_tokens": 11337.3,
+   "budget_covers_required_set": false,
+   "prefill_s": 9.74,
+   "decode_s": 0.74,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-bbbbd3",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 513,
+   "seed": 0,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 512,
+   "key_count": 513,
+   "arm": "b4096",
+   "budget": 4096,
+   "prompt_tokens": 32769,
+   "kept_slots": 4608,
+   "prediction": "160086\nYou are an AI assistant. Please follow the instructions carefully to find the answer. In",
+   "expected": "160086",
+   "references": [
+    "160086"
+   ],
+   "correct": true,
+   "parsed": "160086",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "160086"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "160086"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 11336,
+   "tokens_per_item": 22.1,
+   "mean_item_spacing": 41.8,
+   "required_set_tokens": 11337.3,
+   "budget_covers_required_set": false,
+   "prefill_s": 9.74,
+   "decode_s": 0.74,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-bbbbd3",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 513,
+   "seed": 0,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 512,
+   "key_count": 513,
+   "arm": "b8192",
+   "budget": 8192,
+   "prompt_tokens": 32769,
+   "kept_slots": 8704,
+   "prediction": "160086\nYou are an AI assistant. Please follow the instructions carefully to find the answer. In",
+   "expected": "160086",
+   "references": [
+    "160086"
+   ],
+   "correct": true,
+   "parsed": "160086",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "160086"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "160086"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 11336,
+   "tokens_per_item": 22.1,
+   "mean_item_spacing": 41.8,
+   "required_set_tokens": 11337.3,
+   "budget_covers_required_set": false,
+   "prefill_s": 9.74,
+   "decode_s": 0.74,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-bbbbd3",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 513,
+   "seed": 1,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 512,
+   "key_count": 513,
+   "arm": "full",
+   "budget": null,
+   "prompt_tokens": 32769,
+   "kept_slots": 32769,
+   "prediction": "854134\nYou are an AI assistant. Please provide a answer in the required format.<|endoftext|>",
+   "expected": "854134",
+   "references": [
+    "854134"
+   ],
+   "correct": true,
+   "parsed": "854134",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "854134"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "854134"
+   ],
+   "generated_tokens": 23,
+   "max_new": 24,
+   "statement_tokens": 11274,
+   "tokens_per_item": 21.98,
+   "mean_item_spacing": 41.9,
+   "required_set_tokens": 11275.7,
+   "budget_covers_required_set": null,
+   "prefill_s": 9.77,
+   "decode_s": 0.7,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-8e6b94",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 513,
+   "seed": 1,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 512,
+   "key_count": 513,
+   "arm": "b512",
+   "budget": 512,
+   "prompt_tokens": 32769,
+   "kept_slots": 1024,
+   "prediction": "854134\nYou are an AI assistant. Please rephrase the question to understand it better before answering",
+   "expected": "854134",
+   "references": [
+    "854134"
+   ],
+   "correct": true,
+   "parsed": "854134",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "854134"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "854134"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 11274,
+   "tokens_per_item": 21.98,
+   "mean_item_spacing": 41.9,
+   "required_set_tokens": 11275.7,
+   "budget_covers_required_set": false,
+   "prefill_s": 9.77,
+   "decode_s": 0.74,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-8e6b94",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 513,
+   "seed": 1,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 512,
+   "key_count": 513,
+   "arm": "b1024",
+   "budget": 1024,
+   "prompt_tokens": 32769,
+   "kept_slots": 1536,
+   "prediction": "854134\nYou are an AI assistant. Please go through the instructions carefully and answer the question accordingly",
+   "expected": "854134",
+   "references": [
+    "854134"
+   ],
+   "correct": true,
+   "parsed": "854134",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "854134"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "854134"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 11274,
+   "tokens_per_item": 21.98,
+   "mean_item_spacing": 41.9,
+   "required_set_tokens": 11275.7,
+   "budget_covers_required_set": false,
+   "prefill_s": 9.77,
+   "decode_s": 0.74,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-8e6b94",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 513,
+   "seed": 1,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 512,
+   "key_count": 513,
+   "arm": "b2048",
+   "budget": 2048,
+   "prompt_tokens": 32769,
+   "kept_slots": 2560,
+   "prediction": "854134\nYou are an AI assistant. Please go through the instructions carefully and answer the question accordingly",
+   "expected": "854134",
+   "references": [
+    "854134"
+   ],
+   "correct": true,
+   "parsed": "854134",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "854134"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "854134"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 11274,
+   "tokens_per_item": 21.98,
+   "mean_item_spacing": 41.9,
+   "required_set_tokens": 11275.7,
+   "budget_covers_required_set": false,
+   "prefill_s": 9.77,
+   "decode_s": 0.75,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-8e6b94",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 513,
+   "seed": 1,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 512,
+   "key_count": 513,
+   "arm": "b4096",
+   "budget": 4096,
+   "prompt_tokens": 32769,
+   "kept_slots": 4608,
+   "prediction": "854134\nYou are an AI assistant. Please go through the instructions carefully and answer the question accordingly",
+   "expected": "854134",
+   "references": [
+    "854134"
+   ],
+   "correct": true,
+   "parsed": "854134",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "854134"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "854134"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 11274,
+   "tokens_per_item": 21.98,
+   "mean_item_spacing": 41.9,
+   "required_set_tokens": 11275.7,
+   "budget_covers_required_set": false,
+   "prefill_s": 9.77,
+   "decode_s": 0.74,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-8e6b94",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 513,
+   "seed": 1,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 512,
+   "key_count": 513,
+   "arm": "b8192",
+   "budget": 8192,
+   "prompt_tokens": 32769,
+   "kept_slots": 8704,
+   "prediction": "854134\nYou are an AI assistant. Please provide a single answer within the format instructed. The",
+   "expected": "854134",
+   "references": [
+    "854134"
+   ],
+   "correct": true,
+   "parsed": "854134",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "854134"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "854134"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 11274,
+   "tokens_per_item": 21.98,
+   "mean_item_spacing": 41.9,
+   "required_set_tokens": 11275.7,
+   "budget_covers_required_set": false,
+   "prefill_s": 9.77,
+   "decode_s": 0.74,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-8e6b94",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 513,
+   "seed": 2,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 512,
+   "key_count": 513,
+   "arm": "full",
+   "budget": null,
+   "prompt_tokens": 32769,
+   "kept_slots": 32769,
+   "prediction": "847723 The magic number for trace-c6aa27 is 847723",
+   "expected": "847723",
+   "references": [
+    "847723"
+   ],
+   "correct": true,
+   "parsed": "847723",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "847723"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "847723",
+    "6",
+    "27",
+    "847723"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 11297,
+   "tokens_per_item": 22.02,
+   "mean_item_spacing": 41.9,
+   "required_set_tokens": 11296.3,
+   "budget_covers_required_set": null,
+   "prefill_s": 9.73,
+   "decode_s": 0.75,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-c6aa27",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 513,
+   "seed": 2,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 512,
+   "key_count": 513,
+   "arm": "b512",
+   "budget": 512,
+   "prompt_tokens": 32769,
+   "kept_slots": 1024,
+   "prediction": "847723\n\nThe magic number for trace-c6aa27 mentioned in the text is 8",
+   "expected": "847723",
+   "references": [
+    "847723"
+   ],
+   "correct": true,
+   "parsed": "847723",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "847723"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "847723",
+    "6",
+    "27",
+    "8"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 11297,
+   "tokens_per_item": 22.02,
+   "mean_item_spacing": 41.9,
+   "required_set_tokens": 11296.3,
+   "budget_covers_required_set": false,
+   "prefill_s": 9.73,
+   "decode_s": 0.74,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-c6aa27",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 513,
+   "seed": 2,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 512,
+   "key_count": 513,
+   "arm": "b1024",
+   "budget": 1024,
+   "prompt_tokens": 32769,
+   "kept_slots": 1536,
+   "prediction": "847723\n\nThe magic number for trace-c6aa27 mentioned in the text is 8",
+   "expected": "847723",
+   "references": [
+    "847723"
+   ],
+   "correct": true,
+   "parsed": "847723",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "847723"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "847723",
+    "6",
+    "27",
+    "8"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 11297,
+   "tokens_per_item": 22.02,
+   "mean_item_spacing": 41.9,
+   "required_set_tokens": 11296.3,
+   "budget_covers_required_set": false,
+   "prefill_s": 9.73,
+   "decode_s": 0.73,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-c6aa27",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 513,
+   "seed": 2,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 512,
+   "key_count": 513,
+   "arm": "b2048",
+   "budget": 2048,
+   "prompt_tokens": 32769,
+   "kept_slots": 2560,
+   "prediction": "847723\n\nThe magic number for trace-c6aa27 is 84772",
+   "expected": "847723",
+   "references": [
+    "847723"
+   ],
+   "correct": true,
+   "parsed": "847723",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "847723"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "847723",
+    "6",
+    "27",
+    "84772"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 11297,
+   "tokens_per_item": 22.02,
+   "mean_item_spacing": 41.9,
+   "required_set_tokens": 11296.3,
+   "budget_covers_required_set": false,
+   "prefill_s": 9.73,
+   "decode_s": 0.73,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-c6aa27",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 513,
+   "seed": 2,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 512,
+   "key_count": 513,
+   "arm": "b4096",
+   "budget": 4096,
+   "prompt_tokens": 32769,
+   "kept_slots": 4608,
+   "prediction": "847723\n\nThe magic number for trace-c6aa27 mentioned in the text is 8",
+   "expected": "847723",
+   "references": [
+    "847723"
+   ],
+   "correct": true,
+   "parsed": "847723",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "847723"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "847723",
+    "6",
+    "27",
+    "8"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 11297,
+   "tokens_per_item": 22.02,
+   "mean_item_spacing": 41.9,
+   "required_set_tokens": 11296.3,
+   "budget_covers_required_set": false,
+   "prefill_s": 9.73,
+   "decode_s": 0.72,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-c6aa27",
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "multikey",
+   "items": 513,
+   "seed": 2,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": 512,
+   "key_count": 513,
+   "arm": "b8192",
+   "budget": 8192,
+   "prompt_tokens": 32769,
+   "kept_slots": 8704,
+   "prediction": "847723 The magic number for trace-c6aa27 is 847723",
+   "expected": "847723",
+   "references": [
+    "847723"
+   ],
+   "correct": true,
+   "parsed": "847723",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "847723"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "847723",
+    "6",
+    "27",
+    "847723"
+   ],
+   "generated_tokens": 24,
+   "max_new": 24,
+   "statement_tokens": 11297,
+   "tokens_per_item": 22.02,
+   "mean_item_spacing": 41.9,
+   "required_set_tokens": 11296.3,
+   "budget_covers_required_set": false,
+   "prefill_s": 9.73,
+   "decode_s": 0.72,
+   "peak_mib": 13866.4,
+   "peak_rss_mib": 4799.1,
+   "target_key": "trace-c6aa27",
+   "target_status": null,
+   "shared_prefill": true
+  }
+ ]
+}

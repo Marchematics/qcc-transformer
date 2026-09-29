@@ -1,0 +1,319 @@
+"""Bounded exact-KV decode frontier on the official NVIDIA RULER JSONL split.
+
+Reuses the prefill / selection / decode primitives from
+``benchmark_bounded_decode_frontier.py`` (imported here as ``longctx``) but
+drives them from real RULER records instead of the synthetic generator, and
+scores official answer recall (every expected output string must appear,
+case-insensitively) instead of a single magic number.
+
+Usage::
+
+    python benchmarks/benchmark_bounded_decode_ruler.py \
+        --ruler-jsonl <split.jsonl> \
+        --tasks niah_single_1 niah_multikey_2 niah_multikey_3 vt \
+        --policies full obs_last obs_mean --budgets 128 256 512 1024 \
+        --out artifacts/bounded-decode-frontier-ruler-v1.json
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import time
+from collections import defaultdict
+from pathlib import Path
+
+import torch
+import torch.nn as nn
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+DEFAULT_MODEL = os.environ.get("QCC_MODEL", "meta-llama/Llama-3.2-1B-Instruct")
+
+try:  # repo layout
+    import benchmark_bounded_decode_frontier as L
+except ImportError:  # flat fallback when benchmarks/ is not on sys.path
+    import longctx as L
+
+
+def load_ruler(path, tasks, lengths, max_records=None, answer_prefix=True, tokenizer=None,
+               question_tokens=64, hops=0):
+    records = []
+    for line in Path(path).read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        if tasks and row.get("task") not in tasks:
+            continue
+        if lengths and row.get("length") not in lengths:
+            # allow tolerances only when the caller asked for exact lengths
+            if not any(abs(row.get("length", 0) - x) <= 64 for x in lengths):
+                continue
+        prompt = row["input"]
+        if answer_prefix and row.get("answer_prefix"):
+            prompt = prompt + row["answer_prefix"]
+        pos = row.get("token_position_answer")
+        rec = L.Record(
+            prompt=prompt,
+            question_key="",
+            answer=row["outputs"][0] if row.get("outputs") else "",
+            meta={
+                "task": row.get("task"),
+                "length": row.get("length"),
+                "outputs": row.get("outputs", []),
+                "index": row.get("index"),
+                "length_bucket": row.get("length_bucket_requested"),
+            },
+        )
+        if isinstance(pos, int) and pos >= 0:
+            rec.answer_positions = [pos]
+            rec.needle_positions = [pos]
+        if tokenizer is not None:
+            rec.lexical_positions = L.question_lexical_positions(tokenizer, prompt, question_tokens,
+                                                               hops=hops)
+        records.append(rec)
+        if max_records and len(records) >= max_records:
+            break
+    return records
+
+
+def recall_of(rec, text):
+    outs = [o for o in rec.meta.get("outputs", []) if o]
+    if not outs:
+        return 0.0
+    low = text.lower()
+    return 1.0 if all(o.lower() in low for o in outs) else 0.0
+
+
+@torch.no_grad()
+def run_record(model, rec, args, eos_ids, row_id):
+    ids = L.TOKENIZER(rec.prompt, return_tensors="pt", add_special_tokens=False).input_ids.to("cuda")
+    Lc = ids.shape[1]
+    torch.cuda.reset_peak_memory_stats()
+    torch.cuda.synchronize()
+    t0 = time.time()
+    accumulated = [p for p in args.policies
+                   if p in ("h2o", "tova", "h2o_lex", "blend_lex")]
+    if accumulated:
+        # H2O and TOVA rank keys by attention accumulated over the whole prefill,
+        # which the exact prefill can report without a second pass.
+        cache, last_logits, captured, mass, top1 = L.prefill_accumulate(
+            model, ids, args.obs, args.prefill_chunk, args.key_chunk,
+            query_stride=args.accumulate_stride)
+    else:
+        cache, last_logits, captured = L.prefill_capture(model, ids, args.obs, args.prefill_chunk)
+        mass = top1 = None
+    torch.cuda.synchronize()
+    prefill_s = time.time() - t0
+    next_id = last_logits.argmax(-1)
+    orig = [(layer.keys, layer.values) for layer in cache.layers]
+    peak = torch.cuda.max_memory_allocated()
+    print(f"[ruler] {rec.meta['task']:<16} L={Lc:>6d} outs={rec.meta['outputs'][:2]} "
+          f"prefill={prefill_s:.1f}s peak={peak / 2**30:.2f}GiB", flush=True)
+
+    score_cache: dict = {}
+
+    def get_scores(policy):
+        if policy not in score_cache:
+            if policy == "blend_lex":
+                # half of each ranking: the final query's attention (which preserves
+                # retrieval) and the attention accumulated over the prefill (which
+                # preserves summarisation).  Rank-blended, because the two signals have
+                # different magnitudes.
+                score_cache[policy] = L.blend_scores(
+                    L.obs_scores(model, captured, cache, Lc, args.obs, "last",
+                                 args.key_chunk),
+                    mass, args.blend_alpha)
+            elif policy in ("h2o", "h2o_lex"):
+                score_cache[policy] = mass
+            elif policy == "tova":
+                score_cache[policy] = top1
+            else:
+                # `quest` ranks with the current query (Quest block selection);
+                # `pyramid` with the SnapKV-shaped window mean, because PyramidKV
+                # builds on SnapKV.  The difference from `obs_last`/`obs_mean` is
+                # then the retention unit and the layer schedule, not the scoring
+                # signal.
+                mode = {"lex_obs": "last", "quest": "last", "pyramid": "mean",
+                        "pyramid_mild": "mean", "mean_lex": "mean"}.get(
+                    policy, policy[4:])
+                score_cache[policy] = L.obs_scores(model, captured, cache, Lc, args.obs,
+                                                   mode, args.key_chunk)
+        return score_cache[policy]
+
+    rows = []
+    del last_logits
+    for policy in args.policies:
+        for layer, (ok, ov) in zip(cache.layers, orig):
+            layer.keys, layer.values = ok, ov
+        budgets = [None] if policy == "full" else args.budgets
+        scores = (None if policy in ("full", "recent", "sink_recent")
+                  else get_scores(policy))
+        for budget in budgets:
+            eff = budget if budget is not None else Lc
+            nrecent = max(1, int(eff * 0.25)) if budget is not None else 0
+            idxs = L.build_idxs(policy, scores, cache, rec, eff, args.nsink, nrecent, Lc, args.pool, ids.device, args.dilate, args.lex_cap)
+            diag = L.selection_stats(idxs, rec.answer_positions, Lc)
+            if idxs is None:
+                for layer, (ok, ov) in zip(cache.layers, orig):
+                    layer.keys, layer.values = ok, ov
+            else:
+                for layer, (ok, ov), idx in zip(cache.layers, orig, idxs):
+                    H = ok.shape[1]
+                    ek = idx.unsqueeze(0).unsqueeze(-1).expand(1, H, idx.shape[1], ok.shape[-1])
+                    layer.keys = ok.gather(2, ek).contiguous()
+                    layer.values = ov.gather(2, ek).contiguous()
+            kept = int(cache.get_seq_length())
+            # a layer-varying policy (pyramid) keeps a different width per layer, so
+            # `kept` (the first layer's width) is not the request's state; record the
+            # mean as well and let the tables report that
+            kept_mean = (round(sum(int(index.shape[1]) for index in idxs) / len(idxs), 1)
+                         if idxs else float(kept))
+            text, ngen, dec_s = L.decode(model, cache, next_id, Lc, args.max_new, eos_ids)
+            rec_score = recall_of(rec, text)
+            row = {
+                "row_id": row_id,
+                "task": rec.meta["task"],
+                "length": rec.meta["length"],
+                "length_bucket": rec.meta["length_bucket"],
+                "context_tokens": Lc,
+                "policy": policy,
+                "budget": budget,
+                "kept_slots": kept,
+                "kept_slots_mean": kept_mean,
+                "prediction": text,
+                "generated": ngen,
+                "outputs": rec.meta["outputs"],
+                "answer_recall": rec_score,
+                "selection": diag,
+                "decode_s": round(dec_s, 4),
+                "prefill_s": round(prefill_s, 3),
+                "peak_cuda_bytes": peak,
+            }
+            print(f"  {policy:10s} B={str(budget):>5s} recall={rec_score:.0f} pred={text[:50]!r}", flush=True)
+            rows.append(row)
+    del cache, orig, captured
+    torch.cuda.empty_cache()
+    return rows
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--model", default=DEFAULT_MODEL)
+    ap.add_argument("--ruler-jsonl", required=True)
+    ap.add_argument("--tasks", nargs="+", default=None)
+    ap.add_argument("--lengths", type=int, nargs="+", default=None)
+    ap.add_argument("--max-records", type=int, default=None)
+    ap.add_argument("--max-per-task", type=int, default=None,
+                    help="keep at most N records per task, spread evenly across "
+                         "that task's length-ordered records")
+    ap.add_argument("--policies", nargs="+", default=["full", "obs_last", "obs_mean"])
+    ap.add_argument("--budgets", type=int, nargs="+", default=[128, 256, 512, 1024])
+    ap.add_argument("--obs", type=int, default=64)
+    ap.add_argument("--nsink", type=int, default=4)
+    ap.add_argument("--pool", type=int, default=7)
+    ap.add_argument("--dilate", type=int, default=0)
+    ap.add_argument("--lex-cap", type=int, default=128)
+    ap.add_argument("--hops", type=int, default=0)
+    ap.add_argument("--key-chunk", type=int, default=4096)
+    ap.add_argument("--blend-alpha", type=float, default=0.5,
+                    help="weight of the accumulated-attention ranking in `blend_lex`")
+    ap.add_argument("--accumulate-stride", type=int, default=1,
+                    help="accumulate the H2O/TOVA statistics from every n-th "
+                         "query (both are means over queries, so a stride "
+                         "estimates the same ranking more cheaply; the artifact "
+                         "records the stride it ran with)")
+    ap.add_argument("--max-new", type=int, default=24)
+    ap.add_argument("--prefill-chunk", type=int, default=8192)
+    ap.add_argument("--no-answer-prefix", action="store_true")
+    ap.add_argument("--out", required=True)
+    args = ap.parse_args()
+
+    tokenizer = AutoTokenizer.from_pretrained(args.model)
+    L.TOKENIZER = tokenizer
+    model = AutoModelForCausalLM.from_pretrained(args.model, dtype=torch.bfloat16).to("cuda")
+    model.eval()
+    inner = model.lm_head
+
+    class _LastTokenLMHead(nn.Module):
+        def __init__(self, wrapped):
+            super().__init__()
+            self.wrapped = wrapped
+
+        def forward(self, x):
+            return self.wrapped(x[:, -1:, :])
+
+    model.lm_head = _LastTokenLMHead(inner)
+    eos = model.config.eos_token_id
+    eos_ids = set(eos) if isinstance(eos, (list, tuple)) else {eos}
+
+    records = load_ruler(args.ruler_jsonl, args.tasks, args.lengths,
+                         args.max_records, not args.no_answer_prefix, tokenizer=tokenizer,
+                         question_tokens=args.obs, hops=args.hops)
+    if args.max_per_task:
+        # an even spread across each task's length-ordered records, so a subset
+        # keeps the length range instead of taking the shortest N
+        by_task = defaultdict(list)
+        for rec in records:
+            by_task[rec.meta.get("task")].append(rec)
+        records = []
+        for task in sorted(by_task):
+            entries = by_task[task]
+            n = len(entries)
+            keep = args.max_per_task
+            picks = ([round(i * (n - 1) / (keep - 1)) for i in range(keep)]
+                     if keep > 1 and n > keep else list(range(min(keep, n))))
+            records.extend(entries[index] for index in sorted(set(picks)))
+        print(f"[setup] --max-per-task {args.max_per_task}: "
+              f"{len(records)} of the loaded records kept", flush=True)
+    print(f"[setup] {len(records)} RULER records", flush=True)
+
+    rows = []
+    for i, rec in enumerate(records):
+        rows.extend(run_record(model, rec, args, eos_ids, i))
+        torch.cuda.empty_cache()
+        if (i + 1) % 5 == 0:
+            Path(args.out).write_text(json.dumps({"partial": True, "results": rows}, indent=1), encoding="utf-8")
+    Path(args.out).write_text(json.dumps(
+        {"model": args.model, "ruler": args.ruler_jsonl,
+         "config": {k: v for k, v in vars(args).items()}, "results": rows}, indent=1))
+
+    # aggregates
+    full = {}
+    for r in rows:
+        if r["policy"] == "full":
+            full[r["row_id"]] = r["answer_recall"] >= 1.0
+    by_task = defaultdict(lambda: [0.0, 0.0, 0])
+    by_budget = defaultdict(lambda: [0.0, 0, 0])
+    for r in rows:
+        if r["policy"] == "full":
+            continue
+        key = (r["task"], r["policy"], r["budget"])
+        by_task[key][0] += r["answer_recall"]
+        by_task[key][1] += 1.0 if full.get(r["row_id"]) else 0.0
+        by_task[key][2] += 1
+    print("\n== RULER retention (numerator = recall sum; denom = records where Full-KV correct) ==")
+    tasks = sorted({k[0] for k in by_task})
+    budgets = sorted({k[2] for k in by_task})
+    for pol in args.policies:
+        if pol == "full":
+            continue
+        for b in budgets:
+            tot = [0.0, 0.0]
+            parts = []
+            for t in tasks:
+                k = (t, pol, b)
+                if k in by_task:
+                    c, d, n = by_task[k]
+                    tot[0] += c
+                    tot[1] += d
+                    parts.append(f"{t}={c:.0f}/{d:.0f}")
+            agg = tot[0] / tot[1] if tot[1] else float("nan")
+            print(f"  {pol:10s} B={b:>5} aggregate={agg:.3f}  " + "  ".join(parts))
+    full_total = sum(full.values())
+    print(f"  Full-KV correct records: {full_total}/{len(full)}")
+    print("wrote", args.out)
+
+
+if __name__ == "__main__":
+    main()

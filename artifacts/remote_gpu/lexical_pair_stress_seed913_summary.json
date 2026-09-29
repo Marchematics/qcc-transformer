@@ -1,0 +1,30 @@
+{
+  "checkpoint": "runs/lexical_pair_seed913.pt",
+  "device": "NVIDIA RTX 3090 (CUDA device 2)",
+  "model": {
+    "vocab_size": 32,
+    "d_model": 32,
+    "layers": 1,
+    "heads": 4,
+    "window_size": 16,
+    "num_codes": 32,
+    "position_encoding": "none",
+    "archive_persistent_landmark": true,
+    "archive_prefix_landmark": true,
+    "archive_prefix_pair_landmark": true,
+    "archive_lexical_landmark": true,
+    "use_triton": true
+  },
+  "dataset": {
+    "records": 58,
+    "contexts": {
+      "128000": {"query_position": 115200, "records": 29},
+      "1000000": {"query_position": 900000, "records": 29}
+    },
+    "value_ids": "3-31 (strict all-value stress file)"
+  },
+  "correct": 58,
+  "accuracy": 1.0,
+  "target_accuracy": 0.98,
+  "status": "synthetic retrieval diagnostic; not RULER or pretrained-LM evidence"
+}

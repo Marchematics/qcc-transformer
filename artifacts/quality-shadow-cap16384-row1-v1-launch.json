@@ -1,0 +1,6 @@
+{
+  "run_id": "quality-shadow-cap16384-row1-v1",
+  "purpose": "One 32K multi-key diagnostic: future-query quality-first selection populates bounded bank, but shadow-only prefill prevents bank output feedback; tests selection versus prefill feedback.",
+  "output": "artifacts/benchmark-quality-shadow-cap16384-row1-v1.json",
+  "progress": "artifacts/benchmark-quality-shadow-cap16384-row1-v1.progress.jsonl"
+}

@@ -1,0 +1,11 @@
+device=cuda length=128000 position_encoding=sinusoidal state_only=False
+qcc_state_bytes=659456 full_kv_bytes=524288000 state_fraction=0.125781% reduction=795.03x under_0.5pct=True under_0.1pct=False
+processed_tokens=128000 prefill_seconds=3.830698 tpot_ms=71.822
+
+device=cuda length=1000000 position_encoding=sinusoidal state_only=False
+qcc_state_bytes=659456 full_kv_bytes=4096000000 state_fraction=0.016100% reduction=6211.18x under_0.5pct=True under_0.1pct=True
+processed_tokens=1000000 prefill_seconds=14.312142 tpot_ms=72.439
+
+device=cuda length=4000000 position_encoding=sinusoidal state_only=False
+qcc_state_bytes=659456 full_kv_bytes=16384000000 state_fraction=0.004025% reduction=24844.72x under_0.5pct=True under_0.1pct=True
+processed_tokens=4000000 prefill_seconds=54.564267 tpot_ms=71.665

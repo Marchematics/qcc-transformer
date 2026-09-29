@@ -1,0 +1,99 @@
+{
+ "partial": true,
+ "config": {
+  "model": "/root/qcc/models/Qwen2.5-0.5B-Instruct",
+  "lengths": [
+   131072,
+   1048576
+  ],
+  "items": 4,
+  "seeds": 1,
+  "budget": 4096,
+  "lex_cap": 512,
+  "obs": 64,
+  "nsink": 4,
+  "pool": 7,
+  "dilate": 9,
+  "hops": 6,
+  "key_chunk": 4096,
+  "max_new": 32,
+  "prefill_chunk": 8192,
+  "arms": [
+   "full",
+   "bounded"
+  ],
+  "attn_impl": "flash_attention_2",
+  "yarn": "auto",
+  "out": "artifacts/million-context.json"
+ },
+ "results": [
+  {
+   "length": 131072,
+   "true_tokens": 131068,
+   "seed": 0,
+   "items": 4,
+   "arm": "full",
+   "recall": 0.0,
+   "prediction": "-c53edf, trace-d75528, trace-14ba5e, trace-8490bc, trace-",
+   "needle_positions": [
+    39755,
+    39756,
+    39757,
+    39758,
+    39759,
+    39760,
+    39761,
+    39762
+   ],
+   "rope_scaling": {
+    "rope_type": "yarn",
+    "factor": 4.0,
+    "original_max_position_embeddings": 32768,
+    "rope_theta": 1000000.0
+   },
+   "prefill_s": 15.1,
+   "peak_gib": 3.05,
+   "kept_slots": 131100,
+   "kept_bytes": 1610563584,
+   "full_kv_bytes": 1610563584,
+   "compression": 1.0,
+   "generated": 32,
+   "tpot_ms": 23.11,
+   "decode_s": 0.74
+  },
+  {
+   "length": 131072,
+   "true_tokens": 131068,
+   "seed": 0,
+   "items": 4,
+   "arm": "bounded",
+   "recall": 0.0,
+   "prediction": "-c53edf, trace-d75528, trace-14ba5e, trace-8490bc are all",
+   "needle_positions": [
+    39755,
+    39756,
+    39757,
+    39758,
+    39759,
+    39760,
+    39761,
+    39762
+   ],
+   "rope_scaling": {
+    "rope_type": "yarn",
+    "factor": 4.0,
+    "original_max_position_embeddings": 32768,
+    "rope_theta": 1000000.0
+   },
+   "prefill_s": 15.1,
+   "peak_gib": 3.05,
+   "kept_slots": 4640,
+   "kept_bytes": 56623104,
+   "full_kv_bytes": 1610563584,
+   "compression": 28.4,
+   "generated": 32,
+   "tpot_ms": 19.9,
+   "decode_s": 0.637
+  }
+ ]
+}
