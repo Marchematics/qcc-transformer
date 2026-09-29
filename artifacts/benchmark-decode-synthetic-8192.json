@@ -1,0 +1,16 @@
+{
+  "scope": "synthetic QCCForCausalLM vs same-shell full-attention baseline; not pretrained model",
+  "device": "cuda",
+  "length": 8192,
+  "mode": "decode",
+  "chunk_size": 128,
+  "warmup": 1,
+  "steps": 2,
+  "qcc_seconds": 0.2621,
+  "full_seconds": 0.1264,
+  "speedup_full_over_qcc": 0.48,
+  "qcc_archive_elements": 33792,
+  "qcc_bounded_state_elements": 164864,
+  "full_kv_cache_elements": 8388608,
+  "cache_reduction": 50.88
+}

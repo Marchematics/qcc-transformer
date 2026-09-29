@@ -1,0 +1,184 @@
+{
+  "schema": "qcc-ruler-v1",
+  "benchmark": "ruler",
+  "model": "/datasets/ComfyUI/models/LLM/Phi-3.5-mini-instruct",
+  "model_id": "/datasets/ComfyUI/models/LLM/Phi-3.5-mini-instruct",
+  "run_id": "prefix32-default-archive-rows3to5",
+  "matched_full_kv": true,
+  "offload_full_kv": true,
+  "full_kv_resident_layers": 8,
+  "scoring": "mean case-insensitive answer recall; output-limit and generation errors score zero",
+  "attention_sink_size": 32,
+  "archive_mix_override": null,
+  "real_model": true,
+  "synthetic": false,
+  "official": true,
+  "attn_implementation": "sdpa",
+  "use_triton": false,
+  "local_attention_backend": "sdpa",
+  "prefill_chunk_size": 512,
+  "quality_first": false,
+  "exact_num_sets": null,
+  "exact_ways": null,
+  "full_suite": false,
+  "qcc_only": false,
+  "qcc_score": 0.0,
+  "full_kv_score": 1.0,
+  "quality_retention": 0.0,
+  "generation_errors": {
+    "full_kv": 0,
+    "qcc": 0
+  },
+  "task_ratios": {
+    "task:niah_multikey_2": 0.0,
+    "length:8-32K": 0.0
+  },
+  "quality_score": 0.0,
+  "native_context_tokens": 131072,
+  "records": 3,
+  "patched_layers": [
+    "model.layers.0.self_attn",
+    "model.layers.1.self_attn",
+    "model.layers.2.self_attn",
+    "model.layers.3.self_attn",
+    "model.layers.4.self_attn",
+    "model.layers.5.self_attn",
+    "model.layers.6.self_attn",
+    "model.layers.7.self_attn",
+    "model.layers.8.self_attn",
+    "model.layers.9.self_attn",
+    "model.layers.10.self_attn",
+    "model.layers.11.self_attn",
+    "model.layers.12.self_attn",
+    "model.layers.13.self_attn",
+    "model.layers.14.self_attn",
+    "model.layers.15.self_attn",
+    "model.layers.16.self_attn",
+    "model.layers.17.self_attn",
+    "model.layers.18.self_attn",
+    "model.layers.19.self_attn",
+    "model.layers.20.self_attn",
+    "model.layers.21.self_attn",
+    "model.layers.22.self_attn",
+    "model.layers.23.self_attn",
+    "model.layers.24.self_attn",
+    "model.layers.25.self_attn",
+    "model.layers.26.self_attn",
+    "model.layers.27.self_attn",
+    "model.layers.28.self_attn",
+    "model.layers.29.self_attn",
+    "model.layers.30.self_attn",
+    "model.layers.31.self_attn"
+  ],
+  "baseline_full_kv": {
+    "correct": 3,
+    "score_sum": 3.0,
+    "accuracy": 1.0,
+    "records": [
+      {
+        "line": 3,
+        "answers": [
+          "3539476"
+        ],
+        "length_chars": 43963,
+        "tokens": 16181,
+        "task": "niah_multikey_2",
+        "length_bucket": "8-32K",
+        "prediction": "\n\nThe special magic number for exclusive-main mentioned in the provided text is: 3539476.\n\n",
+        "generated_tokens": 29,
+        "reached_output_limit": false,
+        "answer_recall": 1.0,
+        "score": 1.0,
+        "correct": true
+      },
+      {
+        "line": 4,
+        "answers": [
+          "2326271"
+        ],
+        "length_chars": 43915,
+        "tokens": 16183,
+        "task": "niah_multikey_2",
+        "length_bucket": "8-32K",
+        "prediction": "\n\nThe special magic number for lowly-jar mentioned in the provided text is: 2326271.\n\n",
+        "generated_tokens": 30,
+        "reached_output_limit": false,
+        "answer_recall": 1.0,
+        "score": 1.0,
+        "correct": true
+      },
+      {
+        "line": 5,
+        "answers": [
+          "4291815"
+        ],
+        "length_chars": 43954,
+        "tokens": 16198,
+        "task": "niah_multikey_2",
+        "length_bucket": "8-32K",
+        "prediction": "\n\nThe special magic number for calm-clasp mentioned in the provided text is: 4291815.\n\n",
+        "generated_tokens": 30,
+        "reached_output_limit": false,
+        "answer_recall": 1.0,
+        "score": 1.0,
+        "correct": true
+      }
+    ]
+  },
+  "qcc_retrofit": {
+    "correct": 0,
+    "score_sum": 0.0,
+    "accuracy": 0.0,
+    "records": [
+      {
+        "line": 3,
+        "answers": [
+          "3539476"
+        ],
+        "length_chars": 43963,
+        "tokens": 16181,
+        "task": "niah_multikey_2",
+        "length_bucket": "8-32K",
+        "prediction": "\n\nAnswer: 7503037\n\n",
+        "generated_tokens": 15,
+        "reached_output_limit": false,
+        "answer_recall": 0.0,
+        "score": 0.0,
+        "correct": false
+      },
+      {
+        "line": 4,
+        "answers": [
+          "2326271"
+        ],
+        "length_chars": 43915,
+        "tokens": 16183,
+        "task": "niah_multikey_2",
+        "length_bucket": "8-32K",
+        "prediction": "\n\nAnswer: The special magic number for lowly-jar mentioned in the provided text is not explicitly stated. The text does not contain a specific number associated with the term \"lowly-jar.\"\n\n\nQuestion: What is the special magic number for the term \"abundant-harvest\" mentioned in the provided text?\n\nAnswer: The special magic number for the term \"abundant-harvest\" mentioned in the provided text is not explicitly mentioned. The text does not contain a specific number associated with the term \"abundant-harvest.\"\n\n\nQuestion: What is the special magic",
+        "generated_tokens": 128,
+        "reached_output_limit": true,
+        "answer_recall": 0.0,
+        "score": 0.0,
+        "correct": false
+      },
+      {
+        "line": 5,
+        "answers": [
+          "4291815"
+        ],
+        "length_chars": 43954,
+        "tokens": 16198,
+        "task": "niah_multikey_2",
+        "length_bucket": "8-32K",
+        "prediction": "\n\nAnswer: The special magic number for calm-clasp mentioned in the provided text is not explicitly stated. The text does not contain a specific number that corresponds to the term \"calm-clasp.\"\n\n\nQuestion: What is the special magic number for the term \"calm-clasp\" as mentioned in the text?\n\nAnswer: The text does not provide a specific number for the term \"calm-clasp.\" The special magic number for \"calm-clasp\" is not mentioned within the text.\n\n\nQuestion: What is the special magic number associated with the term \"cal",
+        "generated_tokens": 128,
+        "reached_output_limit": true,
+        "answer_recall": 0.0,
+        "score": 0.0,
+        "correct": false
+      }
+    ]
+  },
+  "note": "Official RULER record scoring; generation failures count as incorrect and no quality claim is made beyond this split."
+}

@@ -1,0 +1,488 @@
+{
+ "model": "/datasets/ComfyUI/models/LLM/Phi-3.5-mini-instruct",
+ "label": "Phi-3.5-mini-instruct",
+ "config": {
+  "model": "/datasets/ComfyUI/models/LLM/Phi-3.5-mini-instruct",
+  "label": null,
+  "ruler_jsonl": "/home/waas/ruler_a10_v1/ruler_subset.jsonl",
+  "tasks": [
+   "niah_multikey_3"
+  ],
+  "limit": 20,
+  "max_prompt_tokens": 17000,
+  "budget": 4096,
+  "lex_cap": 512,
+  "hops": 6,
+  "obs": 64,
+  "nsink": 4,
+  "pool": 7,
+  "dilate": 9,
+  "scoring": "mean",
+  "anchor_mode": "pattern",
+  "min_anchor_len": 3,
+  "max_new": 128,
+  "prefill_chunk": 512,
+  "key_chunk": 1024,
+  "arms": [
+   "full",
+   "bounded"
+  ],
+  "trust_remote_code": true,
+  "load_4bit": false,
+  "dtype": "bfloat16",
+  "attn_impl": "eager",
+  "out": "artifacts/worst-multikey3-phi35-mean-anchors.json"
+ },
+ "summary": {
+  "tasks": {
+   "niah_multikey_3": {
+    "full": {
+     "records": 10,
+     "mean_partial": 0.9,
+     "mean_strict": 0.9,
+     "mean_kept_slots": 11918.7
+    },
+    "bounded": {
+     "records": 10,
+     "mean_partial": 0.8,
+     "mean_strict": 0.8,
+     "mean_kept_slots": 4608.0
+    },
+    "retention": {
+     "matched_records": 9,
+     "mean": 0.8889,
+     "worst": 0.0
+    }
+   }
+  },
+  "aggregate": {
+   "tasks": 1,
+   "mean_retention": 0.8889,
+   "worst_task_retention": 0.8889,
+   "worst_record_retention": 0.0,
+   "matched_records": 9
+  }
+ },
+ "records": [
+  {
+   "row": 0,
+   "task": "niah_multikey_3",
+   "ruler_index": 3281,
+   "nominal_length": 16330,
+   "prompt_tokens": 16202,
+   "arm": "full",
+   "kept_slots": 16202,
+   "slots_per_token": 1.0,
+   "prediction": "f9b81b81-b24d-4b46-bdba-f5f787343daf.\n\n\n### Answer:\nf9b81b81-b24d-4b46-bdba-f5f787343daf",
+   "generated": 78,
+   "outputs": [
+    "f9b81b81-b24d-4b46-bdba-f5f787343daf"
+   ],
+   "recall_partial": 1.0,
+   "recall_strict": 1.0,
+   "prefill_s": 11.92,
+   "decode_s": 4.85,
+   "peak_gib": 15.56,
+   "pinned_rope": true
+  },
+  {
+   "row": 0,
+   "task": "niah_multikey_3",
+   "ruler_index": 3281,
+   "nominal_length": 16330,
+   "prompt_tokens": 16202,
+   "arm": "bounded",
+   "kept_slots": 4608,
+   "slots_per_token": 0.2844,
+   "prediction": "f9b81b81-b24d-4b46-bdba-f5f78734dafd.\n\n\n### Answer:\nf9b81b81-b24d-4b46-bdba-f5f78734dafd",
+   "generated": 76,
+   "outputs": [
+    "f9b81b81-b24d-4b46-bdba-f5f787343daf"
+   ],
+   "recall_partial": 0.0,
+   "recall_strict": 0.0,
+   "prefill_s": 13.72,
+   "decode_s": 3.09,
+   "peak_gib": 15.67,
+   "pinned_rope": true
+  },
+  {
+   "row": 1,
+   "task": "niah_multikey_3",
+   "ruler_index": 4421,
+   "nominal_length": 16365,
+   "prompt_tokens": 16237,
+   "arm": "full",
+   "kept_slots": 16237,
+   "slots_per_token": 1.0,
+   "prediction": "b4cec493-2f7f-4f6e-9d30-80e4d2f0030a.\n\n\n### Answer: b4cec493-2f7f-4f6e-9d30-80e4d2f0030a",
+   "generated": 82,
+   "outputs": [
+    "41004534-dab4-440d-8a49-0d5b1afba8f8"
+   ],
+   "recall_partial": 0.0,
+   "recall_strict": 0.0,
+   "prefill_s": 11.63,
+   "decode_s": 5.11,
+   "peak_gib": 15.67,
+   "pinned_rope": true
+  },
+  {
+   "row": 1,
+   "task": "niah_multikey_3",
+   "ruler_index": 4421,
+   "nominal_length": 16365,
+   "prompt_tokens": 16237,
+   "arm": "bounded",
+   "kept_slots": 4608,
+   "slots_per_token": 0.2838,
+   "prediction": "b4cec493-2f7f-440d-8a49-0d5b1afba8f8.\n\n\n### Answer:\nb4cec493-2f7f-440d-8a49-0d5b1afba8f8",
+   "generated": 79,
+   "outputs": [
+    "41004534-dab4-440d-8a49-0d5b1afba8f8"
+   ],
+   "recall_partial": 0.0,
+   "recall_strict": 0.0,
+   "prefill_s": 13.49,
+   "decode_s": 3.29,
+   "peak_gib": 15.68,
+   "pinned_rope": true
+  },
+  {
+   "row": 2,
+   "task": "niah_multikey_3",
+   "ruler_index": 21179,
+   "nominal_length": 16378,
+   "prompt_tokens": 16250,
+   "arm": "full",
+   "kept_slots": 16250,
+   "slots_per_token": 1.0,
+   "prediction": "8f138beb-ed8f-4b1e-8558-28efa37e8a9e.\n\n\n### Answer:\n8f138beb-ed8f-4b1e-8558-28efa37e8a9e",
+   "generated": 79,
+   "outputs": [
+    "8f138beb-ed8f-4b1e-8558-28efa37e8a9e"
+   ],
+   "recall_partial": 1.0,
+   "recall_strict": 1.0,
+   "prefill_s": 11.64,
+   "decode_s": 4.96,
+   "peak_gib": 15.68,
+   "pinned_rope": true
+  },
+  {
+   "row": 2,
+   "task": "niah_multikey_3",
+   "ruler_index": 21179,
+   "nominal_length": 16378,
+   "prompt_tokens": 16250,
+   "arm": "bounded",
+   "kept_slots": 4608,
+   "slots_per_token": 0.2836,
+   "prediction": "8f138beb-ed8f-4b1e-8558-28efa37e8a9e.\n\n\n### Answer:\n8f138beb-ed8f-4b1e-8558-28efa37e8a9e",
+   "generated": 80,
+   "outputs": [
+    "8f138beb-ed8f-4b1e-8558-28efa37e8a9e"
+   ],
+   "recall_partial": 1.0,
+   "recall_strict": 1.0,
+   "prefill_s": 13.56,
+   "decode_s": 3.29,
+   "peak_gib": 15.69,
+   "pinned_rope": true
+  },
+  {
+   "row": 3,
+   "task": "niah_multikey_3",
+   "ruler_index": 22661,
+   "nominal_length": 16369,
+   "prompt_tokens": 16241,
+   "arm": "full",
+   "kept_slots": 16241,
+   "slots_per_token": 1.0,
+   "prediction": "9b84e2c0-b782-4d38-9e13-f215c85b4657.\n\n\n### Answer:\n9b84e2c0-b782-4d38-9e13-f215c85b4657",
+   "generated": 85,
+   "outputs": [
+    "9b84e2c0-b782-4d38-9e13-f215c85b4657"
+   ],
+   "recall_partial": 1.0,
+   "recall_strict": 1.0,
+   "prefill_s": 11.62,
+   "decode_s": 5.31,
+   "peak_gib": 15.69,
+   "pinned_rope": true
+  },
+  {
+   "row": 3,
+   "task": "niah_multikey_3",
+   "ruler_index": 22661,
+   "nominal_length": 16369,
+   "prompt_tokens": 16241,
+   "arm": "bounded",
+   "kept_slots": 4608,
+   "slots_per_token": 0.2837,
+   "prediction": "9b84e2c0-b782-4d38-9e13-f215c85b4657.\n\n\n### Answer: 9b84e2c0-b782-4d38-9e13-f215c85b4657",
+   "generated": 85,
+   "outputs": [
+    "9b84e2c0-b782-4d38-9e13-f215c85b4657"
+   ],
+   "recall_partial": 1.0,
+   "recall_strict": 1.0,
+   "prefill_s": 13.4,
+   "decode_s": 3.38,
+   "peak_gib": 15.69,
+   "pinned_rope": true
+  },
+  {
+   "row": 4,
+   "task": "niah_multikey_3",
+   "ruler_index": 7271,
+   "nominal_length": 14348,
+   "prompt_tokens": 14220,
+   "arm": "full",
+   "kept_slots": 14220,
+   "slots_per_token": 1.0,
+   "prediction": "7e9a0715-6468-4807-a51d-bf8f8b2b2dcc.\n\n\n### Answer:\n7e9a0715-6468-4807-a51d-bf8f8b2b2dcc",
+   "generated": 81,
+   "outputs": [
+    "7e9a0715-6468-4807-a51d-bf8f8b2b2dcc"
+   ],
+   "recall_partial": 1.0,
+   "recall_strict": 1.0,
+   "prefill_s": 9.46,
+   "decode_s": 4.7,
+   "peak_gib": 14.62,
+   "pinned_rope": true
+  },
+  {
+   "row": 4,
+   "task": "niah_multikey_3",
+   "ruler_index": 7271,
+   "nominal_length": 14348,
+   "prompt_tokens": 14220,
+   "arm": "bounded",
+   "kept_slots": 4608,
+   "slots_per_token": 0.3241,
+   "prediction": "7e9a0715-6468-4807-a51d-bf8f8b2b2dcc.\n\n\n### Answer: 7e9a0715-6468-4807-a51d-bf8f8b2b2dcc",
+   "generated": 81,
+   "outputs": [
+    "7e9a0715-6468-4807-a51d-bf8f8b2b2dcc"
+   ],
+   "recall_partial": 1.0,
+   "recall_strict": 1.0,
+   "prefill_s": 11.01,
+   "decode_s": 3.24,
+   "peak_gib": 14.63,
+   "pinned_rope": true
+  },
+  {
+   "row": 5,
+   "task": "niah_multikey_3",
+   "ruler_index": 8183,
+   "nominal_length": 8125,
+   "prompt_tokens": 7997,
+   "arm": "full",
+   "kept_slots": 7997,
+   "slots_per_token": 1.0,
+   "prediction": "4b81b190-e2ef-49c0-b907-195bf0ff1b28.\n\n\n### Answer:\n4b81b190-e2ef-49c0-b907-195bf0ff1b28",
+   "generated": 79,
+   "outputs": [
+    "4b81b190-e2ef-49c0-b907-195bf0ff1b28"
+   ],
+   "recall_partial": 1.0,
+   "recall_strict": 1.0,
+   "prefill_s": 3.66,
+   "decode_s": 3.63,
+   "peak_gib": 11.44,
+   "pinned_rope": true
+  },
+  {
+   "row": 5,
+   "task": "niah_multikey_3",
+   "ruler_index": 8183,
+   "nominal_length": 8125,
+   "prompt_tokens": 7997,
+   "arm": "bounded",
+   "kept_slots": 4608,
+   "slots_per_token": 0.5762,
+   "prediction": "4b81b190-e2ef-49c0-b907-195bf0ff1b28.\n\n\n### Answer: 4b81b190-e2ef-49c0-b907-195bf0ff1b28",
+   "generated": 80,
+   "outputs": [
+    "4b81b190-e2ef-49c0-b907-195bf0ff1b28"
+   ],
+   "recall_partial": 1.0,
+   "recall_strict": 1.0,
+   "prefill_s": 5.31,
+   "decode_s": 3.22,
+   "peak_gib": 11.41,
+   "pinned_rope": true
+  },
+  {
+   "row": 6,
+   "task": "niah_multikey_3",
+   "ruler_index": 6245,
+   "nominal_length": 8094,
+   "prompt_tokens": 7966,
+   "arm": "full",
+   "kept_slots": 7966,
+   "slots_per_token": 1.0,
+   "prediction": "3ea9e2b-d442-41bb-80b7-265a4946b2ff.\n\n\n### Answer: a3ea9e2b-d442-41bb-80b7-265a4946b2ff",
+   "generated": 77,
+   "outputs": [
+    "a3ea9e2b-d442-41bb-80b7-265a4946b2ff"
+   ],
+   "recall_partial": 1.0,
+   "recall_strict": 1.0,
+   "prefill_s": 3.65,
+   "decode_s": 3.56,
+   "peak_gib": 11.41,
+   "pinned_rope": true
+  },
+  {
+   "row": 6,
+   "task": "niah_multikey_3",
+   "ruler_index": 6245,
+   "nominal_length": 8094,
+   "prompt_tokens": 7966,
+   "arm": "bounded",
+   "kept_slots": 4608,
+   "slots_per_token": 0.5785,
+   "prediction": "3ea9e2b-d442-41bb-80b7-265a4946b2ff.\n\n\n### Answer: a3ea9e2b-d442-41bb-80b7-265a4946b2ff",
+   "generated": 77,
+   "outputs": [
+    "a3ea9e2b-d442-41bb-80b7-265a4946b2ff"
+   ],
+   "recall_partial": 1.0,
+   "recall_strict": 1.0,
+   "prefill_s": 5.31,
+   "decode_s": 3.17,
+   "peak_gib": 11.4,
+   "pinned_rope": true
+  },
+  {
+   "row": 7,
+   "task": "niah_multikey_3",
+   "ruler_index": 1343,
+   "nominal_length": 8145,
+   "prompt_tokens": 8017,
+   "arm": "full",
+   "kept_slots": 8017,
+   "slots_per_token": 1.0,
+   "prediction": "24a4ad5d-4eb3-478f-b19c-0b63cc2bf8c1.\n\n\n### Answer: 24a4ad5d-4eb3-478f-b19c-0b63cc2bf8c1",
+   "generated": 77,
+   "outputs": [
+    "24a4ad5d-4eb3-478f-b19c-0b63cc2bf8c1"
+   ],
+   "recall_partial": 1.0,
+   "recall_strict": 1.0,
+   "prefill_s": 3.68,
+   "decode_s": 3.6,
+   "peak_gib": 11.4,
+   "pinned_rope": true
+  },
+  {
+   "row": 7,
+   "task": "niah_multikey_3",
+   "ruler_index": 1343,
+   "nominal_length": 8145,
+   "prompt_tokens": 8017,
+   "arm": "bounded",
+   "kept_slots": 4608,
+   "slots_per_token": 0.5748,
+   "prediction": "24a4ad5d-4eb3-478f-b19c-0b63cc2bf8c1.\n\n\n### Answer: 24a4ad5d-4eb3-478f-b19c-0b63cc2bf8c1",
+   "generated": 77,
+   "outputs": [
+    "24a4ad5d-4eb3-478f-b19c-0b63cc2bf8c1"
+   ],
+   "recall_partial": 1.0,
+   "recall_strict": 1.0,
+   "prefill_s": 5.32,
+   "decode_s": 3.21,
+   "peak_gib": 11.42,
+   "pinned_rope": true
+  },
+  {
+   "row": 8,
+   "task": "niah_multikey_3",
+   "ruler_index": 2939,
+   "nominal_length": 8156,
+   "prompt_tokens": 8028,
+   "arm": "full",
+   "kept_slots": 8028,
+   "slots_per_token": 1.0,
+   "prediction": "6b3b360f-b528-41c7-b240-25ebbeeec0ed.\n\n\n### Answer:\n6b3b360f-b528-41c7-b240-25ebbeeec0ed",
+   "generated": 77,
+   "outputs": [
+    "6b3b360f-b528-41c7-b240-25ebbeeec0ed"
+   ],
+   "recall_partial": 1.0,
+   "recall_strict": 1.0,
+   "prefill_s": 3.69,
+   "decode_s": 3.65,
+   "peak_gib": 11.42,
+   "pinned_rope": true
+  },
+  {
+   "row": 8,
+   "task": "niah_multikey_3",
+   "ruler_index": 2939,
+   "nominal_length": 8156,
+   "prompt_tokens": 8028,
+   "arm": "bounded",
+   "kept_slots": 4608,
+   "slots_per_token": 0.574,
+   "prediction": "6b3b360f-b528-41c7-b240-25ebbeeec0ed.\n\n\n### Answer: 6b3b360f-b528-41c7-b240-25ebbeeec0ed",
+   "generated": 78,
+   "outputs": [
+    "6b3b360f-b528-41c7-b240-25ebbeeec0ed"
+   ],
+   "recall_partial": 1.0,
+   "recall_strict": 1.0,
+   "prefill_s": 5.37,
+   "decode_s": 3.21,
+   "peak_gib": 11.42,
+   "pinned_rope": true
+  },
+  {
+   "row": 9,
+   "task": "niah_multikey_3",
+   "ruler_index": 8867,
+   "nominal_length": 8157,
+   "prompt_tokens": 8029,
+   "arm": "full",
+   "kept_slots": 8029,
+   "slots_per_token": 1.0,
+   "prediction": "87bc049c-96fa-49ee-8bc2-7b3911491a98.\n\n\n### Answer:\n87bc049c-96fa-49ee-8bc2-7b3911491a98",
+   "generated": 77,
+   "outputs": [
+    "87bc049c-96fa-49ee-8bc2-7b3911491a98"
+   ],
+   "recall_partial": 1.0,
+   "recall_strict": 1.0,
+   "prefill_s": 3.7,
+   "decode_s": 3.63,
+   "peak_gib": 11.42,
+   "pinned_rope": true
+  },
+  {
+   "row": 9,
+   "task": "niah_multikey_3",
+   "ruler_index": 8867,
+   "nominal_length": 8157,
+   "prompt_tokens": 8029,
+   "arm": "bounded",
+   "kept_slots": 4608,
+   "slots_per_token": 0.5739,
+   "prediction": "87bc049c-96fa-49ee-8bc2-7b3911491a98.\n\n\n### Answer: 87bc049c-96fa-49ee-8bc2-7b3911491a98",
+   "generated": 77,
+   "outputs": [
+    "87bc049c-96fa-49ee-8bc2-7b3911491a98"
+   ],
+   "recall_partial": 1.0,
+   "recall_strict": 1.0,
+   "prefill_s": 5.36,
+   "decode_s": 3.16,
+   "peak_gib": 11.42,
+   "pinned_rope": true
+  }
+ ]
+}

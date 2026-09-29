@@ -1,0 +1,34 @@
+step=1 loss=18.273754 accuracy=0.0000
+step=50 loss=4.840826 accuracy=0.0000
+step=100 loss=3.435443 accuracy=0.0000
+step=150 loss=2.718934 accuracy=0.1250
+step=200 loss=0.354759 accuracy=0.8750
+step=250 loss=0.007737 accuracy=1.0000
+step=300 loss=0.000378 accuracy=1.0000
+step=350 loss=0.000337 accuracy=1.0000
+step=400 loss=0.000248 accuracy=1.0000
+step=450 loss=0.000123 accuracy=1.0000
+step=500 loss=0.000126 accuracy=1.0000
+step=550 loss=0.000172 accuracy=1.0000
+step=600 loss=0.000168 accuracy=1.0000
+step=650 loss=0.000097 accuracy=1.0000
+step=700 loss=0.000052 accuracy=1.0000
+step=750 loss=0.000093 accuracy=1.0000
+step=800 loss=0.000062 accuracy=1.0000
+{
+  "device": "cuda",
+  "checkpoint": "artifacts/remote_gpu/temp_sweep_20260902/temp_1.pt",
+  "dataset": "artifacts/remote_gpu/temp_sweep_20260902/temp_1.jsonl",
+  "examples": 8,
+  "eval_lengths": [
+    128
+  ],
+  "train": {
+    "steps": 800.0,
+    "final_loss": 6.217980990186334e-05,
+    "final_accuracy": 1.0,
+    "best_loss": 5.1719714974751696e-05,
+    "best_accuracy": 1.0,
+    "train_seconds": 422.192855988862
+  }
+}

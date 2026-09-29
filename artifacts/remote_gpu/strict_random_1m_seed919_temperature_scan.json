@@ -1,0 +1,20 @@
+{
+  "checkpoint": "runs/lexical_pair_random_codes64_seed917.pt",
+  "dataset": "synthetic random-marker/random-filler, 29 records at 1M/query-900K",
+  "temperature_2.0": {
+    "correct": 26,
+    "total": 29,
+    "accuracy": 0.896551724137931,
+    "passed": false,
+    "failures": [
+      {"line": 8, "answer": 10, "prediction": 31},
+      {"line": 11, "answer": 13, "prediction": 21},
+      {"line": 18, "answer": 20, "prediction": 27}
+    ]
+  },
+  "temperature_1.0": {
+    "status": "incomplete",
+    "note": "Remote process terminated before emitting a report while GPU workers were contending; no score inferred."
+  },
+  "note": "Exploratory routing-temperature diagnostic only; not a quality or speedup claim."
+}

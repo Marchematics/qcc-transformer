@@ -1,0 +1,149 @@
+/root/miniconda3/lib/python3.12/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+`torch_dtype` is deprecated! Use `dtype` instead!
+`flash-attention` package not found, consider installing for better performance: No module named 'flash_attn'.
+Current `flash-attention` does not support `window_size`. Either upgrade or use `attn_implementation='eager'`.
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards:  50%|█████     | 1/2 [00:05<00:05,  5.19s/it]Loading checkpoint shards: 100%|██████████| 2/2 [00:08<00:00,  4.01s/it]Loading checkpoint shards: 100%|██████████| 2/2 [00:08<00:00,  4.18s/it]
+{"event": "record", "run_id": "causal-block-cap8192-row16-row21-v1", "mode": "full_kv", "line": 1, "answers": ["6569343"], "length_chars": 20384, "source_line": 16, "tokens": 7441, "task": "niah_multikey_2", "length_bucket": "0-8K", "prediction": "6569343.", "generated_tokens": 10, "reached_output_limit": false, "answer_recall": 1.0, "score": 1.0, "correct": true, "peak_cuda_allocated_bytes": 4482342400}
+{"event": "record", "run_id": "causal-block-cap8192-row16-row21-v1", "mode": "full_kv", "line": 2, "answers": ["f9b81b81-b24d-4b46-bdba-f5f787343daf"], "length_chars": 23159, "source_line": 21, "tokens": 16205, "task": "niah_multikey_3", "length_bucket": "8-32K", "prediction": ": f9b81b81-b24d-4b46-bdba-f5f787343daf.", "generated_tokens": 36, "reached_output_limit": false, "answer_recall": 1.0, "score": 1.0, "correct": true, "peak_cuda_allocated_bytes": 7083409920}
+past_key_values should not be None in from_legacy_cache()
+{"event": "record", "run_id": "causal-block-cap8192-row16-row21-v1", "mode": "qcc", "line": 1, "answers": ["6569343"], "length_chars": 20384, "source_line": 16, "tokens": 7441, "task": "niah_multikey_2", "length_bucket": "0-8K", "prediction": "6569343.", "generated_tokens": 10, "reached_output_limit": false, "answer_recall": 1.0, "score": 1.0, "correct": true, "qcc_runtime_state": {"tensor_storage_by_device": {"cuda:0": 4995568128}, "rng_state_bytes": 512, "total_bytes": 4995568640}, "peak_cuda_allocated_bytes": 8893238784}
+{"event": "record", "run_id": "causal-block-cap8192-row16-row21-v1", "mode": "qcc", "line": 2, "answers": ["f9b81b81-b24d-4b46-bdba-f5f787343daf"], "length_chars": 23159, "source_line": 21, "tokens": 16205, "task": "niah_multikey_3", "length_bucket": "8-32K", "prediction": "f9b81b81-b24d-4b46-bdba-f5f787343daf.", "generated_tokens": 35, "reached_output_limit": false, "answer_recall": 1.0, "score": 1.0, "correct": true, "qcc_runtime_state": {"tensor_storage_by_device": {"cuda:0": 4995568128}, "rng_state_bytes": 512, "total_bytes": 4995568640}, "peak_cuda_allocated_bytes": 10629317120}
+{
+  "model": "/datasets/ComfyUI/models/LLM/Phi-3.5-mini-instruct",
+  "records": 2,
+  "patched_layers": [
+    "model.layers.0.self_attn",
+    "model.layers.1.self_attn",
+    "model.layers.2.self_attn",
+    "model.layers.3.self_attn",
+    "model.layers.4.self_attn",
+    "model.layers.5.self_attn",
+    "model.layers.6.self_attn",
+    "model.layers.7.self_attn",
+    "model.layers.8.self_attn",
+    "model.layers.9.self_attn",
+    "model.layers.10.self_attn",
+    "model.layers.11.self_attn",
+    "model.layers.12.self_attn",
+    "model.layers.13.self_attn",
+    "model.layers.14.self_attn",
+    "model.layers.15.self_attn",
+    "model.layers.16.self_attn",
+    "model.layers.17.self_attn",
+    "model.layers.18.self_attn",
+    "model.layers.19.self_attn",
+    "model.layers.20.self_attn",
+    "model.layers.21.self_attn",
+    "model.layers.22.self_attn",
+    "model.layers.23.self_attn",
+    "model.layers.24.self_attn",
+    "model.layers.25.self_attn",
+    "model.layers.26.self_attn",
+    "model.layers.27.self_attn",
+    "model.layers.28.self_attn",
+    "model.layers.29.self_attn",
+    "model.layers.30.self_attn",
+    "model.layers.31.self_attn"
+  ],
+  "baseline_full_kv": {
+    "correct": 2,
+    "score_sum": 2.0,
+    "accuracy": 1.0,
+    "records": [
+      {
+        "line": 1,
+        "answers": [
+          "6569343"
+        ],
+        "length_chars": 20384,
+        "source_line": 16,
+        "tokens": 7441,
+        "task": "niah_multikey_2",
+        "length_bucket": "0-8K",
+        "prediction": "6569343.",
+        "generated_tokens": 10,
+        "reached_output_limit": false,
+        "answer_recall": 1.0,
+        "score": 1.0,
+        "correct": true,
+        "peak_cuda_allocated_bytes": 4482342400
+      },
+      {
+        "line": 2,
+        "answers": [
+          "f9b81b81-b24d-4b46-bdba-f5f787343daf"
+        ],
+        "length_chars": 23159,
+        "source_line": 21,
+        "tokens": 16205,
+        "task": "niah_multikey_3",
+        "length_bucket": "8-32K",
+        "prediction": ": f9b81b81-b24d-4b46-bdba-f5f787343daf.",
+        "generated_tokens": 36,
+        "reached_output_limit": false,
+        "answer_recall": 1.0,
+        "score": 1.0,
+        "correct": true,
+        "peak_cuda_allocated_bytes": 7083409920
+      }
+    ]
+  },
+  "qcc_retrofit": {
+    "correct": 2,
+    "score_sum": 2.0,
+    "accuracy": 1.0,
+    "records": [
+      {
+        "line": 1,
+        "answers": [
+          "6569343"
+        ],
+        "length_chars": 20384,
+        "source_line": 16,
+        "tokens": 7441,
+        "task": "niah_multikey_2",
+        "length_bucket": "0-8K",
+        "prediction": "6569343.",
+        "generated_tokens": 10,
+        "reached_output_limit": false,
+        "answer_recall": 1.0,
+        "score": 1.0,
+        "correct": true,
+        "qcc_runtime_state": {
+          "tensor_storage_by_device": {
+            "cuda:0": 4995568128
+          },
+          "rng_state_bytes": 512,
+          "total_bytes": 4995568640
+        },
+        "peak_cuda_allocated_bytes": 8893238784
+      },
+      {
+        "line": 2,
+        "answers": [
+          "f9b81b81-b24d-4b46-bdba-f5f787343daf"
+        ],
+        "length_chars": 23159,
+        "source_line": 21,
+        "tokens": 16205,
+        "task": "niah_multikey_3",
+        "length_bucket": "8-32K",
+        "prediction": "f9b81b81-b24d-4b46-bdba-f5f787343daf.",
+        "generated_tokens": 35,
+        "reached_output_limit": false,
+        "answer_recall": 1.0,
+        "score": 1.0,
+        "correct": true,
+        "qcc_runtime_state": {
+          "tensor_storage_by_device": {
+            "cuda:0": 4995568128
+          },
+          "rng_state_bytes": 512,
+          "total_bytes": 4995568640
+        },
+        "peak_cuda_allocated_bytes": 10629317120
+      }
+    ]
+  }
+}

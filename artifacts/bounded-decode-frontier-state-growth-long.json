@@ -1,0 +1,52 @@
+{
+ "config": {
+  "model": "/root/qcc/models/Llama-3.2-1B-Instruct",
+  "lengths": [
+   131072,
+   262144,
+   524288
+  ],
+  "budget": 4096,
+  "lex_cap": 512,
+  "prefill_chunk": 8192,
+  "key_chunk": 4096,
+  "load_4bit": false,
+  "out": "artifacts/bounded-decode-frontier-state-growth-long.json"
+ },
+ "summary": {
+  "model": "/root/qcc/models/Llama-3.2-1B-Instruct",
+  "budget": 4096,
+  "lex_cap": 512,
+  "state_growth_first_to_last": 1.0,
+  "slots_growth_first_to_last": 1.0
+ },
+ "rows": [
+  {
+   "prompt_tokens": 131072,
+   "status": "ok",
+   "retained_slots": 4608,
+   "slots_per_prompt_token": 0.035156,
+   "bounded_state_mib": 144.0,
+   "fullkv_state_mib": 4096.0,
+   "fullkv_over_bounded": 28.44,
+   "compile_seconds": 51.6,
+   "peak_gib": 12.93
+  },
+  {
+   "prompt_tokens": 262144,
+   "status": "ok",
+   "retained_slots": 4608,
+   "slots_per_prompt_token": 0.017578,
+   "bounded_state_mib": 144.0,
+   "fullkv_state_mib": 8192.0,
+   "fullkv_over_bounded": 56.89,
+   "compile_seconds": 214.6,
+   "peak_gib": 22.89
+  },
+  {
+   "prompt_tokens": 524288,
+   "status": "oom",
+   "detail": "CUDA out of memory. Tried to allocate 4.00 GiB. GPU 0 has a total capacity of 23.55 GiB of which 4.00 GiB is free. Proce"
+  }
+ ]
+}

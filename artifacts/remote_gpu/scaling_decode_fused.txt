@@ -1,0 +1,7 @@
+device=cuda mode=decode lengths=[1024, 2048, 4096, 8192] threads=1
+length=1024 qcc_seconds=1.756865 full_seconds=1.258065 speedup=0.72x
+length=2048 qcc_seconds=3.623489 full_seconds=2.462855 speedup=0.68x
+length=4096 qcc_seconds=7.317330 full_seconds=5.066468 speedup=0.69x
+length=8192 qcc_seconds=14.915042 full_seconds=13.625512 speedup=0.91x
+qcc_loglog_slope=1.027
+full_loglog_slope=1.135

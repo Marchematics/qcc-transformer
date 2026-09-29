@@ -1,0 +1,102 @@
+[
+ {
+  "label": "filler-heavy",
+  "budget": 16384,
+  "lex_cap": 0,
+  "lengths": [
+   7730,
+   15584
+  ],
+  "kept": 15584,
+  "compile_seconds": 4.5,
+  "peak_gib": 12.08,
+  "prompt_lengths": [
+   7730,
+   15584
+  ],
+  "rows": [
+   {
+    "L": 7730,
+    "slots": 7730,
+    "filler_slots": 7854,
+    "mask_slots": 7730,
+    "cache_identical_to_solo": true,
+    "filler_is_duplicate_of_last_slot": true,
+    "prefill_logits_identical_to_solo": true,
+    "slice_decode_matches_solo": true,
+    "batch_decode_matches_solo": true,
+    "diverged_at_step": null,
+    "max_logit_delta": 0.359375,
+    "top2_margin_at_divergence": null,
+    "score": 1.0,
+    "text": "6327192.\nThe final answer is: 6327192.\n\n## S"
+   },
+   {
+    "L": 15584,
+    "slots": 15584,
+    "filler_slots": 0,
+    "mask_slots": 15584,
+    "cache_identical_to_solo": true,
+    "filler_is_duplicate_of_last_slot": true,
+    "prefill_logits_identical_to_solo": true,
+    "slice_decode_matches_solo": true,
+    "batch_decode_matches_solo": true,
+    "diverged_at_step": null,
+    "max_logit_delta": 0.4453125,
+    "top2_margin_at_divergence": null,
+    "score": 1.0,
+    "text": "4080114.\nThe final answer is: 4080114.assist"
+   }
+  ]
+ },
+ {
+  "label": "production",
+  "budget": 4096,
+  "lex_cap": 512,
+  "lengths": [
+   7730,
+   15584
+  ],
+  "kept": 4608,
+  "compile_seconds": 3.9,
+  "peak_gib": 11.55,
+  "prompt_lengths": [
+   7730,
+   15584
+  ],
+  "rows": [
+   {
+    "L": 7730,
+    "slots": 4608,
+    "filler_slots": 0,
+    "mask_slots": 4608,
+    "cache_identical_to_solo": true,
+    "filler_is_duplicate_of_last_slot": true,
+    "prefill_logits_identical_to_solo": true,
+    "slice_decode_matches_solo": true,
+    "batch_decode_matches_solo": false,
+    "diverged_at_step": 23,
+    "max_logit_delta": 0.34375,
+    "top2_margin_at_divergence": 0.0,
+    "score": 1.0,
+    "text": "6327192.\nThe final answer is: 6327192.\n\n## S"
+   },
+   {
+    "L": 15584,
+    "slots": 4608,
+    "filler_slots": 0,
+    "mask_slots": 4608,
+    "cache_identical_to_solo": true,
+    "filler_is_duplicate_of_last_slot": true,
+    "prefill_logits_identical_to_solo": true,
+    "slice_decode_matches_solo": true,
+    "batch_decode_matches_solo": true,
+    "diverged_at_step": null,
+    "max_logit_delta": 0.765625,
+    "top2_margin_at_divergence": null,
+    "score": 1.0,
+    "text": "4080114.\nThe best answer is 4080114. textass"
+   }
+  ]
+ }
+]

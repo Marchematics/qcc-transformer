@@ -9,11 +9,27 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Sequence
 
 import torch
 from torch import Tensor, nn
 import torch.nn.functional as F
+
+
+def _scaled_dot_product_attention(
+    query: Tensor, key: Tensor, value: Tensor, **kwargs: object
+) -> Tensor:
+    """Call SDPA with accelerator-safe contiguous Q/K/V strides.
+
+    Some CUDA flash/memory-efficient kernels reject the non-contiguous
+    head-major views produced by ``transpose`` (``query is not correctly
+    aligned``).  The bounded tensors are made contiguous once at this
+    boundary, preserving SDPA semantics while keeping all backends usable.
+    """
+
+    return F.scaled_dot_product_attention(
+        query.contiguous(), key.contiguous(), value.contiguous(), **kwargs
+    )
 
 
 @dataclass
@@ -22,6 +38,38 @@ class QCCState:
 
     numerator: Tensor
     denominator: Tensor
+
+
+class SinusoidalPositionEmbedding(nn.Module):
+    """Stateless positions that remain valid beyond a learned table limit.
+
+    A learned ``nn.Embedding`` allocates ``max_position_embeddings * d_model``
+    parameters even when serving only one token at a time.  This module builds
+    the requested positions on demand, so a model configured for million-token
+    streams does not reserve a million-row parameter table.  It is deliberately
+    kept as a normal module to make the positional policy explicit and easy to
+    swap in experiments.
+    """
+
+    def __init__(self, d_model: int, max_period: float = 10_000.0) -> None:
+        super().__init__()
+        if d_model <= 0:
+            raise ValueError("d_model must be positive")
+        if max_period <= 1.0:
+            raise ValueError("max_period must be greater than one")
+        half = (d_model + 1) // 2
+        frequencies = torch.exp(
+            -math.log(max_period) * torch.arange(half, dtype=torch.float32) / max(half, 1)
+        )
+        self.d_model = d_model
+        self.register_buffer("frequencies", frequencies, persistent=False)
+
+    def forward(self, positions: Tensor) -> Tensor:
+        if positions.dtype not in (torch.int32, torch.int64):
+            raise ValueError("positions must be an integer tensor")
+        angles = positions.to(dtype=torch.float32).unsqueeze(-1) * self.frequencies
+        values = torch.cat((angles.sin(), angles.cos()), dim=-1)
+        return values[..., : self.d_model]
 
 
 class QCCArchive(nn.Module):
@@ -48,6 +96,18 @@ class QCCArchive(nn.Module):
         num_codes: int = 16,
         decay_rates: tuple[float, ...] = (0.995, 0.98, 0.94, 0.85),
         window_size: int = 128,
+        use_triton: bool = True,
+        active_codes: Optional[int] = None,
+        lazy_decay: bool = False,
+        scan_block_size: int = 1024,
+        content_threshold: Optional[float] = None,
+        persistent_landmark: bool = False,
+        prefix_landmark: bool = False,
+        prefix_pair_landmark: bool = False,
+        landmark_temperature: float = 1.0,
+        kernel_features: bool = False,
+        global_normalization: bool = True,
+        query_correction_rank: int = 0,
     ) -> None:
         super().__init__()
         if num_heads <= 0 or head_dim <= 0 or num_codes <= 0:
@@ -57,16 +117,205 @@ class QCCArchive(nn.Module):
             raise ValueError("decay_rates must contain values strictly between 0 and 1")
         if window_size <= 0:
             raise ValueError("window_size must be positive")
+        if active_codes is not None and not 0 < active_codes <= num_codes:
+            raise ValueError("active_codes must be in [1, num_codes] when provided")
+        if lazy_decay and active_codes is None:
+            raise ValueError("lazy_decay requires active_codes to bound touched slots")
+        if scan_block_size <= 0:
+            raise ValueError("scan_block_size must be positive")
+        if content_threshold is not None and not math.isfinite(content_threshold):
+            raise ValueError("content_threshold must be finite when provided")
+        if query_correction_rank < 0:
+            raise ValueError("query_correction_rank must be non-negative")
 
         self.num_heads = num_heads
         self.head_dim = head_dim
         self.num_codes = num_codes
         self.num_scales = int(rates.numel())
         self.window_size = window_size
+        self.use_triton = use_triton
+        # Inference may route to a small top-k subset while retaining an
+        # overcomplete codebook for representational capacity. ``None`` keeps
+        # the dense reference path.
+        self.active_codes = active_codes
+        self.lazy_decay = lazy_decay
+        self.scan_block_size = scan_block_size
+        # Optional hard event gate.  Scores below the threshold do not enter
+        # the archive, which prevents long runs of uninformative filler from
+        # diluting a sparse retrieval signal.  ``None`` preserves the original
+        # dense recurrence exactly.
+        self.content_threshold = content_threshold
+        # Optional max-retained landmark slots.  Unlike the exponentially
+        # decayed response state, these slots keep the highest-salience value
+        # seen for each code indefinitely.  The mechanism is disabled by
+        # default so existing kernels/checkpoints retain their exact state.
+        self.persistent_landmark = persistent_landmark
+        self.prefix_landmark = prefix_landmark
+        self.prefix_pair_landmark = prefix_pair_landmark
+        self.landmark_temperature = landmark_temperature
+        self.kernel_features = bool(kernel_features)
+        # A zero-initialized low-rank query-conditioned residual gives the
+        # calibrator a small, context-independent way to correct systematic
+        # archive read bias.  It does not change the recurrent state footprint
+        # and preserves the historical uncalibrated output exactly.
+        self.query_correction_rank = int(query_correction_rank)
+        if self.query_correction_rank:
+            # Keep one factor random and the output factors at zero.  Starting
+            # both factors at zero would make their bilinear gradients zero,
+            # preventing calibration from learning either correction or the
+            # scale selector below.  This arrangement is still an exact
+            # identity before calibration because ``query_correction_u`` is
+            # zero-initialized.
+            self.query_correction_u = nn.Parameter(
+                torch.zeros(num_heads, self.query_correction_rank, head_dim)
+            )
+            self.query_correction_v = nn.Parameter(
+                torch.empty(num_heads, head_dim, self.query_correction_rank)
+            )
+            # Reuse the same low-rank query coordinates to select the archive
+            # time scale.  A static per-code mixture cannot distinguish a
+            # query that needs recent history from one that needs a distant
+            # association; this tiny zero-initialized head lets calibration
+            # learn that choice without changing the recurrent state.
+            self.query_scale_logits = nn.Parameter(
+                torch.zeros(num_heads, self.query_correction_rank, self.num_scales)
+            )
+            nn.init.normal_(
+                self.query_correction_v,
+                mean=0.0,
+                std=1.0 / math.sqrt(head_dim),
+            )
+        # Correct separable-softmax reads combine all code/scale numerator and
+        # denominator contributions before the final normalization.  Keep an
+        # explicit switch for reproducing the legacy per-code ablation.
+        self.global_normalization = bool(global_normalization)
+        if prefix_landmark and not persistent_landmark:
+            raise ValueError("prefix_landmark requires persistent_landmark")
+        if prefix_pair_landmark and not prefix_landmark:
+            raise ValueError("prefix_pair_landmark requires prefix_landmark")
+        if not math.isfinite(landmark_temperature) or landmark_temperature <= 0:
+            raise ValueError("landmark_temperature must be positive and finite")
+        if persistent_landmark:
+            self.landmark_mix_logits = nn.Parameter(torch.zeros(num_heads))
         self.register_buffer("decay_rates", rates, persistent=True)
-        self.codes = nn.Parameter(torch.randn(num_heads, num_codes, head_dim) / math.sqrt(head_dim))
+        code_scale = 1.0 if self.kernel_features else 1.0 / math.sqrt(head_dim)
+        self.codes = nn.Parameter(torch.randn(num_heads, num_codes, head_dim) * code_scale)
         self.mix_logits = nn.Parameter(torch.zeros(num_heads, num_codes, self.num_scales))
         self.reset_state(batch_size=1, device=rates.device, dtype=torch.float32)
+        self._triton_mix_cache: Tensor | None = None
+        self._triton_mix_cache_key: tuple[torch.device, int] | None = None
+
+    def _prepared_triton_mix(self, device: torch.device) -> Tensor:
+        """Return cached fp32 scale weights for the current inference parameters."""
+
+        key = (device, int(self.mix_logits._version))
+        if self._triton_mix_cache is not None and self._triton_mix_cache_key == key:
+            return self._triton_mix_cache
+        prepared = F.softmax(
+            self.mix_logits.to(device=device, dtype=torch.float32), dim=-1
+        ).contiguous()
+        self._triton_mix_cache = prepared
+        self._triton_mix_cache_key = key
+        return prepared
+
+    def _kernel_feature_weights(self, x: Tensor) -> Tensor:
+        """Positive random-feature map for the softmax attention kernel.
+
+        ``exp(q.k)`` is approximated by a shared feature map whose query and
+        key factors retain the historical numerator and denominator.  Norm
+        terms keep the estimator unbiased in direction while the clamp avoids
+        overflowing on bf16 activations.
+        """
+        state_dtype = self._numerator.dtype
+        codes = self.codes.to(device=x.device, dtype=state_dtype)
+        logits = torch.einsum("bhd,hmd->bhm", x.to(state_dtype), codes)
+        logits = logits / math.sqrt(self.head_dim)
+        norm_sq = x.to(state_dtype).square().sum(dim=-1, keepdim=True)
+        scale = math.sqrt(self.head_dim)
+        return torch.exp((logits - 0.5 * norm_sq / scale).clamp(min=-20.0, max=10.0))
+
+    def _kernel_feature_weights_chunk(self, x: Tensor) -> Tensor:
+        state_dtype = self._numerator.dtype
+        codes = self.codes.to(device=x.device, dtype=state_dtype)
+        logits = torch.einsum("bhed,hmd->bhem", x.to(state_dtype), codes)
+        logits = logits / math.sqrt(self.head_dim)
+        norm_sq = x.to(state_dtype).square().sum(dim=-1, keepdim=True)
+        scale = math.sqrt(self.head_dim)
+        return torch.exp((logits - 0.5 * norm_sq / scale).clamp(min=-20.0, max=10.0))
+
+    def _finish_read(
+        self,
+        query: Tensor,
+        response: Tensor,
+        *,
+        include_landmarks: bool = True,
+    ) -> Tensor:
+        """Apply the optional learned residual before landmark blending."""
+
+        if self.query_correction_rank:
+            query_f = query.float()
+            value_v = self.query_correction_v.to(device=query.device)
+            value_u = self.query_correction_u.to(device=query.device)
+            if query.ndim == 3:
+                latent = torch.einsum("bhd,hdr->bhr", query_f, value_v)
+                correction = torch.einsum("bhr,hrd->bhd", latent, value_u)
+            elif query.ndim == 4:
+                latent = torch.einsum("bhtd,hdr->bhtr", query_f, value_v)
+                correction = torch.einsum("bhtr,hrd->bhtd", latent, value_u)
+            else:
+                raise ValueError("query must have rank 3 or 4")
+            response = response + correction.to(response.dtype)
+        return (
+            self._combine_landmark(query, response)
+            if include_landmarks
+            else response
+        )
+
+    def _query_scale_delta(self, query: Tensor) -> Tensor | None:
+        """Return a query-conditioned additive bias over decay scales.
+
+        The delta is intentionally initialized to zero, so checkpoints created
+        before this feature retain bitwise-equivalent reads until calibration
+        updates the new parameter.  The returned shape is ``[B,H,S]`` for a
+        single query or ``[B,H,T,S]`` for a query block.
+        """
+
+        if not self.query_correction_rank:
+            return None
+        query_v = self.query_correction_v.to(device=query.device, dtype=torch.float32)
+        scale = self.query_scale_logits.to(device=query.device, dtype=torch.float32)
+        query_f = query.float()
+        if query.ndim == 3:
+            latent = torch.einsum("bhd,hdr->bhr", query_f, query_v)
+            return torch.einsum("bhr,hrs->bhs", latent, scale)
+        if query.ndim == 4:
+            latent = torch.einsum("bhtd,hdr->bhtr", query_f, query_v)
+            return torch.einsum("bhtr,hrs->bhts", latent, scale)
+        raise ValueError("query must have rank 3 or 4")
+
+    def _scale_mix_logits(self, query: Tensor) -> Tensor:
+        """Add the optional query-dependent bias to the scale mixture.
+
+        A static mixture has shape ``[H,M,S]``.  When the calibrated scale
+        head is present, the returned tensor is expanded only as a view to
+        ``[B,H,M,S]`` or ``[B,H,T,M,S]``; no context-sized parameter is stored.
+        """
+
+        base = self.mix_logits.to(device=query.device, dtype=torch.float32)
+        delta = self._query_scale_delta(query)
+        if delta is None:
+            if query.ndim == 3:
+                return base.unsqueeze(0).expand(query.shape[0], -1, -1, -1)
+            if query.ndim == 4:
+                return base.unsqueeze(0).unsqueeze(2).expand(
+                    query.shape[0], -1, query.shape[2], -1, -1
+                )
+            raise ValueError("query must have rank 3 or 4")
+        if query.ndim == 3:
+            return base.unsqueeze(0) + delta.unsqueeze(2)
+        if query.ndim == 4:
+            return base.unsqueeze(0).unsqueeze(2) + delta.unsqueeze(3)
+        raise ValueError("query must have rank 3 or 4")
 
     def reset_state(
         self,
@@ -97,6 +346,218 @@ class QCCArchive(nn.Module):
             device=device,
             dtype=state_dtype,
         )
+        self._last_step = torch.zeros(
+            batch_size,
+            self.num_heads,
+            self.num_codes,
+            self.num_scales,
+            device=device,
+            dtype=torch.long,
+        )
+        self._step = 0
+        if self.persistent_landmark:
+            self._landmark_count = 0
+            self._prefix_pending_slot = -1
+            self._landmark_score = torch.full(
+                (batch_size, self.num_heads, self.num_codes),
+                -torch.inf,
+                device=device,
+                dtype=state_dtype,
+            )
+            self._landmark_value = torch.zeros(
+                batch_size,
+                self.num_heads,
+                self.num_codes,
+                self.head_dim,
+                device=device,
+                dtype=state_dtype,
+            )
+            self._landmark_key = torch.zeros(
+                batch_size,
+                self.num_heads,
+                self.num_codes,
+                self.head_dim,
+                device=device,
+                dtype=state_dtype,
+            )
+
+    def _landmark_scores(self, key: Tensor) -> Tensor:
+        """Return per-code salience scores for landmark updates."""
+
+        codes = self.codes.to(device=key.device, dtype=self._numerator.dtype)
+        return torch.einsum(
+            "bhd,hmd->bhm", key.to(self._numerator.dtype), codes
+        ) / math.sqrt(self.head_dim)
+
+    def _update_landmark(self, key: Tensor, value: Tensor) -> None:
+        """Retain the highest-scoring value for every code."""
+
+        if not self.persistent_landmark:
+            return
+        # Landmark slots are mutable serving state, not trainable activations.
+        # Detaching here prevents repeated prefix writes (including the
+        # successor-binding ablation) from invalidating autograd version
+        # counters during the short differentiable curriculum.
+        key = key.detach()
+        value = value.detach()
+        if self.prefix_landmark:
+            if self._landmark_count >= self.num_codes:
+                # Prefix mode is intentionally immutable after the fixed
+                # prefix has been captured; later filler must never replace
+                # those exact-key anchors.
+                return
+            slot = self._landmark_count
+            if self.prefix_pair_landmark and self._prefix_pending_slot >= 0:
+                # Bind the previous retained key to the current token's value.
+                # This is useful for marker/value streams where the query
+                # matches the marker key but the answer is its successor.
+                updated_value = self._landmark_value.clone()
+                updated_value[:, :, self._prefix_pending_slot] = value.to(
+                    self._landmark_value.dtype
+                )
+                self._landmark_value = updated_value
+            score = self._landmark_scores(key)
+            updated_key = self._landmark_key.clone()
+            updated_value = self._landmark_value.clone()
+            updated_key[:, :, slot] = key.to(self._landmark_key.dtype)
+            updated_value[:, :, slot] = value.to(self._landmark_value.dtype)
+            self._landmark_key = updated_key
+            self._landmark_value = updated_value
+            # Validity is tracked per retained slot; use the strongest code
+            # response as its scalar salience while routing itself uses the
+            # retained key directly at read time.
+            updated_score = self._landmark_score.clone()
+            updated_score[:, :, slot] = score.max(dim=-1).values
+            self._landmark_score = updated_score
+            self._landmark_count += 1
+            if self.prefix_pair_landmark:
+                self._prefix_pending_slot = slot
+            return
+        score = self._landmark_scores(key)
+        if self.content_threshold is not None:
+            score = torch.where(
+                score >= self.content_threshold,
+                score,
+                torch.full_like(score, -torch.inf),
+            )
+        better = score > self._landmark_score
+        candidate = value.to(self._landmark_value.dtype).unsqueeze(2)
+        self._landmark_value = torch.where(
+            better.unsqueeze(-1), candidate, self._landmark_value
+        )
+        self._landmark_key = torch.where(
+            better.unsqueeze(-1), key.to(self._landmark_key.dtype).unsqueeze(2), self._landmark_key
+        )
+        self._landmark_score = torch.where(
+            better, score, self._landmark_score
+        )
+
+    def _update_landmark_chunk(self, key: Tensor, value: Tensor) -> None:
+        """Vectorized landmark update for an evicted token block."""
+
+        if not self.persistent_landmark or key.shape[2] == 0:
+            return
+        if self.prefix_landmark:
+            take = min(key.shape[2], self.num_codes - self._landmark_count)
+            for index in range(take):
+                self._update_landmark(key[:, :, index], value[:, :, index])
+            # Once the prefix is full, intentionally ignore later events.
+            return
+        self._update_landmark_chunk_max(key, value)
+
+    def _update_landmark_chunk_max(self, key: Tensor, value: Tensor) -> None:
+        """Vectorized max-salience update used after prefix slots are filled."""
+
+        if not self.persistent_landmark or key.shape[2] == 0:
+            return
+        scores = torch.einsum(
+            "bhed,hmd->bhem", key.to(self._numerator.dtype),
+            self.codes.to(device=key.device, dtype=self._numerator.dtype),
+        ) / math.sqrt(self.head_dim)
+        if self.content_threshold is not None:
+            scores = torch.where(
+                scores >= self.content_threshold,
+                scores,
+                torch.full_like(scores, -torch.inf),
+            )
+        best_score, best_index = scores.max(dim=2)
+        value_index = best_index.unsqueeze(-1).expand(
+            -1, -1, -1, self.head_dim
+        )
+        best_value = value.to(self._landmark_value.dtype).gather(2, value_index)
+        best_key = key.to(self._landmark_key.dtype).gather(2, value_index)
+        better = best_score > self._landmark_score
+        self._landmark_value = torch.where(
+            better.unsqueeze(-1), best_value, self._landmark_value
+        )
+        self._landmark_key = torch.where(
+            better.unsqueeze(-1), best_key, self._landmark_key
+        )
+        self._landmark_score = torch.where(
+            better, best_score, self._landmark_score
+        )
+
+    def _landmark_read(self, query: Tensor) -> tuple[Tensor, Tensor]:
+        """Read persistent landmarks and return output plus validity mask."""
+
+        if not self.persistent_landmark:
+            return torch.zeros_like(query), torch.zeros(
+                query.shape[:-1], dtype=torch.bool, device=query.device
+            )
+        if query.ndim == 3:
+            routing_logits = torch.einsum(
+                "bhd,bhmd->bhm", query.to(self._landmark_key.dtype), self._landmark_key
+            ) / math.sqrt(self.head_dim) * self.landmark_temperature
+            routing_equation = "bhm,bhmd->bhd"
+        elif query.ndim == 4:
+            routing_logits = torch.einsum(
+                "bhed,bhmd->bhem", query.to(self._landmark_key.dtype), self._landmark_key
+            ) / math.sqrt(self.head_dim) * self.landmark_temperature
+            routing_equation = "bhem,bhemd->bhed"
+        else:
+            raise ValueError("query must have shape [batch, heads, dim] or [batch, heads, time, dim]")
+        routing_logits = torch.where(
+            torch.isfinite(self._landmark_score).unsqueeze(2)
+            if query.ndim == 4
+            else torch.isfinite(self._landmark_score),
+            routing_logits,
+            # Keep the masked softmax finite when a head has not observed a
+            # threshold-passing event yet.  The corresponding values are
+            # zeroed below, so a uniform probability over invalid slots has
+            # no effect on the response.
+            torch.full_like(routing_logits, -1.0e9),
+        )
+        routing = F.softmax(routing_logits, dim=-1).to(self._landmark_value.dtype)
+        values = torch.where(
+            torch.isfinite(self._landmark_score).unsqueeze(-1),
+            self._landmark_value,
+            torch.zeros_like(self._landmark_value),
+        )
+        response = torch.einsum(routing_equation, routing, values.unsqueeze(2) if query.ndim == 4 else values)
+        valid = torch.isfinite(self._landmark_score).any(dim=-1)
+        if query.ndim == 4:
+            valid = valid.unsqueeze(-1).expand(query.shape[:-1])
+        return response.to(query.dtype), valid
+
+    def _combine_landmark(self, query: Tensor, response: Tensor) -> Tensor:
+        """Blend sticky and exponentially decayed responses when enabled."""
+
+        if not self.persistent_landmark:
+            return response
+        landmark, valid = self._landmark_read(query)
+        # Prefix landmarks are an exact-key fallback, so always trust them in
+        # that mode.  The learned blend remains available for max-salience
+        # landmarks, where mixing can preserve the exponentially averaged
+        # archive's broader context.
+        mix = (
+            torch.ones_like(self.landmark_mix_logits)
+            if self.prefix_landmark
+            else torch.sigmoid(self.landmark_mix_logits)
+        ).to(response.dtype)
+        mix_shape = (1, -1, 1) if response.ndim == 3 else (1, -1, 1, 1)
+        mix = mix.view(*mix_shape)
+        mixed = (1.0 - mix) * response + mix * landmark
+        return torch.where(valid.unsqueeze(-1), mixed, response)
 
     @property
     def state(self) -> QCCState:
@@ -109,7 +570,16 @@ class QCCArchive(nn.Module):
         self._numerator = self._numerator.detach()
         self._denominator = self._denominator.detach()
 
-    def update(self, key: Tensor, value: Tensor) -> None:
+    def update(
+        self,
+        key: Tensor,
+        value: Tensor,
+        *,
+        _include_landmarks: bool = True,
+        exact_key: Optional[Tensor] = None,
+        exact_query: Optional[Tensor] = None,
+        admission_score: Optional[Tensor] = None,
+    ) -> None:
         """Insert one evicted token per batch/head into the archive.
 
         ``key`` and ``value`` have shape ``[batch, heads, head_dim]``. Existing
@@ -117,21 +587,61 @@ class QCCArchive(nn.Module):
         local-window length.
         """
 
+        del exact_key, exact_query, admission_score
         if key.shape != value.shape or key.ndim != 3:
             raise ValueError("key and value must both have shape [batch, heads, head_dim]")
         bsz, heads, dim = key.shape
         if heads != self.num_heads or dim != self.head_dim:
             raise ValueError("key shape does not match archive configuration")
-        if self._numerator.shape[0] != bsz:
+        if self._numerator.shape[0] != bsz or self._numerator.device != key.device:
             self.reset_state(bsz, device=key.device)
 
+        if _include_landmarks:
+            self._update_landmark(key, value)
+
+        if self.lazy_decay and not torch.is_grad_enabled():
+            self._lazy_update(
+                key, value, include_landmarks=False
+            )
+            return
+
         rates = self.decay_rates.to(device=key.device, dtype=self._numerator.dtype)
-        codes = self.codes.to(dtype=self._numerator.dtype)
+        if self.use_triton and not torch.is_grad_enabled() and key.is_cuda:
+            from .triton_kernels import TRITON_AVAILABLE, triton_update_archive
+
+            if TRITON_AVAILABLE:
+                triton_update_archive(
+                    self._numerator,
+                    self._denominator,
+                    key,
+                    value,
+                    self.codes,
+                    rates,
+                    self.window_size,
+                    self.content_threshold,
+                )
+                return
+
+        codes = self.codes.to(device=key.device, dtype=self._numerator.dtype)
         score = torch.einsum("bhd,hmd->bhm", key.to(self._numerator.dtype), codes)
         score = score / math.sqrt(self.head_dim)
         # Clipping bounds the reference implementation. A fused kernel should
         # use per-code log rescaling instead of clipping for higher fidelity.
-        content_weight = torch.exp(score.clamp(min=-20.0, max=10.0))
+        if self.kernel_features:
+            norm_sq = key.to(self._numerator.dtype).square().sum(dim=-1, keepdim=True)
+            content_weight = torch.exp(
+                (score - 0.5 * norm_sq / math.sqrt(self.head_dim)).clamp(
+                    min=-20.0, max=10.0
+                )
+            )
+        else:
+            content_weight = torch.exp(score.clamp(min=-20.0, max=10.0))
+        if self.content_threshold is not None:
+            content_weight = torch.where(
+                score >= self.content_threshold,
+                content_weight,
+                torch.zeros_like(content_weight),
+            )
         age = rates.pow(self.window_size).view(1, 1, 1, self.num_scales)
 
         denominator_decay = rates.view(1, 1, 1, self.num_scales)
@@ -151,23 +661,680 @@ class QCCArchive(nn.Module):
             self._denominator.mul_(denominator_decay).add_(denominator_add)
             self._numerator.mul_(numerator_decay).add_(numerator_add)
 
-    def read(self, query: Tensor) -> Tensor:
+    @torch.no_grad()
+    def _lazy_update(
+        self,
+        key: Tensor,
+        value: Tensor,
+        *,
+        include_landmarks: bool = True,
+    ) -> None:
+        """Update only top-k code slots and apply decay on first touch."""
+
+        assert self.active_codes is not None
+        state_dtype = self._numerator.dtype
+        codes = self.codes.to(device=key.device, dtype=state_dtype)
+        scores = torch.einsum("bhd,hmd->bhm", key.to(state_dtype), codes)
+        if include_landmarks:
+            self._update_landmark(key, value)
+        values, indices = torch.topk(scores, self.active_codes, dim=-1)
+        self._step += 1
+        if (
+            self.use_triton
+            and key.is_cuda
+            and self.active_codes & (self.active_codes - 1) == 0
+        ):
+            from .triton_kernels import TRITON_AVAILABLE, triton_lazy_update_archive
+
+            if TRITON_AVAILABLE:
+                rates = self.decay_rates.to(device=key.device, dtype=state_dtype)
+                triton_lazy_update_archive(
+                    self._numerator,
+                    self._denominator,
+                    self._last_step,
+                    key,
+                    value,
+                    codes,
+                    indices,
+                    rates,
+                    self.window_size,
+                    self._step,
+                    self.content_threshold,
+                )
+                return
+        index_scales = indices.unsqueeze(-1).expand(-1, -1, -1, self.num_scales)
+        old_den = self._denominator.gather(2, index_scales)
+        old_num = self._numerator.gather(
+            2, index_scales.unsqueeze(-1).expand(-1, -1, -1, -1, self.head_dim)
+        )
+        old_step = self._last_step.gather(2, index_scales)
+        delta = (self._step - old_step).clamp_min(0)
+        rates = self.decay_rates.to(device=key.device, dtype=state_dtype)
+        decay = rates.view(1, 1, 1, -1).pow(delta)
+        selected_active = (
+            torch.ones_like(values, dtype=torch.bool)
+            if self.content_threshold is None
+            else (values / math.sqrt(self.head_dim) >= self.content_threshold)
+        )
+        old_den = torch.where(
+            selected_active.unsqueeze(-1), old_den * decay, old_den
+        )
+        old_num = torch.where(
+            selected_active.unsqueeze(-1).unsqueeze(-1),
+            old_num * decay.unsqueeze(-1),
+            old_num,
+        )
+        content_weight = torch.exp(
+            (values / math.sqrt(self.head_dim)).clamp(min=-20.0, max=10.0)
+        )
+        content_weight = torch.where(
+            selected_active, content_weight, torch.zeros_like(content_weight)
+        )
+        age = rates.pow(self.window_size).view(1, 1, 1, -1)
+        denominator_add = content_weight.unsqueeze(-1) * age
+        numerator_add = (
+            denominator_add.unsqueeze(-1)
+            * value.to(state_dtype).unsqueeze(2).unsqueeze(3)
+        )
+        new_den = old_den + denominator_add
+        new_num = old_num + numerator_add
+        self._denominator.scatter_(2, index_scales, new_den)
+        self._numerator.scatter_(
+            2,
+            index_scales.unsqueeze(-1).expand(-1, -1, -1, -1, self.head_dim),
+            new_num,
+        )
+        self._last_step.scatter_(
+            2,
+            index_scales,
+            torch.where(
+                selected_active.unsqueeze(-1),
+                torch.full_like(old_step, self._step),
+                old_step,
+            ),
+        )
+
+    def _parallel_decay_scan(
+        self, additions: Tensor, initial: Tensor, rates: Tensor
+    ) -> tuple[Tensor, Tensor]:
+        """Scan ``state[t] = rates * state[t-1] + additions[t]`` in blocks.
+
+        Rescaling is local to each block, avoiding underflow from ``rate **
+        sequence_length`` while replacing one Python operation per token with
+        one operation per configured ``scan_block_size`` block.
+        """
+
+        events = additions.shape[2]
+        if events == 0:
+            return additions, initial
+        block_size = self.scan_block_size
+        states: list[Tensor] = []
+        state = initial
+        for start in range(0, events, block_size):
+            block = additions[:, :, start : start + block_size]
+            block_length = block.shape[2]
+            powers = rates.view(1, -1).pow(
+                torch.arange(1, block_length + 1, device=additions.device).view(-1, 1)
+            )
+            if additions.ndim == 5:
+                powers_view = powers.view(1, 1, block_length, 1, -1)
+            else:
+                powers_view = powers.view(1, 1, block_length, 1, -1, 1)
+            scaled = block / powers_view
+            cumulative = torch.cumsum(scaled, dim=2)
+            state_view = state.unsqueeze(2)
+            block_states = powers_view * (state_view + cumulative)
+            states.append(block_states)
+            state = block_states[:, :, -1]
+        return torch.cat(states, dim=2), state
+
+    @torch.no_grad()
+    def update_read_chunk(
+        self,
+        key: Tensor,
+        value: Tensor,
+        query: Tensor,
+        *,
+        output: Optional[Tensor] = None,
+        _include_landmarks: bool = True,
+        exact_key: Optional[Tensor] = None,
+        exact_query: Optional[Tensor] = None,
+        quality_query: Optional[Tensor] = None,
+        quality_key_start: int = 0,
+        quality_query_start: int = 0,
+    ) -> Tensor:
+        """Update and read a sequence of evicted tokens with a block scan.
+
+        Inputs are ``[batch, heads, events, head_dim]`` and the returned
+        archive responses have the same leading dimensions as ``query``.
+        ``step_chunk`` calls this only in inference mode; the differentiable
+        reference remains the single-token ``update``/``read`` pair.
+        """
+
+        if key.ndim != 4 or value.shape != key.shape or query.shape != key.shape:
+            raise ValueError("key, value, and query must have shape [batch, heads, events, head_dim]")
+        # ``exact_key``/``exact_query`` are an optional side channel used by
+        # HybridQCCArchive.  The dense recurrent archive deliberately ignores
+        # it, preserving the historical raw-Q/K equation for position-invariant
+        # addressing.
+        del exact_key, exact_query, quality_query, quality_key_start, quality_query_start
+        if output is not None and (output.shape != query.shape or output.device != query.device):
+            raise ValueError("output must match query shape and device")
+        batch, heads, events, dim = key.shape
+        if heads != self.num_heads or dim != self.head_dim:
+            raise ValueError("chunk shapes do not match archive configuration")
+        if events == 0:
+            return query.new_empty(query.shape)
+        if self._numerator.shape[0] != batch or self._numerator.device != key.device:
+            self.reset_state(batch, device=key.device)
+
+        if self.persistent_landmark and _include_landmarks:
+            # The recurrent archive can be scanned as a block, but sticky
+            # landmarks are causal records.  Process the base response once
+            # without landmark blending, then update and read the bounded
+            # landmark table in temporal order.  This keeps chunked inference
+            # identical to the one-token path without expanding state with
+            # sequence length.
+            recurrent = QCCArchive.update_read_chunk(
+                self,
+                key,
+                value,
+                query,
+                output=None,
+                _include_landmarks=False,
+            )
+            outputs = []
+            for index in range(events):
+                self._update_landmark(key[:, :, index], value[:, :, index])
+                outputs.append(
+                    self._combine_landmark(
+                        query[:, :, index], recurrent[:, :, index]
+                    )
+                )
+            result = torch.stack(outputs, dim=2)
+            if output is not None:
+                output.copy_(result)
+                return output
+            return result
+
+        # Update sticky landmarks once per block before dispatching to the
+        # dense/sparse archive kernel.  This side state is tiny (one value per
+        # code) and therefore does not alter the O(1) memory bound.
+        if _include_landmarks:
+            self._update_landmark_chunk(key, value)
+
+        if (
+            self.lazy_decay and self.use_triton and key.is_cuda
+            and not self.kernel_features and not self.global_normalization
+            and self.query_correction_rank == 0
+        ):
+            if self.active_codes is None:
+                raise RuntimeError("lazy_decay requires active_codes")
+            if self.active_codes & (self.active_codes - 1) == 0:
+                from .triton_kernels import (
+                    TRITON_AVAILABLE,
+                    triton_sparse_update_read_archive_chunk,
+                )
+
+                if TRITON_AVAILABLE:
+                    output = triton_sparse_update_read_archive_chunk(
+                        key,
+                        value,
+                        query,
+                        self._numerator,
+                        self._denominator,
+                        self._last_step,
+                        self.codes,
+                        self.mix_logits,
+                        self.decay_rates,
+                        self.window_size,
+                        self._step,
+                        self.active_codes,
+                        block_size=self.scan_block_size,
+                        output=output,
+                        content_threshold=self.content_threshold,
+                    )
+                    self._step += events
+                    combined = (
+                        self._combine_landmark(query, output)
+                        if _include_landmarks
+                        else output
+                    )
+                    if output is not None and combined.data_ptr() != output.data_ptr():
+                        output.copy_(combined)
+                        return output
+                    return combined
+
+        if self.lazy_decay:
+            outputs = []
+            for index in range(events):
+                self._lazy_update(
+                    key[:, :, index],
+                    value[:, :, index],
+                    include_landmarks=_include_landmarks,
+                )
+                outputs.append(
+                    self._lazy_read(
+                        query[:, :, index], include_landmarks=_include_landmarks
+                    )
+                )
+            result = torch.stack(outputs, dim=2)
+            if output is not None:
+                output.copy_(result)
+                return output
+            return result
+
+        # Dense CUDA chunks use a two-launch fused update/read path: one
+        # update and one read launch per event is launch-bound even when the
+        # archive state itself is tiny.  Sparse/lazy archives retain their
+        # dedicated top-k path; CPU and unsupported devices use the block scan.
+        if (
+            self.use_triton
+            and key.is_cuda
+            and self.active_codes is None
+            and not self.kernel_features
+            and self.query_correction_rank == 0
+        ):
+            from .triton_kernels import TRITON_AVAILABLE, triton_update_read_archive_chunk
+
+            if TRITON_AVAILABLE:
+                result = triton_update_read_archive_chunk(
+                    key,
+                    value,
+                    query,
+                    self._numerator,
+                    self._denominator,
+                    self.codes,
+                    self.mix_logits,
+                    self.decay_rates,
+                    self.window_size,
+                    block_size=self.scan_block_size,
+                    output=output,
+                    content_threshold=self.content_threshold,
+                    prepared_mix=self._prepared_triton_mix(key.device),
+                    global_normalization=self.global_normalization,
+                )
+                combined = (
+                    self._combine_landmark(query, result)
+                    if _include_landmarks
+                    else result
+                )
+                if output is not None and combined.data_ptr() != output.data_ptr():
+                    output.copy_(combined)
+                    return output
+                return combined
+
+        # Sparse/lazy CUDA chunks and unsupported devices use the reference
+        # event path or block scan below.
+        if (
+            self.use_triton
+            and key.is_cuda
+            and (
+                self.active_codes is not None
+                or self.kernel_features
+                or self.persistent_landmark
+            )
+        ):
+            outputs = []
+            for index in range(events):
+                if _include_landmarks:
+                    self.update(key[:, :, index], value[:, :, index])
+                    outputs.append(self.read(query[:, :, index]))
+                else:
+                    QCCArchive.update(
+                        self,
+                        key[:, :, index],
+                        value[:, :, index],
+                        _include_landmarks=False,
+                    )
+                    outputs.append(
+                        self._read_states(
+                            query[:, :, index],
+                            self._numerator,
+                            self._denominator,
+                            include_landmarks=False,
+                        )
+                    )
+            result = torch.stack(outputs, dim=2)
+            if output is not None:
+                output.copy_(result)
+                return output
+            return result
+
+        state_dtype = self._numerator.dtype
+        rates = self.decay_rates.to(device=key.device, dtype=state_dtype)
+        codes = self.codes.to(device=key.device, dtype=state_dtype)
+        # Stream the recurrence in bounded blocks.  Materializing all event
+        # states at once costs O(events * num_codes * scales * head_dim), which
+        # defeats long-context serving even though the persistent state itself
+        # is constant-size.  A block is large enough to amortize tensor launch
+        # overhead while keeping the temporary working set bounded.
+        outputs: list[Tensor] = []
+        state_den = self._denominator
+        state_num = self._numerator
+        age = rates.pow(self.window_size)
+        for start in range(0, events, self.scan_block_size):
+            end = min(events, start + self.scan_block_size)
+            block_key = key[:, :, start:end]
+            block_value = value[:, :, start:end]
+            score = torch.einsum("bhed,hmd->bhem", block_key.to(state_dtype), codes)
+            if self.kernel_features:
+                key_norm_sq = block_key.to(state_dtype).square().sum(dim=-1, keepdim=True)
+                content_weight = torch.exp(
+                    (score / math.sqrt(dim) - 0.5 * key_norm_sq / math.sqrt(dim)).clamp(
+                        min=-20.0, max=10.0
+                    )
+                )
+            else:
+                content_weight = torch.exp(
+                    (score / math.sqrt(dim)).clamp(min=-20.0, max=10.0)
+                )
+            if self.content_threshold is not None:
+                content_weight = torch.where(
+                    score / math.sqrt(dim) >= self.content_threshold,
+                    content_weight,
+                    torch.zeros_like(content_weight),
+                )
+            denominator_add = content_weight.unsqueeze(-1) * age.view(1, 1, 1, 1, -1)
+            numerator_add = denominator_add.unsqueeze(-1) * block_value.to(state_dtype).unsqueeze(3).unsqueeze(4)
+            denominator_states, state_den = self._parallel_decay_scan(
+                denominator_add, state_den, rates
+            )
+            numerator_states, state_num = self._parallel_decay_scan(
+                numerator_add, state_num, rates
+            )
+            outputs.append(
+                self._read_states_chunk(
+                    query[:, :, start:end],
+                    numerator_states,
+                    denominator_states,
+                    include_landmarks=_include_landmarks,
+                )
+            )
+        # Final scan slices otherwise retain the whole event block on every layer.
+        self._denominator = state_den.clone()
+        self._numerator = state_num.clone()
+        result = torch.cat(outputs, dim=2)
+        if output is not None:
+            output.copy_(result)
+            return output
+        return result
+
+    def _read_states(
+        self,
+        query: Tensor,
+        numerator: Tensor,
+        denominator: Tensor,
+        *,
+        include_landmarks: bool = True,
+    ) -> Tensor:
+        """Read one or many queries from explicit archive states."""
+
+        codes = self.codes.to(device=query.device, dtype=self._numerator.dtype)
+        routing_logits = torch.einsum(
+            "bhd,hmd->bhm", query.to(codes.dtype), codes
+        ) / math.sqrt(self.head_dim)
+        active = self.active_codes
+        if self.kernel_features:
+            feature = torch.exp(
+                (
+                    routing_logits
+                    - 0.5
+                    * query.to(codes.dtype).square().sum(dim=-1, keepdim=True)
+                    / math.sqrt(self.head_dim)
+                ).clamp(min=-20.0, max=10.0)
+            )
+            mix_logits = self._scale_mix_logits(query)
+            mix = F.softmax(mix_logits, dim=-1).to(numerator.dtype)
+            weighted_num = torch.einsum("bhms,bhmsd->bhmd", mix, numerator)
+            weighted_den = torch.einsum("bhms,bhms->bhm", mix, denominator)
+            total_num = (feature.unsqueeze(-1) * weighted_num).sum(dim=2)
+            total_den = (feature * weighted_den).sum(dim=2).clamp_min(1e-8)
+            response = (total_num / total_den.unsqueeze(-1)).to(query.dtype)
+            return self._finish_read(
+                query, response, include_landmarks=include_landmarks
+            )
+        if self.global_normalization and (
+            active is None or active >= self.num_codes or torch.is_grad_enabled()
+        ):
+            mix_logits = self._scale_mix_logits(query)
+            mix = F.softmax(mix_logits, dim=-1).to(numerator.dtype)
+            weighted_num = torch.einsum("bhms,bhmsd->bhmd", mix, numerator)
+            weighted_den = torch.einsum("bhms,bhms->bhm", mix, denominator)
+            routing = torch.exp(routing_logits.clamp(min=-20.0, max=10.0))
+            total_num = (routing.unsqueeze(-1) * weighted_num).sum(dim=2)
+            total_den = (routing * weighted_den).sum(dim=2).clamp_min(1e-8)
+            response = (total_num / total_den.unsqueeze(-1)).to(query.dtype)
+            return self._finish_read(
+                query, response, include_landmarks=include_landmarks
+            )
+        if active is None or active >= self.num_codes or torch.is_grad_enabled():
+            denom = denominator.clamp_min(1e-8)
+            response = numerator / denom.unsqueeze(-1)
+            mix_logits = self._scale_mix_logits(query)
+            mix = F.softmax(mix_logits, dim=-1).to(response.dtype)
+            response = torch.einsum("bhms,bhmsd->bhmd", mix, response)
+            routing = F.softmax(routing_logits, dim=-1).to(response.dtype)
+            response = torch.einsum("bhm,bhmd->bhd", routing, response).to(query.dtype)
+            return self._finish_read(
+                query, response, include_landmarks=include_landmarks
+            )
+
+        values, indices = torch.topk(routing_logits, active, dim=-1)
+        index_scales = indices.unsqueeze(-1).expand(-1, -1, -1, self.num_scales)
+        selected_num = numerator.gather(
+            2, index_scales.unsqueeze(-1).expand(-1, -1, -1, -1, self.head_dim)
+        )
+        selected_den = denominator.gather(2, index_scales)
+        selected = selected_num / selected_den.clamp_min(1e-8).unsqueeze(-1)
+        mix_logits = self.mix_logits.to(device=query.device, dtype=torch.float32).unsqueeze(0).expand(
+            query.shape[0], -1, -1, -1
+        ).gather(2, index_scales)
+        scale_delta = self._query_scale_delta(query)
+        if scale_delta is not None:
+            mix_logits = mix_logits + scale_delta.unsqueeze(2)
+        mix = F.softmax(mix_logits, dim=-1).to(selected.dtype)
+        selected = (mix.unsqueeze(-1) * selected).sum(dim=3)
+        routing = F.softmax(values, dim=-1).to(selected.dtype)
+        response = (routing.unsqueeze(-1) * selected).sum(dim=2).to(query.dtype)
+        return self._finish_read(
+            query, response, include_landmarks=include_landmarks
+        )
+
+    @torch.no_grad()
+    def _lazy_read(
+        self, query: Tensor, *, include_landmarks: bool = True
+    ) -> Tensor:
+        """Read top-k slots, materializing their elapsed decay on demand."""
+
+        assert self.active_codes is not None
+        state_dtype = self._numerator.dtype
+        codes = self.codes.to(device=query.device, dtype=state_dtype)
+        routing_logits = torch.einsum(
+            "bhd,hmd->bhm", query.to(state_dtype), codes
+        ) / math.sqrt(self.head_dim)
+        values, indices = torch.topk(routing_logits, self.active_codes, dim=-1)
+        if (
+            self.use_triton
+            and query.is_cuda
+            and self.active_codes & (self.active_codes - 1) == 0
+            and self.query_correction_rank == 0
+            and not self.global_normalization
+        ):
+            from .triton_kernels import TRITON_AVAILABLE, triton_sparse_read_archive
+
+            if TRITON_AVAILABLE:
+                result = triton_sparse_read_archive(
+                    query,
+                    self._numerator,
+                    self._denominator,
+                    self._last_step,
+                    codes,
+                    self.mix_logits,
+                    indices,
+                    values,
+                    self.decay_rates,
+                    self._step,
+                )
+                landmark, valid = self._landmark_read(query)
+                mix = torch.sigmoid(self.landmark_mix_logits).to(result.dtype)
+                if include_landmarks:
+                    result = torch.where(
+                        valid.unsqueeze(-1),
+                        (1.0 - mix.view(1, -1, 1)) * result
+                        + mix.view(1, -1, 1) * landmark,
+                        result,
+                    )
+                return self._finish_read(
+                    query, result, include_landmarks=False
+                )
+        index_scales = indices.unsqueeze(-1).expand(-1, -1, -1, self.num_scales)
+        numerator = self._numerator.gather(
+            2, index_scales.unsqueeze(-1).expand(-1, -1, -1, -1, self.head_dim)
+        )
+        denominator = self._denominator.gather(2, index_scales)
+        last_step = self._last_step.gather(2, index_scales)
+        rates = self.decay_rates.to(device=query.device, dtype=state_dtype)
+        delta = (self._step - last_step).clamp_min(0)
+        decay = rates.view(1, 1, 1, -1).pow(delta)
+        numerator = numerator * decay.unsqueeze(-1)
+        denominator = denominator * decay
+        response = numerator / denominator.clamp_min(1e-8).unsqueeze(-1)
+        mix_logits = self._scale_mix_logits(query).gather(2, index_scales)
+        mix = F.softmax(mix_logits, dim=-1).to(response.dtype)
+        if self.global_normalization:
+            weighted_num = (mix.unsqueeze(-1) * numerator).sum(dim=3)
+            weighted_den = (mix * denominator).sum(dim=3)
+            routing = torch.exp(values.clamp(min=-20.0, max=10.0))
+            total_num = (routing.unsqueeze(-1) * weighted_num).sum(dim=2)
+            total_den = (routing * weighted_den).sum(dim=2).clamp_min(1e-8)
+            response = (total_num / total_den.unsqueeze(-1)).to(query.dtype)
+            return self._finish_read(
+                query, response, include_landmarks=include_landmarks
+            )
+        response = (mix.unsqueeze(-1) * response).sum(dim=3)
+        routing = F.softmax(values, dim=-1).to(response.dtype)
+        response = (routing.unsqueeze(-1) * response).sum(dim=2).to(query.dtype)
+        return self._finish_read(
+            query, response, include_landmarks=include_landmarks
+        )
+
+    def _read_states_chunk(
+        self,
+        query: Tensor,
+        numerator: Tensor,
+        denominator: Tensor,
+        *,
+        include_landmarks: bool = True,
+    ) -> Tensor:
+        """Read a query block from explicit archive states."""
+
+        codes = self.codes.to(device=query.device, dtype=self._numerator.dtype)
+        routing_logits = torch.einsum(
+            "bhed,hmd->bhem", query.to(codes.dtype), codes
+        ) / math.sqrt(self.head_dim)
+        active = self.active_codes
+        if self.kernel_features:
+            query_norm_sq = query.to(codes.dtype).square().sum(dim=-1, keepdim=True)
+            feature = torch.exp(
+                (
+                    routing_logits - 0.5 * query_norm_sq / math.sqrt(self.head_dim)
+                ).clamp(min=-20.0, max=10.0)
+            )
+            mix_logits = self._scale_mix_logits(query)
+            mix = F.softmax(mix_logits, dim=-1).to(numerator.dtype)
+            weighted_num = torch.einsum("bhtms,bhtmsd->bhtmd", mix, numerator)
+            weighted_den = torch.einsum("bhtms,bhtms->bhtm", mix, denominator)
+            total_num = (feature.unsqueeze(-1) * weighted_num).sum(dim=3)
+            total_den = (feature * weighted_den).sum(dim=3).clamp_min(1e-8)
+            response = (total_num / total_den.unsqueeze(-1)).to(query.dtype)
+            return self._finish_read(
+                query, response, include_landmarks=include_landmarks
+            )
+        if self.global_normalization and (
+            active is None or active >= self.num_codes or torch.is_grad_enabled()
+        ):
+            mix_logits = self._scale_mix_logits(query)
+            mix = F.softmax(mix_logits, dim=-1).to(numerator.dtype)
+            weighted_num = torch.einsum("bhtms,bhtmsd->bhtmd", mix, numerator)
+            weighted_den = torch.einsum("bhtms,bhtms->bhtm", mix, denominator)
+            routing = torch.exp(routing_logits.clamp(min=-20.0, max=10.0))
+            total_num = (routing.unsqueeze(-1) * weighted_num).sum(dim=3)
+            total_den = (routing * weighted_den).sum(dim=3).clamp_min(1e-8)
+            response = (total_num / total_den.unsqueeze(-1)).to(query.dtype)
+            return self._finish_read(
+                query, response, include_landmarks=include_landmarks
+            )
+        if active is None or active >= self.num_codes:
+            denom = denominator.clamp_min(1e-8)
+            response = numerator / denom.unsqueeze(-1)
+            mix_logits = self._scale_mix_logits(query)
+            mix = F.softmax(mix_logits, dim=-1).to(response.dtype)
+            response = torch.einsum("bhtms,bhtmsd->bhtmd", mix, response)
+            routing = F.softmax(routing_logits, dim=-1).to(response.dtype)
+            response = torch.einsum("bhem,bhemd->bhed", routing, response).to(query.dtype)
+            return self._finish_read(
+                query, response, include_landmarks=include_landmarks
+            )
+
+        values, indices = torch.topk(routing_logits, active, dim=-1)
+        index_scales = indices.unsqueeze(-1).expand(-1, -1, -1, -1, self.num_scales)
+        selected_num = numerator.gather(
+            3, index_scales.unsqueeze(-1).expand(-1, -1, -1, -1, -1, self.head_dim)
+        )
+        selected_den = denominator.gather(3, index_scales)
+        selected = selected_num / selected_den.clamp_min(1e-8).unsqueeze(-1)
+        mix_logits = self.mix_logits.to(device=query.device, dtype=torch.float32).unsqueeze(0).unsqueeze(2).expand(
+            query.shape[0], -1, query.shape[2], -1, -1
+        ).gather(3, index_scales)
+        scale_delta = self._query_scale_delta(query)
+        if scale_delta is not None:
+            mix_logits = mix_logits + scale_delta.unsqueeze(3)
+        mix = F.softmax(mix_logits, dim=-1).to(selected.dtype)
+        selected = (mix.unsqueeze(-1) * selected).sum(dim=4)
+        routing = F.softmax(values, dim=-1).to(selected.dtype)
+        response = (routing.unsqueeze(-1) * selected).sum(dim=3).to(query.dtype)
+        return self._finish_read(
+            query, response, include_landmarks=include_landmarks
+        )
+
+    def read(self, query: Tensor, *, exact_query: Optional[Tensor] = None) -> Tensor:
         """Read archive response for queries of shape ``[batch, heads, head_dim]``."""
 
         if query.ndim != 3 or query.shape[1:] != (self.num_heads, self.head_dim):
             raise ValueError("query must have shape [batch, heads, head_dim]")
-        if query.shape[0] != self._numerator.shape[0]:
+        if (
+            query.shape[0] != self._numerator.shape[0]
+            or query.device != self._numerator.device
+        ):
             self.reset_state(query.shape[0], device=query.device)
 
-        denom = self._denominator.clamp_min(1e-8)
-        response = self._numerator / denom.unsqueeze(-1)
-        mix = F.softmax(self.mix_logits, dim=-1).to(response.dtype)
-        response = torch.einsum("hmj,bhmjd->bhmd", mix, response)
-        routing = torch.einsum(
-            "bhd,hmd->bhm", query.to(self.codes.dtype), self.codes
-        ) / math.sqrt(self.head_dim)
-        routing = F.softmax(routing, dim=-1).to(response.dtype)
-        return torch.einsum("bhm,bhmd->bhd", routing, response)
+        if self.lazy_decay and not torch.is_grad_enabled():
+            return self._lazy_read(query)
+
+        if (
+            self.active_codes is None
+            and self.use_triton
+            and not torch.is_grad_enabled()
+            and query.is_cuda
+            and not self.kernel_features
+            and self.query_correction_rank == 0
+        ):
+            from .triton_kernels import TRITON_AVAILABLE, triton_read_archive
+
+            if TRITON_AVAILABLE:
+                result = triton_read_archive(
+                    query,
+                    self._numerator,
+                    self._denominator,
+                    self.codes,
+                    self.mix_logits,
+                    prepared_mix=self._prepared_triton_mix(query.device),
+                    global_normalization=self.global_normalization,
+                )
+                return self._combine_landmark(query, result)
+
+        return self._read_states(query, self._numerator, self._denominator)
 
 
 class QCCSelfAttention(nn.Module):
@@ -181,66 +1348,2173 @@ class QCCSelfAttention(nn.Module):
         num_codes: int = 16,
         num_scales: int = 4,
         window_size: int = 128,
+        attention_sink_size: int = 0,
         use_archive: bool = True,
+        use_triton: bool = True,
+        active_codes: Optional[int] = None,
+        lazy_decay: bool = False,
+        archive_read_stride: int = 1,
+        archive_query_cosine_threshold: Optional[float] = None,
+        archive_norm_gating: bool = False,
+        archive_scan_block_size: int = 1024,
+        archive_content_threshold: Optional[float] = None,
+        archive_persistent_landmark: bool = False,
+        archive_prefix_landmark: bool = False,
+        archive_prefix_pair_landmark: bool = False,
+        archive_landmark_temperature: float = 1.0,
+        archive_kernel_features: bool = False,
+        archive_global_normalization: bool = True,
+        archive_query_correction_rank: int = 8,
+        active_query_correction: bool = False,
+        archive_lexical_landmark: bool = False,
+        archive_position_invariant: bool = False,
+        local_attention_backend: str = "sdpa",
+        rope_theta: Optional[float] = None,
+        max_position_embeddings: int = 4096,
+        decay_rates: Optional[tuple[float, ...]] = None,
+        gate_bias_init: float = 0.0,
+        rotary_dim: Optional[int] = None,
+        rope_inv_freq: Optional[Tensor] = None,
+        rope_inv_freq_long: Optional[Tensor] = None,
+        rope_original_max_position_embeddings: Optional[int] = None,
+        rope_attention_scaling: float = 1.0,
     ) -> None:
         super().__init__()
         if d_model % num_heads:
             raise ValueError("d_model must be divisible by num_heads")
         if num_scales <= 0:
             raise ValueError("num_scales must be positive")
+        if archive_read_stride <= 0:
+            raise ValueError("archive_read_stride must be positive")
+        if archive_query_cosine_threshold is not None and not -1.0 <= archive_query_cosine_threshold <= 1.0:
+            raise ValueError("archive_query_cosine_threshold must be in [-1, 1]")
+        if local_attention_backend not in {"sdpa", "eager"}:
+            raise ValueError("local_attention_backend must be 'sdpa' or 'eager'")
+        if rope_theta is not None and rope_theta <= 0:
+            raise ValueError("rope_theta must be positive")
+        if max_position_embeddings <= 0:
+            raise ValueError("max_position_embeddings must be positive")
+        if not math.isfinite(gate_bias_init):
+            raise ValueError("gate_bias_init must be finite")
+        if rotary_dim is not None and rotary_dim <= 0:
+            raise ValueError("rotary_dim must be positive")
+        if not math.isfinite(rope_attention_scaling) or rope_attention_scaling <= 0:
+            raise ValueError("rope_attention_scaling must be positive and finite")
+        if decay_rates is not None and len(decay_rates) != num_scales:
+            raise ValueError("decay_rates must contain exactly num_scales values")
         self.d_model = d_model
         self.num_heads = num_heads
         self.head_dim = d_model // num_heads
+        if rotary_dim is not None and rotary_dim > self.head_dim:
+            raise ValueError("rotary_dim must be no larger than head_dim")
         self.window_size = window_size
+        self.attention_sink_size = attention_sink_size
+        self.max_position_embeddings = int(max_position_embeddings)
+        if not 0 <= attention_sink_size <= window_size:
+            raise ValueError("attention_sink_size must be between zero and window_size")
+        self._sink_keys: Optional[Tensor] = None
+        self._sink_values: Optional[Tensor] = None
         self.use_archive = use_archive
+        # Retain the dispatch policy on the attention module so optional
+        # accelerator kernels can be selected at serving time without
+        # changing the public constructor or consulting child modules.
+        self.use_triton = use_triton
+        self.rope_theta = rope_theta
+        configured_rotary_dim = rotary_dim or (2 * (self.head_dim // 2))
+        half_dim = configured_rotary_dim // 2
+        if rope_inv_freq is None:
+            rope_inv_freq = (
+                rope_theta ** (-torch.arange(half_dim, dtype=torch.float32) / max(half_dim, 1))
+                if rope_theta is not None
+                else torch.empty(0, dtype=torch.float32)
+            )
+        if rope_inv_freq.numel() and int(rope_inv_freq.numel()) * 2 != configured_rotary_dim:
+            raise ValueError("rope_inv_freq length does not match rotary_dim")
+        self._rotary_dim = configured_rotary_dim
+        self._rope_original_max_position_embeddings = rope_original_max_position_embeddings
+        self._rope_attention_scaling = float(rope_attention_scaling)
+        self.register_buffer("rope_inv_freq", rope_inv_freq.detach().float(), persistent=False)
+        long_freq = rope_inv_freq_long
+        if long_freq is None:
+            long_freq = torch.empty(0, dtype=torch.float32)
+        if long_freq.numel() and long_freq.numel() != rope_inv_freq.numel():
+            raise ValueError("long RoPE frequency length must match short RoPE frequency length")
+        self.register_buffer("rope_inv_freq_long", long_freq.detach().float(), persistent=False)
         self.q_proj = nn.Linear(d_model, d_model)
         self.k_proj = nn.Linear(d_model, d_model)
         self.v_proj = nn.Linear(d_model, d_model)
         self.out_proj = nn.Linear(d_model, d_model)
         self.gate = nn.Linear(d_model, num_heads)
-        # Log-spaced rates cover short, medium, and long historical scales.
-        rates = tuple(1.0 - 10.0 ** (-x) for x in torch.linspace(1.3, 3.5, num_scales).tolist())
+        # The gate is a newly introduced retrofit parameter.  Random weights
+        # would inject an unrelated, token-dependent local/archive mixture
+        # before calibration and can dominate the approximation error on a
+        # pretrained model.  Start from a fixed bias-only mixture; calibration
+        # can still learn the full gate later.
+        nn.init.zeros_(self.gate.weight)
+        nn.init.constant_(self.gate.bias, gate_bias_init)
+        # Choose half-lives from the exact window to the configured context so
+        # a 1M-token model does not silently forget everything after a few
+        # thousand updates.  Explicit rates remain available for ablations.
+        if decay_rates is None:
+            min_horizon = max(1.0, float(window_size))
+            max_horizon = max(min_horizon, float(max_position_embeddings))
+            horizons = torch.logspace(
+                math.log10(min_horizon), math.log10(max_horizon), num_scales
+            )
+            rates = tuple(torch.exp(-math.log(2.0) / horizons).tolist())
+        else:
+            rates = decay_rates
         self.archive = QCCArchive(
-            num_heads, self.head_dim, num_codes, rates, window_size
+            num_heads,
+            self.head_dim,
+            num_codes,
+            rates,
+            window_size,
+            use_triton=use_triton,
+            active_codes=active_codes,
+            lazy_decay=lazy_decay,
+            scan_block_size=archive_scan_block_size,
+            content_threshold=archive_content_threshold,
+            persistent_landmark=archive_persistent_landmark,
+            prefix_landmark=archive_prefix_landmark,
+            prefix_pair_landmark=archive_prefix_pair_landmark,
+            landmark_temperature=archive_landmark_temperature,
+            kernel_features=archive_kernel_features,
+            global_normalization=archive_global_normalization,
+            query_correction_rank=archive_query_correction_rank,
         )
+        self.active_query_correction = bool(active_query_correction)
+        self.archive_read_stride = archive_read_stride
+        self.archive_lexical_landmark = archive_lexical_landmark
+        # RoPE is required for exact local attention, but an archive response
+        # that mixes keys carrying different absolute phases is not a stable
+        # content address.  This opt-in path keeps local q/k rotary while
+        # feeding unrotated projections to the long-range archive.
+        self.archive_position_invariant = archive_position_invariant
+        # ``eager`` mirrors Hugging Face's reference attention equation
+        # (matmul -> scale -> fp32 softmax -> value matmul) and is useful for
+        # quality-sensitive checks where a one-bit top-1 change matters.  ``sdpa`` stays
+        # the default for serving and fused accelerator kernels.
+        self.local_attention_backend = local_attention_backend
+        # Optional adaptive remote-read suppression. ``None`` keeps exact
+        # archive reads; otherwise a read is skipped when the new query is
+        # cosine-close to the previous refreshed query. The state is still
+        # updated every token, so this knob changes only read freshness.
+        self.archive_query_cosine_threshold = archive_query_cosine_threshold
+        self.archive_norm_gating = bool(archive_norm_gating)
+        self._local_keys: list[Tensor] = []
+        self._local_values: list[Tensor] = []
+        self._local_key_cache: Optional[Tensor] = None
+        self._local_value_cache: Optional[Tensor] = None
+        # A hidden-state writer scores a KV at birth.  Keep those scores in
+        # the same chronological ring as the local K/V so eviction forwards
+        # the score for the evicted item, rather than the current token.
+        self._local_score_cache: Optional[Tensor] = None
+        # Optional diagnostic/deployment policy: selected query heads retain
+        # their original K/V history up to the configured context bound. The
+        # remaining heads continue through the bounded archive path.
+        self.full_history_heads: tuple[int, ...] = ()
+        self.full_history_scope = "both"
+        self._full_history_key_cache: Optional[Tensor] = None
+        self._full_history_value_cache: Optional[Tensor] = None
+        # Position-free lexical keys/values are kept in a separate bounded
+        # ring when ``archive_lexical_landmark`` is enabled.  Initialize the
+        # fields eagerly so introspection and checkpoint-free unit tests see a
+        # stable object surface before the first decode call.
+        self._lexical_key_cache: Optional[Tensor] = None
+        self._lexical_value_cache: Optional[Tensor] = None
+        self._archive_key_cache: Optional[Tensor] = None
+        self._chunk_key_scratch: Optional[Tensor] = None
+        self._chunk_value_scratch: Optional[Tensor] = None
+        self._chunk_score_scratch: Optional[Tensor] = None
+        self._chunk_lexical_key_scratch: Optional[Tensor] = None
+        self._chunk_lexical_value_scratch: Optional[Tensor] = None
+        self._chunk_archive_key_scratch: Optional[Tensor] = None
+        self._full_key_cache: Optional[Tensor] = None
+        self._full_value_cache: Optional[Tensor] = None
+        self._cache_start = 0
+        self._cache_length = 0
+        self._seen_tokens = 0
+        self._archive_read_cache: Optional[Tensor] = None
+        self._archive_query_cache: Optional[Tensor] = None
+        self._fused_projection_weight: Optional[Tensor] = None
+        self._fused_projection_bias: Optional[Tensor] = None
+        self._fused_projection_versions: Optional[tuple[int, ...]] = None
+
+    def _mix_local_archive(self, local: Tensor, archive: Tensor, gate: Tensor,
+                           local_log_partition: Optional[Tensor] = None) -> Tensor:
+        """Mix local and archived responses, optionally suppressing bad scales.
+
+        Archive statistics can have a very different norm from the exact local
+        attention response even when the learned gate is unchanged.  When
+        enabled, a parameter-free geometric norm agreement factor limits the
+        remote contribution; this is causal and keeps the bounded state/API
+        unchanged.  The default is disabled for exact historical behavior.
+        """
+        if bool(getattr(self.archive, "exact_attention", False)):
+            remote_partition = self.archive._last_exact_log_partition
+            if remote_partition is None or local_log_partition is None:
+                # Shadow-only prefill populates the exact tier but returns the
+                # recurrent response. It has no local partition to combine
+                # with an exact remote mass yet, so keep the regular gate.
+                if local_log_partition is None:
+                    return gate * local + (1.0 - gate) * archive
+                return local
+            weight = torch.sigmoid(remote_partition - local_log_partition).unsqueeze(-1).to(local.dtype)
+            return (1 - weight) * local + weight * archive
+        if not self.archive_norm_gating:
+            return gate * local + (1.0 - gate) * archive
+        local_norm = local.float().square().mean(dim=-1, keepdim=True).sqrt()
+        archive_norm = archive.float().square().mean(dim=-1, keepdim=True).sqrt()
+        agreement = torch.minimum(
+            local_norm / archive_norm.clamp_min(1e-6),
+            archive_norm / local_norm.clamp_min(1e-6),
+        ).clamp(0.0, 1.0).to(local.dtype)
+        remote_weight = (1.0 - gate) * agreement
+        return (1.0 - remote_weight) * local + remote_weight * archive
+
+    def _project_qkv_gate(self, hidden: Tensor) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+        """Project Q/K/V and the mixing gate with one GEMM.
+
+        The public/state-dict surface deliberately keeps the four historical
+        ``Linear`` modules, so existing checkpoints remain loadable.  At
+        inference/training time their weights are concatenated into one linear
+        operation; on small per-token decode this removes three launch and
+        dispatcher round trips that otherwise dominate the bounded-memory
+        archive work.
+        """
+        # Phi3/Phi4-style attention keeps Q/K/V in one fused projection. The
+        # retrofit exposes three lightweight views, but calls the source GEMM
+        # once so this compatibility path does not triple projection cost.
+        fused_qkv = getattr(self.q_proj, "project_qkv", None)
+        if (
+            callable(fused_qkv)
+            and getattr(self.k_proj, "_base", None) is getattr(self.q_proj, "_base", None)
+            and getattr(self.v_proj, "_base", None) is getattr(self.q_proj, "_base", None)
+        ):
+            q, k, v = fused_qkv(hidden)
+            kv_heads = int(getattr(self.k_proj, "_kv_heads", self.num_heads))
+            if k.shape[-1] != self.d_model:
+                head_dim = self.d_model // self.num_heads
+                k = k.view(*k.shape[:-1], kv_heads, head_dim).repeat_interleave(
+                    self.num_heads // kv_heads, dim=-2
+                ).reshape(*k.shape[:-1], self.d_model)
+                v = v.view(*v.shape[:-1], kv_heads, head_dim).repeat_interleave(
+                    self.num_heads // kv_heads, dim=-2
+                ).reshape(*v.shape[:-1], self.d_model)
+            gate_weight = getattr(self.gate, "weight", None)
+            if isinstance(gate_weight, Tensor) and gate_weight.dtype != hidden.dtype:
+                gate = self.gate(hidden.to(dtype=gate_weight.dtype)).to(hidden.dtype)
+            else:
+                gate = self.gate(hidden)
+            return q, k, v, gate
+
+        # Retrofit adapters may expose an explicit GQA/MQA expansion module
+        # for K/V.  Fuse the *raw* Q/K/V projections before the explicit
+        # expansion so a normal Llama/Qwen GQA layer still uses one GEMM.
+        # Quantized projection classes intentionally stay on the fallback
+        # path because their custom dequantization must own the operation.
+        raw_k_proj = getattr(self.k_proj, "base", self.k_proj)
+        raw_v_proj = getattr(self.v_proj, "base", self.v_proj)
+        expanded_kv = raw_k_proj is not self.k_proj or raw_v_proj is not self.v_proj
+        projection_sources = (self.q_proj, raw_k_proj, raw_v_proj, self.gate)
+
+        def supports_fused_linear(projection: nn.Module) -> bool:
+            """Return whether a projection exposes a safe dense weight view.
+
+            bitsandbytes ``Linear4bit`` subclasses ``nn.Linear`` but its
+            ``weight`` is packed metadata rather than a ``[out, in]`` matrix.
+            Concatenating it with the other projections corrupts the fused GEMM
+            shape and defeats the quantized kernel.  Quantized modules must own
+            their individual forward calls instead.
+            """
+
+            if not isinstance(projection, nn.Linear):
+                return False
+            projection_name = projection.__class__.__name__.lower()
+            if "4bit" in projection_name or "8bit" in projection_name:
+                return False
+            if getattr(projection, "is_quantized", False) or hasattr(
+                projection, "quant_state"
+            ):
+                return False
+            weight = getattr(projection, "weight", None)
+            weight_name = type(weight).__name__.lower()
+            weight_module = type(weight).__module__.lower()
+            if "4bit" in weight_name or "8bit" in weight_name:
+                return False
+            if "bitsandbytes" in weight_module or hasattr(weight, "quant_state"):
+                return False
+            module_name = projection.__class__.__module__.lower()
+            return "bitsandbytes" not in module_name
+
+        can_fuse = all(supports_fused_linear(projection) for projection in projection_sources)
+        if not can_fuse:
+            q = self.q_proj(hidden)
+            k = self.k_proj(hidden)
+            v = self.v_proj(hidden)
+            gate_weight = getattr(self.gate, "weight", None)
+            if isinstance(gate_weight, Tensor) and gate_weight.dtype != hidden.dtype:
+                gate = self.gate(hidden.to(dtype=gate_weight.dtype)).to(hidden.dtype)
+            else:
+                gate = self.gate(hidden)
+            if k.shape[-1] != self.d_model or v.shape[-1] != self.d_model:
+                raise ValueError(
+                    "retrofit K/V projections must expand to hidden size; "
+                    "provide an explicit GQA/MQA policy"
+                )
+            return q, k, v, gate
+
+        versions = tuple(
+            parameter._version if parameter is not None else -1
+            for source in projection_sources
+            for parameter in (source.weight, source.bias)
+        )
+        use_cache = not torch.is_grad_enabled() and not self.training
+        if (
+            use_cache
+            and self._fused_projection_weight is not None
+            and self._fused_projection_bias is not None
+            and self._fused_projection_versions == versions
+            and self._fused_projection_weight.device == hidden.device
+            and self._fused_projection_weight.dtype == hidden.dtype
+        ):
+            weight = self._fused_projection_weight
+            bias = self._fused_projection_bias
+        else:
+            projection_dtype = hidden.dtype
+            weight = torch.cat(
+                tuple(
+                    source.weight.to(device=hidden.device, dtype=projection_dtype)
+                    for source in projection_sources
+                ),
+                dim=0,
+            )
+            # Hugging Face Llama/Qwen checkpoints commonly disable projection
+            # biases, while the reference QCC gate keeps one.  Materialize
+            # zeros for bias-less projections so the fused retrofit path
+            # remains compatible without changing the loaded weights.
+            bias_parts = []
+            for projection in projection_sources:
+                if projection.bias is None:
+                    bias_parts.append(
+                        torch.zeros(
+                            projection.out_features,
+                            device=hidden.device,
+                            dtype=projection_dtype,
+                        )
+                    )
+                else:
+                    bias_parts.append(
+                        projection.bias.to(device=hidden.device, dtype=projection_dtype)
+                    )
+            bias = torch.cat(tuple(bias_parts), dim=0)
+            if use_cache:
+                self._fused_projection_weight = weight
+                self._fused_projection_bias = bias
+                self._fused_projection_versions = versions
+        projected = F.linear(hidden, weight, bias)
+        q_width = self.d_model
+        k_width = int(raw_k_proj.out_features)
+        v_width = int(raw_v_proj.out_features)
+        q, k, v, gate = projected.split(
+            (q_width, k_width, v_width, self.num_heads), dim=-1
+        )
+        if expanded_kv:
+            kv_heads = int(getattr(self.k_proj, "kv_heads", 0))
+            head_dim = int(getattr(self.k_proj, "head_dim", 0))
+            if (
+                kv_heads <= 0
+                or head_dim <= 0
+                or k_width != kv_heads * head_dim
+                or v_width != kv_heads * head_dim
+                or self.num_heads % kv_heads
+            ):
+                raise ValueError("invalid grouped-query projection geometry")
+            repeat = self.num_heads // kv_heads
+            k = k.view(*k.shape[:-1], kv_heads, head_dim).repeat_interleave(
+                repeat, dim=-2
+            ).reshape(*k.shape[:-1], self.d_model)
+            v = v.view(*v.shape[:-1], kv_heads, head_dim).repeat_interleave(
+                repeat, dim=-2
+            ).reshape(*v.shape[:-1], self.d_model)
+        return q, k, v, gate
+
+    def _apply_active_query_correction(self, query: Tensor) -> Tensor:
+        """Apply the optional low-rank correction to the live attention query.
+
+        The archive-level residual historically corrected only a returned
+        archive value.  This opt-in path changes the actual Q used by local,
+        archive, and exact attention, which makes its calibration target match
+        the deployed computation.  Zero-initialized output factors preserve
+        the pretrained path before calibration.
+        """
+
+        if not self.active_query_correction or not self.archive.query_correction_rank:
+            return query
+        query_f = query.float()
+        value_v = self.archive.query_correction_v.to(
+            device=query.device, dtype=torch.float32
+        )
+        value_u = self.archive.query_correction_u.to(
+            device=query.device, dtype=torch.float32
+        )
+        if query.ndim == 3:
+            latent = torch.einsum("bhd,hdr->bhr", query_f, value_v)
+            delta = torch.einsum("bhr,hrd->bhd", latent, value_u)
+        elif query.ndim == 4:
+            latent = torch.einsum("bhtd,hdr->bhtr", query_f, value_v)
+            delta = torch.einsum("bhtr,hrd->bhtd", latent, value_u)
+        else:
+            raise ValueError("query must have rank 3 or 4")
+        return query + delta.to(query.dtype)
+
+    def _local_window_attention(
+        self, query: Tensor, keys: Tensor, values: Tensor, *, old_length: int
+    ) -> Tensor:
+        """Exact causal local attention over a bounded window.
+
+        Unlike SDPA over ``old_length + chunk_length`` keys, this path unfolds
+        only the fixed window and evaluates all queries in one batched set of
+        tensor operations.  It is used for CUDA chunks where hundreds of small
+        SDPA launches become the TTFT bottleneck; memory is O(chunk * window)
+        and never depends on historical context.
+        """
+
+        length = query.shape[2]
+        window = min(self.window_size, keys.shape[2])
+        key_pad = F.pad(keys.transpose(-1, -2), (window - 1, 0))
+        value_pad = F.pad(values.transpose(-1, -2), (window - 1, 0))
+        key_windows = key_pad.unfold(-1, window, 1).permute(0, 1, 3, 4, 2)
+        value_windows = value_pad.unfold(-1, window, 1).permute(0, 1, 3, 4, 2)
+        positions = old_length + torch.arange(length, device=query.device)
+        key_windows = key_windows[:, :, positions]
+        value_windows = value_windows[:, :, positions]
+        # Quantized HF projections can produce large fp16 Q/K activations.
+        # Accumulate the dot product in fp32 so a finite attention score does
+        # not overflow before softmax (the fused SDPA path already does this
+        # internally on supported accelerators).
+        logits = torch.einsum(
+            "bhtd,bhtwd->bhtw", query.float(), key_windows.float()
+        )
+        logits = logits / math.sqrt(self.head_dim)
+        valid = torch.arange(window, device=query.device)[None, :] >= (
+            window - 1 - positions[:, None]
+        )
+        logits = logits.masked_fill(~valid[None, None], torch.finfo(logits.dtype).min)
+        probabilities = F.softmax(logits, dim=-1).to(value_windows.dtype)
+        return torch.einsum(
+            "bhtw,bhtwd->bhtd", probabilities, value_windows
+        )
+
+    def _local_sdpa_attention(
+        self, query: Tensor, keys: Tensor, values: Tensor
+    ) -> Tensor:
+        """Exact bounded causal attention using the fused SDPA causal mask.
+
+        ``keys`` contains the previous ``window_size - 1`` tokens followed by
+        the current block.  A rectangular (bottom-right) causal mask is needed
+        because the query block is shorter than that key slice.  Newer
+        PyTorch versions expose this mask as a symbolic ``CausalBias``; the
+        small boolean fallback keeps older versions correct.  Because the key
+        slice is already bounded to the local window, this is algebraically
+        identical to the explicit sliding-window mask while allowing fused
+        SDPA kernels to run when the backend supports the bias.
+        """
+
+        query_len, key_len = query.shape[-2], keys.shape[-2]
+        try:
+            from torch.nn.attention.bias import causal_lower_right
+
+            mask = causal_lower_right(query_len, key_len)
+        except (ImportError, AttributeError):  # PyTorch < 2.5
+            key_positions = torch.arange(key_len, device=query.device)
+            query_positions = (key_len - query_len) + torch.arange(
+                query_len, device=query.device
+            )
+            mask = key_positions[None, :] <= query_positions[:, None]
+        return _scaled_dot_product_attention(
+            query, keys, values, attn_mask=mask, dropout_p=0.0
+        )
+
+    def _local_eager_attention(
+        self, query: Tensor, keys: Tensor, values: Tensor, mask: Tensor
+    ) -> Tensor:
+        """Reference HF attention equation over a bounded causal key slice."""
+
+        # Match HF eager attention exactly: the projection dtype is retained
+        # for the QK matmul and scale, then only the softmax is accumulated in
+        # fp32.  Casting Q/K before matmul changes reduction rounding enough
+        # to flip close vocabulary logits after many decoder layers.
+        logits = torch.matmul(query, keys.transpose(-2, -1))
+        logits = logits * (self.head_dim ** -0.5)
+        logits = logits.masked_fill(~mask, torch.finfo(logits.dtype).min)
+        probabilities = F.softmax(logits, dim=-1, dtype=torch.float32).to(values.dtype)
+        return torch.matmul(probabilities, values)
+
+    def _lexical_archive_triplet(
+        self, archive_hint: Optional[Tensor]
+    ) -> tuple[Optional[Tensor], Optional[Tensor], Optional[Tensor]]:
+        """Build position-free archive q/k/v heads from token embeddings."""
+        if not self.archive_lexical_landmark or archive_hint is None:
+            return None, None, None
+        if archive_hint.ndim != 3 or archive_hint.shape[-1] != self.d_model:
+            raise ValueError("archive_hint must have shape [batch, sequence, d_model]")
+        heads = self._split_heads(archive_hint)
+        return heads, heads, heads
+
+    def _apply_rope(
+        self,
+        query: Tensor,
+        key: Tensor,
+        positions: Optional[Tensor],
+        position_embeddings: Optional[tuple[Tensor, Tensor]] = None,
+        sequence_length: Optional[int] = None,
+    ) -> tuple[Tensor, Tensor]:
+        """Apply rotary phases to q/k for an optional relative-position path."""
+
+        if query.shape[-1] < 2:
+            return query, key
+        external_angles = position_embeddings is not None
+        if (
+            not external_angles
+            and (self.rope_theta is None or self.rope_inv_freq.numel() == 0)
+        ):
+            return query, key
+        if external_angles:
+            if (
+                not isinstance(position_embeddings, (tuple, list))
+                or len(position_embeddings) != 2
+                or not all(isinstance(angle, Tensor) for angle in position_embeddings)
+            ):
+                raise ValueError("position_embeddings must be a (cos, sin) tensor pair")
+            cos, sin = (angle.to(device=query.device) for angle in position_embeddings)
+            if cos.shape != sin.shape:
+                raise ValueError("position_embeddings cos/sin shapes must match")
+            if query.ndim == 4:
+                if cos.ndim == 2:
+                    cos = cos.unsqueeze(0).unsqueeze(1)
+                    sin = sin.unsqueeze(0).unsqueeze(1)
+                elif cos.ndim == 3:
+                    cos = cos.unsqueeze(1)
+                    sin = sin.unsqueeze(1)
+                elif cos.ndim != 4:
+                    raise ValueError("rank-4 q/k require position embeddings with rank 2-4")
+                if cos.shape[1] != 1:
+                    if cos.shape[2] == 1:
+                        cos = cos.transpose(1, 2)
+                        sin = sin.transpose(1, 2)
+                    else:
+                        raise ValueError("position embeddings have an unsupported head shape")
+                if cos.shape[0] not in (1, query.shape[0]):
+                    raise ValueError("position embeddings batch dimension must match q/k")
+                if cos.shape[2] != query.shape[2]:
+                    raise ValueError("position embeddings sequence dimension must match q/k")
+                cos = cos.expand(query.shape[0], -1, -1, -1)
+                sin = sin.expand(query.shape[0], -1, -1, -1)
+            elif query.ndim == 3:
+                if cos.ndim == 2:
+                    cos = cos.unsqueeze(1)
+                    sin = sin.unsqueeze(1)
+                elif cos.ndim == 3 and cos.shape[0] == 1 and cos.shape[1] == query.shape[0]:
+                    cos = cos.transpose(0, 1)
+                    sin = sin.transpose(0, 1)
+                elif cos.ndim != 3:
+                    raise ValueError("rank-3 q/k require position embeddings with rank 2-3")
+                if cos.shape[0] not in (1, query.shape[0]):
+                    raise ValueError("position embeddings batch dimension must match q/k")
+                if cos.shape[1] not in (1, query.shape[1]):
+                    raise ValueError("position embeddings head dimension must be singleton")
+                cos = cos.expand(query.shape[0], -1, -1)
+                sin = sin.expand(query.shape[0], -1, -1)
+            else:
+                raise ValueError("q/k tensors must have rank 3 or 4")
+            rotary_dim = int(cos.shape[-1])
+            if rotary_dim % 2:
+                raise ValueError("position embeddings rotary width must be even")
+            if rotary_dim > query.shape[-1]:
+                raise ValueError("position embeddings rotary width exceeds head dimension")
+            cos_full = cos.to(dtype=query.dtype)
+            sin_full = sin.to(dtype=query.dtype)
+
+            def rotate_external(tensor: Tensor) -> Tensor:
+                prefix = tensor[..., :rotary_dim]
+                suffix = tensor[..., rotary_dim:]
+                half = prefix.shape[-1] // 2
+                rotate_half = torch.cat((-prefix[..., half:], prefix[..., :half]), dim=-1)
+                return torch.cat((prefix * cos_full + rotate_half * sin_full, suffix), dim=-1)
+
+            return rotate_external(query), rotate_external(key)
+        if positions is None:
+            if query.ndim == 4:
+                positions = torch.arange(query.shape[2], device=query.device)
+            else:
+                positions = torch.arange(query.shape[0], device=query.device)
+        positions = positions.to(device=query.device)
+        has_long_rope = bool(
+            self.rope_inv_freq_long.numel()
+            and self._rope_original_max_position_embeddings is not None
+        )
+        if query.ndim == 4:
+            if positions.ndim == 1:
+                positions = positions.unsqueeze(0)
+            position_values = positions.to(torch.float32).unsqueeze(-1)
+            if has_long_rope:
+                short_angles = position_values * self.rope_inv_freq.to(
+                    device=query.device
+                )
+                long_angles = position_values * self.rope_inv_freq_long.to(
+                    device=query.device
+                )
+                # Phi LongRoPE selects its factor table from the *current
+                # sequence length*, so once a request crosses the original
+                # context limit every position in that call uses long factors.
+                # Selecting per-position factors leaves the prefix on short
+                # phases and makes Q/K diverge sharply after the boundary.
+                context_length = (
+                    int(sequence_length)
+                    if sequence_length is not None
+                    else int(positions.max().item() + 1)
+                )
+                if context_length <= 0:
+                    raise ValueError("sequence_length must be positive")
+                use_long = context_length > self._rope_original_max_position_embeddings
+                angles = long_angles if bool(use_long) else short_angles
+            else:
+                angles = position_values * self.rope_inv_freq.to(device=query.device)
+            # Keep the trigonometric values in fp32 until the optional HF
+            # LongRoPE scaling has been applied.  Phi's reference rotary
+            # module multiplies by this factor before casting to bf16/fp16;
+            # doing it in the reverse order creates avoidable q/k drift that
+            # is large enough to flip close top-1 logits.
+            cos = angles.cos().unsqueeze(1)
+            sin = angles.sin().unsqueeze(1)
+        elif query.ndim == 3:
+            if positions.ndim == 0:
+                positions = positions.expand(query.shape[0])
+            position_values = positions.to(torch.float32).unsqueeze(-1)
+            if has_long_rope:
+                short_angles = position_values * self.rope_inv_freq.to(
+                    device=query.device
+                )
+                long_angles = position_values * self.rope_inv_freq_long.to(
+                    device=query.device
+                )
+                context_length = (
+                    int(sequence_length)
+                    if sequence_length is not None
+                    else int(positions.max().item() + 1)
+                )
+                if context_length <= 0:
+                    raise ValueError("sequence_length must be positive")
+                use_long = context_length > self._rope_original_max_position_embeddings
+                angles = long_angles if bool(use_long) else short_angles
+            else:
+                angles = position_values * self.rope_inv_freq.to(device=query.device)
+            # See the rank-4 path above: match HF's fp32 RoPE scaling order.
+            cos = angles.cos().unsqueeze(1)
+            sin = angles.sin().unsqueeze(1)
+        else:
+            raise ValueError("q/k tensors must have rank 3 or 4")
+        rotary_dim = self.rope_inv_freq.numel() * 2
+
+        # Hugging Face Llama/Qwen checkpoints use the ``rotate_half``
+        # convention (the first half of each rotary vector is paired with the
+        # second half), rather than interleaving adjacent dimensions.  The
+        # distinction is invisible in a self-contained randomly initialized
+        # model but is catastrophic for a retrofit because every attention
+        # score changes.  Expand the per-frequency cos/sin values to the full
+        # rotary width before applying the checkpoint-compatible transform.
+        cos_full = (
+            torch.cat((cos, cos), dim=-1) * self._rope_attention_scaling
+        ).to(query.dtype)
+        sin_full = (
+            torch.cat((sin, sin), dim=-1) * self._rope_attention_scaling
+        ).to(query.dtype)
+
+        def rotate(tensor: Tensor) -> Tensor:
+            prefix = tensor[..., :rotary_dim]
+            suffix = tensor[..., rotary_dim:]
+            half = prefix.shape[-1] // 2
+            first, second = prefix[..., :half], prefix[..., half:]
+            rotate_half = torch.cat((-second, first), dim=-1)
+            rotated = prefix * cos_full + rotate_half * sin_full
+            return torch.cat((rotated, suffix), dim=-1)
+
+        return rotate(query), rotate(key)
 
     def _split_heads(self, x: Tensor) -> Tensor:
         bsz, length, _ = x.shape
         return x.view(bsz, length, self.num_heads, self.head_dim).transpose(1, 2)
 
-    def forward(self, hidden: Tensor, *, reset_state: bool = True) -> Tensor:
+    def reset_cache(self, batch_size: int, *, device: torch.device) -> None:
+        """Reset the persistent state used by :meth:`step`."""
+
+        self.archive.reset_state(batch_size, device=device)
+        self._sink_keys = None
+        self._sink_values = None
+        self._local_keys = []
+        self._local_values = []
+        self._local_key_cache = None
+        self._local_value_cache = None
+        self._local_score_cache = None
+        self._full_history_key_cache = None
+        self._full_history_value_cache = None
+        self._lexical_key_cache = None
+        self._lexical_value_cache = None
+        self._archive_key_cache = None
+        self._full_key_cache = None
+        self._full_value_cache = None
+        self._chunk_key_scratch = None
+        self._chunk_value_scratch = None
+        self._chunk_score_scratch = None
+        self._chunk_lexical_key_scratch = None
+        self._chunk_lexical_value_scratch = None
+        self._chunk_archive_key_scratch = None
+        self._cache_start = 0
+        self._cache_length = 0
+        self._seen_tokens = 0
+        self._archive_read_cache = None
+        self._archive_query_cache = None
+
+    def set_full_history_heads(
+        self, heads: Sequence[int], *, scope: str = "both"
+    ) -> None:
+        """Select query heads that keep an exact bounded full-history cache."""
+        selected = tuple(sorted({int(head) for head in heads}))
+        if any(head < 0 or head >= self.num_heads for head in selected):
+            raise ValueError("full-history head index is outside attention geometry")
+        if scope not in {"both", "prefill", "decode"}:
+            raise ValueError("full-history scope must be 'both', 'prefill', or 'decode'")
+        self.full_history_heads = selected
+        self.full_history_scope = scope
+        self._full_history_key_cache = None
+        self._full_history_value_cache = None
+
+    def _retain_attention_sinks(self, key: Tensor, value: Tensor) -> None:
+        if not self.use_archive or self._seen_tokens >= self.attention_sink_size:
+            return
+        if key.ndim == 3:
+            key, value = key.unsqueeze(2), value.unsqueeze(2)
+        if self._sink_keys is None:
+            shape = (*key.shape[:2], self.attention_sink_size, self.head_dim)
+            self._sink_keys = key.new_empty(shape)
+            self._sink_values = value.new_empty(shape)
+        count = min(key.shape[2], self.attention_sink_size - self._seen_tokens)
+        self._sink_keys[:, :, self._seen_tokens:self._seen_tokens + count] = key[:, :, :count]
+        self._sink_values[:, :, self._seen_tokens:self._seen_tokens + count] = value[:, :, :count]
+
+    def _local_attention_with_sinks(
+        self, query: Tensor, keys: Tensor, values: Tensor, mask: Optional[Tensor] = None,
+    ) -> Tensor:
+        """Normalize retained prefix and recent KV together, without duplicates."""
+        count = min(self.attention_sink_size, self._seen_tokens + query.shape[2])
+        positions = self._seen_tokens + torch.arange(query.shape[2], device=query.device)
+        prefix_positions = torch.arange(count, device=query.device)
+        prefix_mask = positions[:, None] >= self.window_size + prefix_positions[None, :]
+        if mask is None:
+            mask = torch.ones(query.shape[2], keys.shape[2], dtype=torch.bool, device=query.device)
+        mask = torch.cat((prefix_mask, mask), dim=-1)
+        keys = torch.cat((self._sink_keys[:, :, :count], keys), dim=2)
+        values = torch.cat((self._sink_values[:, :, :count], values), dim=2)
+        if self.local_attention_backend == "eager":
+            return self._local_eager_attention(query, keys, values, mask)
+        return _scaled_dot_product_attention(query, keys, values, attn_mask=mask, dropout_p=0.0)
+
+    def _local_partition(self, query: Tensor, keys: Tensor, mask: Optional[Tensor] = None) -> Tensor:
+        if mask is None:
+            mask = torch.ones(query.shape[2], keys.shape[2], device=query.device, dtype=torch.bool)
+        if self.attention_sink_size:
+            count = min(self.attention_sink_size, self._seen_tokens + query.shape[2])
+            positions = self._seen_tokens + torch.arange(query.shape[2], device=query.device)
+            prefix_mask = positions[:, None] >= self.window_size + torch.arange(count, device=query.device)[None, :]
+            keys = torch.cat((self._sink_keys[:, :, :count], keys), 2)
+            mask = torch.cat((prefix_mask, mask), -1)
+        logits = torch.matmul(query.float(), keys.float().transpose(-1, -2)) / math.sqrt(self.head_dim)
+        return logits.masked_fill(~mask, -torch.inf).logsumexp(-1)
+
+    def _ordered_ring(self) -> tuple[Tensor, Tensor]:
+        """Return valid ring contents in chronological order."""
+
+        if self._local_key_cache is None:
+            raise RuntimeError("local cache is not initialized")
+        assert self._local_value_cache is not None
+        if self._cache_length == 0:
+            return self._local_key_cache[:, :, :0], self._local_value_cache[:, :, :0]
+        if self._cache_start == 0:
+            return (
+                self._local_key_cache[:, :, : self._cache_length],
+                self._local_value_cache[:, :, : self._cache_length],
+            )
+        return (
+            torch.cat(
+                (
+                    self._local_key_cache[:, :, self._cache_start : self._cache_length],
+                    self._local_key_cache[:, :, : self._cache_start],
+                ), dim=2
+            ),
+            torch.cat(
+                (
+                    self._local_value_cache[:, :, self._cache_start : self._cache_length],
+                    self._local_value_cache[:, :, : self._cache_start],
+                ), dim=2
+            ),
+        )
+
+    def _combined_local_chunk(
+        self, key: Tensor, value: Tensor
+    ) -> tuple[Tensor, Tensor, int]:
+        """Build a chronological local block in reusable scratch storage.
+
+        The persistent cache is a ring to make eviction O(1).  Attention
+        kernels need chronological keys, however, and allocating two fresh
+        ``cat`` tensors at every decode chunk adds allocator traffic and a
+        second copy at ring wrap-around.  Reusing scratch storage keeps that
+        temporary allocation out of the steady-state path.
+        """
+
+        if self._local_key_cache is None or self._local_value_cache is None:
+            raise RuntimeError("local cache must be initialized before combining a chunk")
+        bsz, _, length, _ = key.shape
+        old_length = self._cache_length
+        needed = old_length + length
+        if (
+            self._chunk_key_scratch is None
+            or self._chunk_value_scratch is None
+            or self._chunk_key_scratch.shape[0] != bsz
+            or self._chunk_key_scratch.shape[2] < needed
+            or self._chunk_key_scratch.device != key.device
+            or self._chunk_key_scratch.dtype != key.dtype
+            or self._chunk_value_scratch.device != value.device
+            or self._chunk_value_scratch.dtype != value.dtype
+        ):
+            capacity = max(needed, self.window_size + length)
+            scratch_shape = (bsz, self.num_heads, capacity, self.head_dim)
+            self._chunk_key_scratch = torch.empty(
+                scratch_shape, device=key.device, dtype=key.dtype
+            )
+            self._chunk_value_scratch = torch.empty(
+                scratch_shape, device=value.device, dtype=value.dtype
+            )
+        assert self._chunk_value_scratch is not None
+        if old_length:
+            start = self._cache_start
+            first = min(old_length, self.window_size - start)
+            self._chunk_key_scratch[:, :, :first] = self._local_key_cache[
+                :, :, start : start + first
+            ]
+            self._chunk_value_scratch[:, :, :first] = self._local_value_cache[
+                :, :, start : start + first
+            ]
+            if first < old_length:
+                remainder = old_length - first
+                self._chunk_key_scratch[:, :, first:old_length] = self._local_key_cache[
+                    :, :, :remainder
+                ]
+                self._chunk_value_scratch[:, :, first:old_length] = self._local_value_cache[
+                    :, :, :remainder
+                ]
+        self._chunk_key_scratch[:, :, old_length:needed] = key
+        self._chunk_value_scratch[:, :, old_length:needed] = value
+        return (
+            self._chunk_key_scratch[:, :, :needed],
+            self._chunk_value_scratch[:, :, :needed],
+            old_length,
+        )
+
+    def _combined_local_score_chunk(
+        self, score: Tensor, *, old_length: int
+    ) -> Tensor:
+        """Build chronological birth scores matching ``_combined_local_chunk``."""
+        if self._local_score_cache is None:
+            raise RuntimeError("local score cache is not initialized")
+        if score.ndim != 3 or score.shape[:2] != self._local_score_cache.shape[:2]:
+            raise ValueError("score must have shape [batch, heads, tokens]")
+        length = score.shape[2]
+        needed = old_length + length
+        if (
+            not hasattr(self, "_chunk_score_scratch")
+            or self._chunk_score_scratch is None
+            or self._chunk_score_scratch.shape[0] != score.shape[0]
+            or self._chunk_score_scratch.shape[2] < needed
+            or self._chunk_score_scratch.device != score.device
+        ):
+            self._chunk_score_scratch = torch.empty(
+                (score.shape[0], self.num_heads, max(needed, self.window_size + length)),
+                device=score.device,
+                dtype=torch.float32,
+            )
+        scratch = self._chunk_score_scratch
+        if old_length:
+            start = self._cache_start
+            first = min(old_length, self.window_size - start)
+            scratch[:, :, :first] = self._local_score_cache[:, :, start:start + first]
+            if first < old_length:
+                remainder = old_length - first
+                scratch[:, :, first:old_length] = self._local_score_cache[:, :, :remainder]
+        scratch[:, :, old_length:needed] = score.float()
+        return scratch[:, :, :needed]
+
+    def _full_history_attention(
+        self,
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        *,
+        old_length: int,
+        read: bool = True,
+    ) -> Optional[Tensor]:
+        """Read selected heads from their exact, bounded full-history cache."""
+        if not self.full_history_heads:
+            raise RuntimeError("full-history attention requested without selected heads")
+        bsz, _, length, dim = query.shape
+        selected = torch.tensor(self.full_history_heads, device=query.device)
+        selected_key = key.index_select(1, selected)
+        selected_value = value.index_select(1, selected)
+        needed = old_length + length
+        if needed > self.max_position_embeddings:
+            raise ValueError(
+                "full-history cache exceeds max_position_embeddings; "
+                "use a checkpoint-native context bound"
+            )
+        if (
+            self._full_history_key_cache is None
+            or self._full_history_value_cache is None
+            or self._full_history_key_cache.shape[0] != bsz
+            or self._full_history_key_cache.device != key.device
+            or self._full_history_key_cache.dtype != key.dtype
+            or self._full_history_key_cache.shape[2] < needed
+        ):
+            previous_capacity = (
+                0
+                if self._full_history_key_cache is None
+                else int(self._full_history_key_cache.shape[2])
+            )
+            capacity = min(
+                self.max_position_embeddings,
+                max(needed, self.window_size, max(1, previous_capacity * 2)),
+            )
+            cache_shape = (
+                bsz,
+                len(self.full_history_heads),
+                capacity,
+                dim,
+            )
+            self._full_history_key_cache = torch.empty(
+                cache_shape, device=key.device, dtype=key.dtype
+            )
+            self._full_history_value_cache = torch.empty(
+                cache_shape, device=value.device, dtype=value.dtype
+            )
+        assert self._full_history_value_cache is not None
+        self._full_history_key_cache[:, :, old_length:needed] = selected_key
+        self._full_history_value_cache[:, :, old_length:needed] = selected_value
+        if not read:
+            return None
+        full_key = self._full_history_key_cache[:, :, :needed]
+        full_value = self._full_history_value_cache[:, :, :needed]
+        # SDPA's rectangular causal mode uses the lower-right alignment, so a
+        # query chunk sees exactly the prefix before it plus its causal prefix.
+        return _scaled_dot_product_attention(
+            query.index_select(1, selected),
+            full_key,
+            full_value,
+            is_causal=True,
+            dropout_p=0.0,
+        )
+
+    def _combined_lexical_chunk(
+        self, key: Tensor, value: Tensor
+    ) -> tuple[Tensor, Tensor, int]:
+        """Build the same chronological block for the lexical archive ring."""
+        if self._lexical_key_cache is None or self._lexical_value_cache is None:
+            raise RuntimeError("lexical cache must be initialized before combining a chunk")
+        bsz, _, length, _ = key.shape
+        old_length = self._cache_length
+        needed = old_length + length
+        if (
+            not hasattr(self, "_chunk_lexical_key_scratch")
+            or self._chunk_lexical_key_scratch is None
+            or self._chunk_lexical_key_scratch.shape[0] != bsz
+            or self._chunk_lexical_key_scratch.shape[2] < needed
+        ):
+            capacity = max(needed, self.window_size + length)
+            shape = (bsz, self.num_heads, capacity, self.head_dim)
+            self._chunk_lexical_key_scratch = torch.empty(shape, device=key.device, dtype=key.dtype)
+            self._chunk_lexical_value_scratch = torch.empty(shape, device=value.device, dtype=value.dtype)
+        scratch_k = self._chunk_lexical_key_scratch
+        scratch_v = self._chunk_lexical_value_scratch
+        if old_length:
+            start = self._cache_start
+            first = min(old_length, self.window_size - start)
+            scratch_k[:, :, :first] = self._lexical_key_cache[:, :, start : start + first]
+            scratch_v[:, :, :first] = self._lexical_value_cache[:, :, start : start + first]
+            if first < old_length:
+                remainder = old_length - first
+                scratch_k[:, :, first:old_length] = self._lexical_key_cache[:, :, :remainder]
+                scratch_v[:, :, first:old_length] = self._lexical_value_cache[:, :, :remainder]
+        scratch_k[:, :, old_length:needed] = key
+        scratch_v[:, :, old_length:needed] = value
+        return scratch_k[:, :, :needed], scratch_v[:, :, :needed], old_length
+
+    def _combined_archive_key_chunk(self, key: Tensor) -> Tensor:
+        """Build chronological unrotated keys for the position-free archive."""
+
+        if self._archive_key_cache is None:
+            raise RuntimeError("archive key cache must be initialized before combining a chunk")
+        bsz, _, length, _ = key.shape
+        old_length = self._cache_length
+        needed = old_length + length
+        if (
+            self._chunk_archive_key_scratch is None
+            or self._chunk_archive_key_scratch.shape[0] != bsz
+            or self._chunk_archive_key_scratch.shape[2] < needed
+            or self._chunk_archive_key_scratch.device != key.device
+            or self._chunk_archive_key_scratch.dtype != key.dtype
+        ):
+            capacity = max(needed, self.window_size + length)
+            self._chunk_archive_key_scratch = torch.empty(
+                (bsz, self.num_heads, capacity, self.head_dim),
+                device=key.device,
+                dtype=key.dtype,
+            )
+        scratch = self._chunk_archive_key_scratch
+        if old_length:
+            start = self._cache_start
+            first = min(old_length, self.window_size - start)
+            scratch[:, :, :first] = self._archive_key_cache[:, :, start : start + first]
+            if first < old_length:
+                remainder = old_length - first
+                scratch[:, :, first:old_length] = self._archive_key_cache[:, :, :remainder]
+        scratch[:, :, old_length:needed] = key
+        return scratch[:, :, :needed]
+
+    def step(
+        self,
+        hidden: Tensor,
+        *,
+        reset_cache: bool = False,
+        position_ids: Optional[Tensor] = None,
+        archive_hint: Optional[Tensor] = None,
+        position_embeddings: Optional[tuple[Tensor, Tensor]] = None,
+    ) -> Tensor:
+        """Decode one token with bounded local KV plus recurrent archive state.
+
+        ``hidden`` is ``[batch, d_model]``. This method is intended for
+        ``torch.no_grad()`` serving; unlike :meth:`forward`, it does not replay
+        the prefix and therefore exposes the constant-history read path.
+        """
+
+        if hidden.ndim != 2 or hidden.shape[-1] != self.d_model:
+            raise ValueError("hidden must have shape [batch, d_model]")
+        if bool(getattr(self.archive, "causal_block_retention", False)):
+            positions = position_ids
+            if positions is not None and positions.ndim == 1:
+                positions = positions.unsqueeze(-1)
+            embeddings = position_embeddings
+            if embeddings is not None:
+                embeddings = tuple(angle.unsqueeze(-2) if angle.ndim == 2 else angle for angle in embeddings)
+            return self.step_chunk(
+                hidden.unsqueeze(1), reset_cache=reset_cache,
+                position_ids=positions, archive_hint=archive_hint,
+                position_embeddings=embeddings,
+                rope_sequence_length=(0 if reset_cache else self._seen_tokens) + 1,
+            ).squeeze(1)
+        bsz = hidden.shape[0]
+        if (
+            reset_cache
+            or self.archive._numerator.shape[0] != bsz
+            or self.archive._numerator.device != hidden.device
+        ):
+            self.reset_cache(bsz, device=hidden.device)
+        history_length = self._seen_tokens
+        q_proj, k_proj, v_proj, gate_proj = self._project_qkv_gate(hidden[:, None])
+        birth_score = None
+        if bool(getattr(self.archive, "causal_hidden_predictor", False)):
+            birth_score = self.archive.hidden_admission(hidden).float()
+        q_raw = self._split_heads(q_proj)[:, :, 0]
+        q_raw = self._apply_active_query_correction(q_raw)
+        key_raw = self._split_heads(k_proj)[:, :, 0]
+        value = self._split_heads(v_proj)[:, :, 0]
+        lexical_q, lexical_k, lexical_v = self._lexical_archive_triplet(archive_hint)
+        if lexical_q is not None:
+            lexical_q, lexical_k, lexical_v = lexical_q[:, :, 0], lexical_k[:, :, 0], lexical_v[:, :, 0]
+        if position_ids is None:
+            position_ids = torch.full(
+                (bsz,), self._seen_tokens, device=hidden.device, dtype=torch.long
+            )
+        q, key = self._apply_rope(q_raw, key_raw, position_ids, position_embeddings)
+        self._retain_attention_sinks(key, value)
+        archive_query = q_raw if self.archive_position_invariant else q
+        archive_key_current = key_raw if self.archive_position_invariant else key
+        if self.use_archive:
+            if self._local_key_cache is None:
+                shape = (bsz, self.num_heads, self.window_size, self.head_dim)
+                self._local_key_cache = torch.empty(shape, device=key.device, dtype=key.dtype)
+                self._local_value_cache = torch.empty(shape, device=value.device, dtype=value.dtype)
+                if birth_score is not None:
+                    self._local_score_cache = torch.empty(
+                        (bsz, self.num_heads, self.window_size),
+                        device=birth_score.device,
+                        dtype=torch.float32,
+                    )
+                if (
+                    self.archive_position_invariant
+                    and lexical_k is None
+                    and not bool(getattr(self.archive, "exact_only", False))
+                ):
+                    self._archive_key_cache = torch.empty(
+                        shape, device=key_raw.device, dtype=key_raw.dtype
+                    )
+                if lexical_k is not None:
+                    self._lexical_key_cache = torch.empty(
+                        shape, device=lexical_k.device, dtype=lexical_k.dtype
+                    )
+                    self._lexical_value_cache = torch.empty(
+                        shape, device=lexical_v.device, dtype=lexical_v.dtype
+                    )
+            assert self._local_value_cache is not None
+            if self._cache_length < self.window_size:
+                write_index = (self._cache_start + self._cache_length) % self.window_size
+                self._cache_length += 1
+            else:
+                write_index = self._cache_start
+                archive_key = self._local_key_cache[:, :, write_index]
+                archive_value = self._local_value_cache[:, :, write_index]
+                if lexical_k is not None:
+                    assert self._lexical_key_cache is not None and self._lexical_value_cache is not None
+                    archive_key = self._lexical_key_cache[:, :, write_index]
+                    archive_value = self._lexical_value_cache[:, :, write_index]
+                elif self.archive_position_invariant and not bool(
+                    getattr(self.archive, "exact_only", False)
+                ):
+                    assert self._archive_key_cache is not None
+                    archive_key = self._archive_key_cache[:, :, write_index]
+                if self._seen_tokens >= self.window_size + self.attention_sink_size:
+                    evicted_score = None
+                    if birth_score is not None:
+                        assert self._local_score_cache is not None
+                        evicted_score = self._local_score_cache[:, :, write_index]
+                    update_kwargs = {
+                        "exact_key": self._local_key_cache[:, :, write_index],
+                        "exact_query": q,
+                        "admission_score": evicted_score,
+                    }
+                    if hasattr(self.archive, "causal_hidden_predictor"):
+                        update_kwargs["hidden"] = hidden
+                    self.archive.update(archive_key, archive_value, **update_kwargs)
+                # A token eviction changes the recurrent archive state.  Any
+                # read cached from an earlier state is therefore invalid even
+                # when the optional read stride would otherwise reuse it.  An
+                # explicit query-stability threshold opts into stale-read
+                # reuse, so preserve that documented approximation mode.
+                if self.archive_query_cosine_threshold is None:
+                    self._archive_read_cache = None
+                    self._archive_query_cache = None
+                self._cache_start = (self._cache_start + 1) % self.window_size
+            self._local_key_cache[:, :, write_index] = key
+            self._local_value_cache[:, :, write_index] = value
+            if birth_score is not None:
+                assert self._local_score_cache is not None
+                self._local_score_cache[:, :, write_index] = birth_score
+            if (
+                self.archive_position_invariant
+                and lexical_k is None
+                and not bool(getattr(self.archive, "exact_only", False))
+            ):
+                assert self._archive_key_cache is not None
+                self._archive_key_cache[:, :, write_index] = archive_key_current
+            if lexical_k is not None:
+                assert self._lexical_key_cache is not None and self._lexical_value_cache is not None
+                self._lexical_key_cache[:, :, write_index] = lexical_k
+                self._lexical_value_cache[:, :, write_index] = lexical_v
+            # Attention over one query is permutation-invariant over its K/V
+            # set. Keep the physical ring order and avoid copying/rotating the
+            # window on every token; ``_cache_start`` is only the eviction slot.
+            local_keys = self._local_key_cache[:, :, : self._cache_length]
+            local_values = self._local_value_cache[:, :, : self._cache_length]
+        else:
+            if self._full_key_cache is None:
+                shape = (bsz, self.num_heads, self.window_size, self.head_dim)
+                self._full_key_cache = torch.empty(shape, device=key.device, dtype=key.dtype)
+                self._full_value_cache = torch.empty(shape, device=value.device, dtype=value.dtype)
+            if self._seen_tokens >= self.window_size:
+                raise ValueError("full-KV cache exceeds configured maximum length")
+            assert self._full_value_cache is not None
+            self._full_key_cache[:, :, self._seen_tokens] = key
+            self._full_value_cache[:, :, self._seen_tokens] = value
+            local_keys = self._full_key_cache[:, :, : self._seen_tokens + 1]
+            local_values = self._full_value_cache[:, :, : self._seen_tokens + 1]
+        if self.use_archive:
+            if self.attention_sink_size and self._seen_tokens >= self.window_size:
+                local_out = self._local_attention_with_sinks(
+                    q.unsqueeze(2), local_keys, local_values,
+                ).squeeze(2)
+            elif self.local_attention_backend == "eager":
+                valid = torch.ones(
+                    (1, local_keys.shape[2]), device=hidden.device, dtype=torch.bool
+                )
+                local_out = self._local_eager_attention(
+                    q.unsqueeze(2), local_keys, local_values, valid
+                ).squeeze(2)
+            elif key.is_cuda and self._cache_length == self.window_size:
+                # Once the ring is full, a single Triton program computes the
+                # exact local softmax/value reduction.  This removes the SDPA
+                # wrapper and its mask setup from the persistent one-token path.
+                from .triton_kernels import TRITON_AVAILABLE, triton_local_decode_attention
+                if TRITON_AVAILABLE:
+                    local_out = triton_local_decode_attention(
+                        q, local_keys, local_values, valid_length=self.window_size
+                    )
+                else:
+                    local_out = _scaled_dot_product_attention(
+                        q.unsqueeze(2), local_keys, local_values, dropout_p=0.0
+                    ).squeeze(2)
+            else:
+                # SDPA handles the small local window with one fused primitive.
+                local_out = _scaled_dot_product_attention(
+                    q.unsqueeze(2), local_keys, local_values, dropout_p=0.0
+                ).squeeze(2)
+        else:
+            # Use the same fused SDPA primitive as the block path for an honest
+            # full-KV serving baseline. All cached keys are valid for this
+            # single query because they precede (or equal) the current token.
+            valid = torch.ones(
+                (1, local_keys.shape[2]), device=hidden.device, dtype=torch.bool
+            )
+            local_out = _scaled_dot_product_attention(
+                q.unsqueeze(2),
+                local_keys,
+                local_values,
+                attn_mask=valid,
+                dropout_p=0.0,
+            ).squeeze(2)
+        if self.use_archive and self._seen_tokens >= self.window_size + self.attention_sink_size:
+            refresh = (
+                self._archive_read_cache is None
+                or self.archive_read_stride == 1
+                or self._seen_tokens % self.archive_read_stride == 0
+            )
+            if (
+                refresh
+                and self.archive_query_cosine_threshold is not None
+                and self._archive_query_cache is not None
+            ):
+                # Archive reads are batched over heads.  Skip the whole read
+                # only when every head sees a stable query; this avoids mixing
+                # fresh and stale heads while keeping the decision scalar.
+                similarity = F.cosine_similarity(archive_query, self._archive_query_cache, dim=-1)
+                refresh = bool(
+                    torch.any(similarity < self.archive_query_cosine_threshold).item()
+                )
+            if refresh:
+                read_query = archive_query if lexical_q is None else lexical_q
+                self._archive_read_cache = self.archive.read(read_query, exact_query=q)
+                self._archive_query_cache = read_query.detach()
+            assert self._archive_read_cache is not None
+            archive_out = self._archive_read_cache
+            gate = (
+                torch.zeros_like(gate_proj[:, 0]).unsqueeze(-1)
+                if self.archive.prefix_landmark
+                else torch.sigmoid(gate_proj[:, 0]).unsqueeze(-1)
+            )
+            # A quality-first hybrid archive exposes the confidence of its
+            # exact nearest-neighbour read.  Promote only a high-confidence
+            # exact hit to the remote path; unrelated queries retain the
+            # learned conservative local/archive gate.  This avoids diluting
+            # a recovered needle while preserving the regular QCC behavior.
+            exact_gate = getattr(self.archive, "_last_exact_gate", None)
+            if (
+                exact_gate is not None
+                and bool(getattr(self.archive, "quality_first", False))
+                and exact_gate.shape == gate.shape[:-1]
+            ):
+                gate = gate * (1.0 - exact_gate.unsqueeze(-1).to(gate.dtype))
+            local_partition = (
+                self._local_partition(q.unsqueeze(2), local_keys).squeeze(2)
+                if bool(getattr(self.archive, "exact_attention", False)) else None
+            )
+            head_out = self._mix_local_archive(local_out, archive_out, gate, local_partition)
+        else:
+            head_out = local_out
+        self._seen_tokens += 1
+        return self.out_proj(head_out.reshape(bsz, self.d_model))
+
+    @torch.no_grad()
+    def step_chunk(
+        self,
+        hidden: Tensor,
+        *,
+        reset_cache: bool = False,
+        position_ids: Optional[Tensor] = None,
+        archive_hint: Optional[Tensor] = None,
+        position_embeddings: Optional[tuple[Tensor, Tensor]] = None,
+        quality_query: Optional[Tensor] = None,
+        quality_query_start: int = 0,
+        rope_sequence_length: Optional[int] = None,
+    ) -> Tensor:
+        """Decode a causal block while preserving the persistent cache.
+
+        Projections and local attention are vectorized over the block. Archive
+        writes/reads remain ordered because each position may evict a different
+        historical slot.
+        """
+
         if hidden.ndim != 3 or hidden.shape[-1] != self.d_model:
             raise ValueError("hidden must have shape [batch, sequence, d_model]")
         bsz, length, _ = hidden.shape
-        q = self._split_heads(self.q_proj(hidden))
-        k = self._split_heads(self.k_proj(hidden))
-        v = self._split_heads(self.v_proj(hidden))
-        if reset_state or self.archive._numerator.shape[0] != bsz:
+        if length == 0:
+            return hidden
+        if (
+            reset_cache
+            or self.archive._numerator.shape[0] != bsz
+            or self.archive._numerator.device != hidden.device
+        ):
+            self.reset_cache(bsz, device=hidden.device)
+        history_length = self._seen_tokens
+        q_proj, k_proj, v_proj, gate_proj = self._project_qkv_gate(hidden)
+        birth_scores = None
+        if bool(getattr(self.archive, "causal_hidden_predictor", False)):
+            birth_scores = self.archive.hidden_admission(hidden).float()
+        q_raw = self._split_heads(q_proj)
+        q_raw = self._apply_active_query_correction(q_raw)
+        k_raw = self._split_heads(k_proj)
+        v = self._split_heads(v_proj)
+        lexical_q, lexical_k, lexical_v = self._lexical_archive_triplet(archive_hint)
+        archive_q = q_raw
+        archive_k_current = k_raw
+        if position_ids is None:
+            position_ids = self._seen_tokens + torch.arange(
+                length, device=hidden.device, dtype=torch.long
+            )
+        q, k = self._apply_rope(
+            q_raw,
+            k_raw,
+            position_ids,
+            position_embeddings,
+            sequence_length=rope_sequence_length,
+        )
+        self._retain_attention_sinks(k, v)
+        if not self.archive_position_invariant:
+            archive_q = q
+            archive_k_current = k
+
+        if self.use_archive:
+            if self._local_key_cache is None:
+                shape = (bsz, self.num_heads, self.window_size, self.head_dim)
+                self._local_key_cache = torch.empty(shape, device=k.device, dtype=k.dtype)
+                self._local_value_cache = torch.empty(shape, device=v.device, dtype=v.dtype)
+                if birth_scores is not None:
+                    self._local_score_cache = torch.empty(
+                        (bsz, self.num_heads, self.window_size),
+                        device=birth_scores.device,
+                        dtype=torch.float32,
+                    )
+                if (
+                    self.archive_position_invariant
+                    and lexical_k is None
+                    and not bool(getattr(self.archive, "exact_only", False))
+                ):
+                    self._archive_key_cache = torch.empty(
+                        shape, device=k_raw.device, dtype=k_raw.dtype
+                    )
+                if lexical_k is not None:
+                    self._lexical_key_cache = torch.empty(shape, device=lexical_k.device, dtype=lexical_k.dtype)
+                    self._lexical_value_cache = torch.empty(shape, device=lexical_v.device, dtype=lexical_v.dtype)
+            combined_k, combined_v, old_length = self._combined_local_chunk(k, v)
+            combined_scores = None
+            if birth_scores is not None:
+                combined_scores = self._combined_local_score_chunk(
+                    birth_scores, old_length=old_length
+                )
+            combined_archive_k = (
+                self._combined_archive_key_chunk(archive_k_current)
+                if (
+                    self.archive_position_invariant
+                    and lexical_k is None
+                    and not bool(getattr(self.archive, "exact_only", False))
+                )
+                else None
+            )
+            if lexical_k is not None:
+                combined_lexical_k, combined_lexical_v, _ = self._combined_lexical_chunk(lexical_k, lexical_v)
+            else:
+                combined_lexical_k = combined_lexical_v = None
+        else:
+            if self._full_key_cache is None:
+                shape = (bsz, self.num_heads, self.window_size, self.head_dim)
+                self._full_key_cache = torch.empty(shape, device=k.device, dtype=k.dtype)
+                self._full_value_cache = torch.empty(shape, device=v.device, dtype=v.dtype)
+            if self._seen_tokens + length > self.window_size:
+                raise ValueError("full-KV cache exceeds configured maximum length")
+            assert self._full_value_cache is not None
+            self._full_key_cache[:, :, self._seen_tokens : self._seen_tokens + length] = k
+            self._full_value_cache[:, :, self._seen_tokens : self._seen_tokens + length] = v
+            old_k = self._full_key_cache[:, :, : self._seen_tokens]
+            old_v = self._full_value_cache[:, :, : self._seen_tokens]
+            old_length = old_k.shape[2]
+            combined_k = torch.cat((old_k, k), dim=2)
+            combined_v = torch.cat((old_v, v), dim=2)
+        total_length = combined_k.shape[2]
+
+        if not self.use_archive:
+            # The full-KV control uses PyTorch's fused SDPA with a causal mask
+            # offset by the already-cached prefix. This avoids materializing a
+            # quadratic [query, key, head_dim] window in the control itself.
+            key_positions = torch.arange(total_length, device=hidden.device)
+            query_positions = old_length + torch.arange(length, device=hidden.device)
+            causal_mask = key_positions[None, :] <= query_positions[:, None]
+            head_out = _scaled_dot_product_attention(
+                q,
+                combined_k,
+                combined_v,
+                attn_mask=causal_mask,
+                dropout_p=0.0,
+            )
+            self._seen_tokens += length
+            return self.out_proj(
+                head_out.transpose(1, 2).reshape(bsz, length, self.d_model)
+            )
+
+        # # Feed the finite causal band directly to SDPA.  Unlike materializing
+        # an unfolded [batch, head, time, window, dim] tensor, this lets the
+        # backend use its fused attention implementation while the mask keeps
+        # work bounded to the exact local window.  ``combined_k`` is already
+        # chronological (old ring contents followed by the new block).
+        positions = old_length + torch.arange(length, device=hidden.device)
+        key_positions = torch.arange(total_length, device=hidden.device)
+        valid = (key_positions[None, :] <= positions[:, None]) & (
+            key_positions[None, :] >= positions[:, None] - self.window_size + 1
+        )
+        if self.attention_sink_size and self._seen_tokens + length > self.window_size:
+            local_out = self._local_attention_with_sinks(q, combined_k, combined_v, valid)
+        elif hidden.is_cuda:
+            # Prefer the one-launch Triton sliding-window kernel.  It computes
+            # the exact lower *and* upper causal bounds directly, avoiding the
+            # large unfolded [time, window, dim] temporary used by the
+            # reference path.  Fall back to the readable implementation when
+            # Triton is unavailable (e.g. a CUDA build without Triton).
+            local_out = None
+            if self.use_triton and self.local_attention_backend == "sdpa":
+                from .triton_kernels import TRITON_AVAILABLE, triton_local_chunk_attention
+
+                if TRITON_AVAILABLE:
+                    local_out = triton_local_chunk_attention(
+                        q,
+                        combined_k,
+                        combined_v,
+                        old_length=old_length,
+                        window_size=self.window_size,
+                    )
+            if local_out is None:
+                # The readable unfold implementation materializes
+                # ``[batch, heads, time, window, head_dim]`` and can exceed
+                # a 24 GB card when a quality run intentionally uses a large
+                # exact window (for example 8K).  SDPA keeps the same causal
+                # band semantics while selecting a fused/memory-efficient
+                # backend, so the non-Triton control remains usable for
+                # numerical A/B validation at long context.
+                if self.local_attention_backend == "eager":
+                    local_out = self._local_eager_attention(
+                        q, combined_k, combined_v, valid
+                    )
+                else:
+                    local_out = _scaled_dot_product_attention(
+                        q,
+                        combined_k,
+                        combined_v,
+                        attn_mask=valid,
+                        dropout_p=0.0,
+                    )
+        else:
+            local_out = _scaled_dot_product_attention(
+                q,
+                combined_k,
+                combined_v,
+                attn_mask=valid,
+                dropout_p=0.0,
+            )
+
+        if self.use_archive:
+            archive_event_offset = max(0, self._seen_tokens - self.window_size)
+            archive_out = torch.zeros_like(local_out)
+            event_start = max(0, self.window_size - old_length)
+            prefix_skip = max(0, self.attention_sink_size - archive_event_offset)
+            event_start += prefix_skip
+            archive_event_offset += prefix_skip
+            event_count = length - event_start
+            if event_count > 0:
+                evicted_k = combined_k[:, :, prefix_skip:prefix_skip + event_count]
+                evicted_v = combined_v[:, :, prefix_skip:prefix_skip + event_count]
+                evicted_scores = None
+                if combined_scores is not None:
+                    evicted_scores = combined_scores[
+                        :, :, prefix_skip:prefix_skip + event_count
+                    ]
+                # Keep the rotary local keys for the optional exact shadow;
+                # the recurrent archive may intentionally receive raw keys.
+                exact_evicted_k = evicted_k
+                if combined_archive_k is not None:
+                    evicted_k = combined_archive_k[:, :, prefix_skip:prefix_skip + event_count]
+                if combined_lexical_k is not None:
+                    evicted_k = combined_lexical_k[:, :, prefix_skip:prefix_skip + event_count]
+                    evicted_v = combined_lexical_v[:, :, prefix_skip:prefix_skip + event_count]
+                    exact_evicted_k = evicted_k
+                update_kwargs = {
+                    "output": archive_out[:, :, event_start:],
+                    "exact_key": exact_evicted_k,
+                    "exact_query": q[:, :, event_start:],
+                    "quality_query": quality_query,
+                    "quality_key_start": archive_event_offset,
+                    "quality_query_start": quality_query_start,
+                }
+                if hasattr(self.archive, "causal_hidden_predictor"):
+                    update_kwargs["hidden"] = hidden[
+                        :, event_start:event_start + event_count
+                    ]
+                    update_kwargs["admission_score"] = evicted_scores
+                self.archive.update_read_chunk(
+                    evicted_k,
+                    evicted_v,
+                    archive_q[:, :, event_start:] if lexical_q is None else lexical_q[:, :, event_start:],
+                    **update_kwargs,
+                )
+                # A chunk update changes the archive state for every active
+                # position.  Do not let a prior token-path remote read leak
+                # into the next decode step when read reuse is enabled.
+                self._archive_read_cache = None
+                self._archive_query_cache = None
+            gate = (
+                torch.zeros_like(gate_proj).transpose(1, 2).unsqueeze(-1)
+                if self.archive.prefix_landmark
+                else torch.sigmoid(gate_proj).transpose(1, 2).unsqueeze(-1)
+            )
+            exact_gate = getattr(self.archive, "_last_exact_gate", None)
+            if (
+                exact_gate is not None
+                and bool(getattr(self.archive, "quality_first", False))
+                and exact_gate.shape == gate.shape[:-1]
+            ):
+                gate = gate * (1.0 - exact_gate.unsqueeze(-1).to(gate.dtype))
+            local_partition = None
+            if (
+                bool(getattr(self.archive, "exact_attention", False))
+                and not bool(getattr(self.archive, "quality_prefill_shadow_only", False))
+            ):
+                local_partition = self._local_partition(q, combined_k, valid)
+                log_z = torch.full_like(local_partition, -torch.inf)
+                if event_count > 0:
+                    log_z[:, :, event_start:] = self.archive._last_exact_log_partition
+                self.archive._last_exact_log_partition = log_z
+            mixed_out = self._mix_local_archive(local_out, archive_out, gate, local_partition)
+            active = (
+                self._seen_tokens + torch.arange(length, device=hidden.device)
+                >= self.window_size + self.attention_sink_size
+            ).view(1, 1, length, 1)
+            head_out = torch.where(active, mixed_out, local_out)
+            keep = min(self.window_size, total_length)
+            assert self._local_key_cache is not None and self._local_value_cache is not None
+            # Preserve the ring layout instead of clearing and rewriting the
+            # entire window.  A chunk may wrap around the physical end, so
+            # split the tail copy into at most two contiguous slices.  This
+            # makes cache maintenance proportional to the number of retained
+            # tokens rather than an additional O(window_size) memset.
+            evicted = max(0, total_length - self.window_size)
+            new_start = (self._cache_start + evicted) % self.window_size
+            tail_k = combined_k[:, :, -keep:]
+            tail_v = combined_v[:, :, -keep:]
+            tail_scores = None if combined_scores is None else combined_scores[:, :, -keep:]
+            first = min(keep, self.window_size - new_start)
+            self._local_key_cache[:, :, new_start : new_start + first] = tail_k[:, :, :first]
+            self._local_value_cache[:, :, new_start : new_start + first] = tail_v[:, :, :first]
+            if tail_scores is not None:
+                assert self._local_score_cache is not None
+                self._local_score_cache[:, :, new_start : new_start + first] = tail_scores[:, :, :first]
+            if first < keep:
+                remainder = keep - first
+                self._local_key_cache[:, :, :remainder] = tail_k[:, :, first:]
+                self._local_value_cache[:, :, :remainder] = tail_v[:, :, first:]
+                if tail_scores is not None:
+                    assert self._local_score_cache is not None
+                    self._local_score_cache[:, :, :remainder] = tail_scores[:, :, first:]
+            if combined_lexical_k is not None:
+                assert self._lexical_key_cache is not None and self._lexical_value_cache is not None
+                lexical_tail_k = combined_lexical_k[:, :, -keep:]
+                lexical_tail_v = combined_lexical_v[:, :, -keep:]
+                self._lexical_key_cache[:, :, new_start : new_start + first] = lexical_tail_k[:, :, :first]
+                self._lexical_value_cache[:, :, new_start : new_start + first] = lexical_tail_v[:, :, :first]
+                if first < keep:
+                    remainder = keep - first
+                    self._lexical_key_cache[:, :, :remainder] = lexical_tail_k[:, :, first:]
+                    self._lexical_value_cache[:, :, :remainder] = lexical_tail_v[:, :, first:]
+            if combined_archive_k is not None:
+                assert self._archive_key_cache is not None
+                archive_tail_k = combined_archive_k[:, :, -keep:]
+                self._archive_key_cache[:, :, new_start : new_start + first] = archive_tail_k[:, :, :first]
+                if first < keep:
+                    remainder = keep - first
+                    self._archive_key_cache[:, :, :remainder] = archive_tail_k[:, :, first:]
+            self._cache_start = new_start
+            self._cache_length = keep
+        full_history_active = (
+            self.full_history_heads
+            and (
+                self.full_history_scope == "both"
+                or self.full_history_scope == ("prefill" if length > 1 else "decode")
+            )
+        )
+        full_out = self._full_history_attention(
+            q, k, v, old_length=history_length, read=bool(full_history_active)
+        ) if self.full_history_heads else None
+        if full_history_active:
+            assert full_out is not None
+            selected = torch.tensor(self.full_history_heads, device=q.device)
+            head_out[:, selected] = full_out
+        self._seen_tokens += length
+        return self.out_proj(head_out.transpose(1, 2).reshape(bsz, length, self.d_model))
+
+    def _forward_train_chunked(
+        self, hidden: Tensor, q: Tensor, k: Tensor, v: Tensor, gate_proj: Tensor,
+        archive_hint: Optional[Tensor] = None,
+        archive_query_source: Optional[Tensor] = None,
+        archive_key_source: Optional[Tensor] = None,
+    ) -> Tensor:
+        """Differentiable bounded-memory path for long training sequences.
+
+        The original teacher path intentionally spells out one token at a time
+        so the recurrence is easy to inspect, but that makes a 128K training
+        example both launch-bound and prohibitively expensive to backpropagate
+        through.  This path keeps the same equations while scanning bounded
+        blocks: local attention uses a causal band mask and archive states use
+        :meth:`QCCArchive._parallel_decay_scan`, which is fully differentiable.
+        It is selected only on CUDA; the short CPU reference remains the
+        pedagogical implementation.
+        """
+
+        if not self.use_archive:
+            return self.out_proj(
+                _scaled_dot_product_attention(q, k, v, is_causal=True)
+                .transpose(1, 2)
+                .reshape(hidden.shape[0], hidden.shape[1], self.d_model)
+            )
+        bsz, length, _ = hidden.shape
+        lexical_q, lexical_k, lexical_v = self._lexical_archive_triplet(archive_hint)
+        archive_q_base = q if archive_query_source is None else archive_query_source
+        archive_k_base = k if archive_key_source is None else archive_key_source
+        archive_q = archive_q_base if lexical_q is None else lexical_q
+        archive_k = archive_k_base if lexical_k is None else lexical_k
+        archive_v = v if lexical_v is None else lexical_v
+        window = min(self.window_size, length)
+        block_size = self.archive.scan_block_size
+        local_outputs: list[Tensor] = []
+        for start in range(0, length, block_size):
+            end = min(length, start + block_size)
+            key_start = max(0, start - window + 1)
+            key_positions = torch.arange(key_start, end, device=hidden.device)
+            query_positions = torch.arange(start, end, device=hidden.device)
+            valid = (key_positions[None, :] <= query_positions[:, None]) & (
+                key_positions[None, :] >= query_positions[:, None] - window + 1
+            )
+            local_outputs.append(
+                _scaled_dot_product_attention(
+                    q[:, :, start:end],
+                    k[:, :, key_start:end],
+                    v[:, :, key_start:end],
+                    attn_mask=valid,
+                    dropout_p=0.0,
+                )
+            )
+        local_out = torch.cat(local_outputs, dim=2)
+
+        state_dtype = self.archive._numerator.dtype
+        rates = self.archive.decay_rates.to(device=hidden.device, dtype=state_dtype)
+        codes = self.archive.codes.to(device=hidden.device, dtype=state_dtype)
+        age = rates.pow(self.window_size)
+        state_den = torch.zeros(
+            bsz,
+            self.num_heads,
+            self.archive.num_codes,
+            self.archive.num_scales,
+            device=hidden.device,
+            dtype=state_dtype,
+        )
+        state_num = torch.zeros(
+            bsz,
+            self.num_heads,
+            self.archive.num_codes,
+            self.archive.num_scales,
+            self.head_dim,
+            device=hidden.device,
+            dtype=state_dtype,
+        )
+        archive_outputs: list[Tensor] = []
+        landmark_outputs: list[Tensor] = []
+        landmark_valid_outputs: list[Tensor] = []
+        landmark_score_state: Optional[Tensor] = None
+        landmark_value_state: Optional[Tensor] = None
+        landmark_key_state: Optional[Tensor] = None
+        if self.archive.persistent_landmark:
+            landmark_score_state = torch.full(
+                (bsz, self.num_heads, self.archive.num_codes),
+                -torch.inf,
+                device=hidden.device,
+                dtype=state_dtype,
+            )
+            landmark_value_state = torch.zeros(
+                bsz,
+                self.num_heads,
+                self.archive.num_codes,
+                self.head_dim,
+                device=hidden.device,
+                dtype=state_dtype,
+            )
+            landmark_key_state = torch.zeros(
+                bsz,
+                self.num_heads,
+                self.archive.num_codes,
+                self.head_dim,
+                device=hidden.device,
+                dtype=state_dtype,
+            )
+        event_count = max(0, length - window)
+        # The first ``window`` tokens are still in exact local KV and must not
+        # enter the historical archive.  The inference path begins its archive
+        # recurrence at the same boundary; keeping this offset here is crucial
+        # for a train/inference-equivalent checkpoint.
+        for start in range(0, event_count, block_size):
+            end = min(event_count, start + block_size)
+            block_key = archive_k[:, :, start:end]
+            block_value = archive_v[:, :, start:end]
+            score = torch.einsum(
+                "bhed,hmd->bhem", block_key.to(state_dtype), codes
+            ) / math.sqrt(self.head_dim)
+            content_weight = torch.exp(score.clamp(min=-20.0, max=10.0))
+            if self.archive.content_threshold is not None:
+                # Keep a smooth surrogate while gradients are enabled so a
+                # value token just below the hard inference threshold still
+                # receives a signal to become salient.  No-grad/reference and
+                # Triton paths retain the exact hard gate.
+                if torch.is_grad_enabled():
+                    smooth_gate = torch.sigmoid(
+                        (score - self.archive.content_threshold) / 0.1
+                    )
+                    hard_gate = (score >= self.archive.content_threshold).to(
+                        content_weight.dtype
+                    )
+                    # Straight-through estimator: preserve the exact hard
+                    # threshold in the forward pass (matching inference),
+                    # while exposing a smooth derivative to train scores that
+                    # sit just below the threshold.
+                    gate = hard_gate + smooth_gate - smooth_gate.detach()
+                    content_weight = content_weight * gate
+                else:
+                    content_weight = torch.where(
+                        score >= self.archive.content_threshold,
+                        content_weight,
+                        torch.zeros_like(content_weight),
+                    )
+            denominator_add = content_weight.unsqueeze(-1) * age.view(1, 1, 1, 1, -1)
+            numerator_add = denominator_add.unsqueeze(-1) * block_value.to(
+                state_dtype
+            ).unsqueeze(3).unsqueeze(4)
+            denominator_states, state_den = self.archive._parallel_decay_scan(
+                denominator_add, state_den, rates
+            )
+            numerator_states, state_num = self.archive._parallel_decay_scan(
+                numerator_add, state_num, rates
+            )
+            archive_outputs.append(
+                self.archive._read_states_chunk(
+                    archive_q[:, :, window + start : window + end],
+                    numerator_states,
+                    denominator_states,
+                )
+            )
+            if self.archive.persistent_landmark:
+                assert (
+                    landmark_score_state is not None
+                    and landmark_value_state is not None
+                    and landmark_key_state is not None
+                )
+                landmark_scores = score
+                if self.archive.content_threshold is not None:
+                    landmark_scores = torch.where(
+                        landmark_scores >= self.archive.content_threshold,
+                        landmark_scores,
+                        torch.full_like(landmark_scores, -torch.inf),
+                    )
+                block_scores, block_indices = torch.cummax(landmark_scores, dim=2)
+                bsz_, heads_, block_len, codes_ = block_scores.shape
+                value_index = block_indices.unsqueeze(-1).expand(
+                    bsz_, heads_, block_len, codes_, self.head_dim
+                )
+                value_expanded = block_value.to(state_dtype).unsqueeze(3).expand(
+                    bsz_, heads_, block_len, codes_, self.head_dim
+                )
+                block_values = value_expanded.gather(2, value_index)
+                key_expanded = block_key.to(state_dtype).unsqueeze(3).expand(
+                    bsz_, heads_, block_len, codes_, self.head_dim
+                )
+                block_keys = key_expanded.gather(2, value_index)
+                prior_scores = landmark_score_state.unsqueeze(2)
+                use_block = block_scores > prior_scores
+                running_scores = torch.where(use_block, block_scores, prior_scores)
+                prior_values = landmark_value_state.unsqueeze(2).expand(
+                    bsz_, heads_, block_len, codes_, self.head_dim
+                )
+                running_values = torch.where(
+                    use_block.unsqueeze(-1), block_values, prior_values
+                )
+                prior_keys = landmark_key_state.unsqueeze(2).expand(
+                    bsz_, heads_, block_len, codes_, self.head_dim
+                )
+                running_keys = torch.where(
+                    use_block.unsqueeze(-1), block_keys, prior_keys
+                )
+                query_block = archive_q[:, :, window + start : window + end]
+                landmark_routing = F.softmax(
+                    torch.einsum(
+                        "bhed,bhemd->bhem", query_block.to(state_dtype), running_keys
+                    )
+                    / math.sqrt(self.head_dim),
+                    dim=-1,
+                ).to(state_dtype)
+                landmark_outputs.append(
+                    torch.einsum(
+                        "bhem,bhemd->bhed", landmark_routing, running_values
+                    ).to(query_block.dtype)
+                )
+                landmark_valid_outputs.append(
+                    torch.isfinite(running_scores).any(dim=-1)
+                )
+                landmark_score_state = running_scores[:, :, -1]
+                landmark_value_state = running_values[:, :, -1]
+                landmark_key_state = running_keys[:, :, -1]
+        archive_out = torch.zeros_like(local_out)
+        if archive_outputs:
+            archive_out[:, :, window:] = torch.cat(archive_outputs, dim=2)
+        if landmark_outputs:
+            landmark_out = torch.zeros_like(local_out)
+            landmark_out[:, :, window:] = torch.cat(landmark_outputs, dim=2)
+            landmark_valid = torch.zeros(
+                (bsz, self.num_heads, length), device=hidden.device, dtype=torch.bool
+            )
+            landmark_valid[:, :, window:] = torch.cat(landmark_valid_outputs, dim=2)
+            landmark_mix = (
+                torch.ones_like(self.archive.landmark_mix_logits)
+                if self.archive.prefix_landmark
+                else torch.sigmoid(self.archive.landmark_mix_logits)
+            ).to(archive_out.dtype).view(1, self.num_heads, 1, 1)
+            archive_out = torch.where(
+                landmark_valid.unsqueeze(-1),
+                (1.0 - landmark_mix) * archive_out + landmark_mix * landmark_out,
+                archive_out,
+            )
+            self.archive._landmark_score = landmark_score_state.detach()
+            self.archive._landmark_value = landmark_value_state.detach()
+            self.archive._landmark_key = landmark_key_state.detach()
+        if self.archive.persistent_landmark and self.archive.prefix_landmark and event_count:
+            # The token-at-a-time serving path fills prefix slots in temporal
+            # order.  Reproduce that exact address policy in the CUDA
+            # training path instead of treating prefix landmarks as ordinary
+            # max-salience slots (which silently changed the semantics during
+            # curriculum training).  Lexical mode makes these keys
+            # position-free; pair mode binds each key to its successor value.
+            prefix_count = min(self.archive.num_codes, event_count)
+            prefix_keys = archive_k[:, :, :prefix_count]
+            if self.archive.prefix_pair_landmark:
+                successor_end = min(event_count, prefix_count + 1)
+                prefix_values = archive_v[:, :, 1:successor_end]
+                if prefix_values.shape[2] < prefix_count:
+                    prefix_values = torch.cat(
+                        (prefix_values, archive_v[:, :, prefix_count - 1 : prefix_count]),
+                        dim=2,
+                    )
+            else:
+                prefix_values = archive_v[:, :, :prefix_count]
+            query_block = archive_q[:, :, window:]
+            routing_logits = torch.einsum(
+                "bhed,bhmd->bhem", query_block.to(state_dtype), prefix_keys.to(state_dtype)
+            ) / math.sqrt(self.head_dim) * self.archive.landmark_temperature
+            prefix_routing = F.softmax(routing_logits, dim=-1).to(query_block.dtype)
+            prefix_out = torch.einsum(
+                "bhem,bhmd->bhed", prefix_routing, prefix_values.to(query_block.dtype)
+            )
+            archive_out[:, :, window:] = prefix_out
+            # Keep a detached serving snapshot for callers inspecting the
+            # archive after a differentiable forward pass.
+            scores = torch.einsum(
+                "bhed,hmd->bhem", prefix_keys.to(state_dtype),
+                self.archive.codes.to(device=hidden.device, dtype=state_dtype),
+            ) / math.sqrt(self.head_dim)
+            score_state = torch.full(
+                (bsz, self.num_heads, self.archive.num_codes), -torch.inf,
+                device=hidden.device, dtype=state_dtype,
+            )
+            score_state[:, :, :prefix_count] = scores.max(dim=-1).values
+            key_state = torch.zeros_like(self.archive._landmark_key)
+            value_state = torch.zeros_like(self.archive._landmark_value)
+            key_state[:, :, :prefix_count] = prefix_keys.to(key_state.dtype)
+            value_state[:, :, :prefix_count] = prefix_values.to(value_state.dtype)
+            self.archive._landmark_count = prefix_count
+            self.archive._landmark_score = score_state.detach()
+            self.archive._landmark_key = key_state.detach()
+            self.archive._landmark_value = value_state.detach()
+        gate = (
+            torch.zeros_like(gate_proj).transpose(1, 2).unsqueeze(-1)
+            if self.archive.prefix_landmark
+            else torch.sigmoid(gate_proj).transpose(1, 2).unsqueeze(-1)
+        )
+        mixed_out = self._mix_local_archive(local_out, archive_out, gate)
+        active = (torch.arange(length, device=hidden.device) >= window).view(
+            1, 1, length, 1
+        )
+        head_out = torch.where(active, mixed_out, local_out)
+        # Keep a detached snapshot for inspection without retaining the full
+        # sequence graph in the mutable streaming state.
+        self.archive._numerator = state_num.detach()
+        self.archive._denominator = state_den.detach()
+        return self.out_proj(head_out.transpose(1, 2).reshape(bsz, length, self.d_model))
+
+    def _forward_inference(
+        self, hidden: Tensor, q: Tensor, k: Tensor, v: Tensor, gate_proj: Tensor,
+        archive_hint: Optional[Tensor] = None,
+        archive_query_source: Optional[Tensor] = None,
+        archive_key_source: Optional[Tensor] = None,
+    ) -> Tensor:
+        """Vectorized local path used by evaluation/decode (no autograd)."""
+
+        bsz, length, _ = hidden.shape
+        lexical_q, lexical_k, lexical_v = self._lexical_archive_triplet(archive_hint)
+        archive_q_base = q if archive_query_source is None else archive_query_source
+        archive_k_base = k if archive_key_source is None else archive_key_source
+        archive_q = archive_q_base if lexical_q is None else lexical_q
+        archive_k = archive_k_base if lexical_k is None else lexical_k
+        archive_v = v if lexical_v is None else lexical_v
+        window = min(self.window_size, length)
+        if hidden.is_cuda or hidden.device.type == "mps":
+            # On accelerator backends, use the fused SDPA primitive on bounded
+            # blocks instead of materializing an unfolded [time, window, dim]
+            # tensor and launching separate einsums for logits and values. The
+            # key slice contains at most ``window + block_size - 1`` tokens;
+            # the boolean mask keeps exact causal local-window semantics.
+            local_out = None
+            if self.use_triton and self.local_attention_backend == "sdpa":
+                from .triton_kernels import TRITON_AVAILABLE, triton_local_chunk_attention
+
+                if TRITON_AVAILABLE:
+                    local_out = triton_local_chunk_attention(
+                        q, k, v, old_length=0, window_size=window
+                    )
+            if local_out is None:
+                block_size = self.archive.scan_block_size
+                local_outputs: list[Tensor] = []
+                for start in range(0, length, block_size):
+                    end = min(length, start + block_size)
+                    key_start = max(0, start - window + 1)
+                    key_positions = torch.arange(key_start, end, device=hidden.device)
+                    query_positions = torch.arange(start, end, device=hidden.device)
+                    valid = (key_positions[None, :] <= query_positions[:, None]) & (
+                        key_positions[None, :] >= query_positions[:, None] - window + 1
+                    )
+                    if self.local_attention_backend == "eager":
+                        local_outputs.append(
+                            self._local_eager_attention(
+                                q[:, :, start:end],
+                                k[:, :, key_start:end],
+                                v[:, :, key_start:end],
+                                valid,
+                            )
+                        )
+                    else:
+                        local_outputs.append(
+                            _scaled_dot_product_attention(
+                                q[:, :, start:end],
+                                k[:, :, key_start:end],
+                                v[:, :, key_start:end],
+                                attn_mask=valid,
+                                dropout_p=0.0,
+                            )
+                        )
+                local_out = torch.cat(local_outputs, dim=2)
+        else:
+            # The CPU SDPA backend currently pays a relatively high per-block
+            # mask setup cost. Keep the reference's single vectorized unfold
+            # there; it remains exact and avoids thousands of tiny dispatches.
+            valid = torch.arange(window, device=hidden.device)[None, :] >= (
+                window - 1 - torch.arange(length, device=hidden.device)[:, None]
+            )
+            if self.local_attention_backend == "eager":
+                local_out = self._local_eager_attention(q, k, v, valid)
+            else:
+                k_pad = F.pad(k.transpose(-1, -2), (window - 1, 0))
+                v_pad = F.pad(v.transpose(-1, -2), (window - 1, 0))
+                k_windows = k_pad.unfold(-1, window, 1).permute(0, 1, 3, 4, 2)
+                v_windows = v_pad.unfold(-1, window, 1).permute(0, 1, 3, 4, 2)
+                local_logits = torch.einsum(
+                    "bhtd,bhtwd->bhtw", q.float(), k_windows.float()
+                )
+                local_logits = local_logits / math.sqrt(self.head_dim)
+                local_logits = local_logits.masked_fill(
+                    ~valid[None, None], torch.finfo(local_logits.dtype).min
+                )
+                local_prob = F.softmax(local_logits, dim=-1).to(v_windows.dtype)
+                local_out = torch.einsum("bhtw,bhtwd->bhtd", local_prob, v_windows)
+
+        if self.use_archive:
+            self.archive.reset_state(bsz, device=hidden.device)
+            archive_out = torch.zeros_like(local_out)
+            # The archive state is a linear recurrence.  Feed all evicted
+            # tokens through the block scan at once instead of launching one
+            # Python-level update/read pair per position.  This preserves the
+            # post-update read semantics (the first event corresponds to
+            # position ``window_size``) while making prefill overhead scale in
+            # tensor blocks rather than interpreter iterations.
+            event_count = length - self.window_size
+            if event_count > 0:
+                update_kwargs = {
+                    "output": archive_out[:, :, self.window_size :],
+                    "exact_key": k[:, :, :event_count],
+                    "exact_query": q[:, :, self.window_size :],
+                }
+                if hasattr(self.archive, "causal_hidden_predictor"):
+                    update_kwargs["hidden"] = hidden[:, :event_count]
+                self.archive.update_read_chunk(
+                    archive_k[:, :, :event_count],
+                    archive_v[:, :, :event_count],
+                    archive_q[:, :, self.window_size :],
+                    **update_kwargs,
+                )
+            gate = torch.sigmoid(gate_proj).transpose(1, 2).unsqueeze(-1)
+            mixed_out = self._mix_local_archive(local_out, archive_out, gate)
+            active = (torch.arange(length, device=hidden.device) >= self.window_size).view(1, 1, length, 1)
+            head_out = torch.where(active, mixed_out, local_out)
+        else:
+            # Full-attention baseline uses PyTorch's fused causal kernel.
+            head_out = _scaled_dot_product_attention(q, k, v, is_causal=True)
+        return self.out_proj(head_out.transpose(1, 2).reshape(bsz, length, self.d_model))
+
+    def forward(
+        self,
+        hidden: Tensor,
+        *,
+        reset_state: bool = True,
+        position_ids: Optional[Tensor] = None,
+        archive_hint: Optional[Tensor] = None,
+        position_embeddings: Optional[tuple[Tensor, Tensor]] = None,
+    ) -> Tensor:
+        if hidden.ndim != 3 or hidden.shape[-1] != self.d_model:
+            raise ValueError("hidden must have shape [batch, sequence, d_model]")
+        exact_attention = bool(getattr(self.archive, "exact_attention", False))
+        if (self.attention_sink_size or exact_attention) and not torch.is_grad_enabled():
+            return self.step_chunk(
+                hidden, reset_cache=reset_state, position_ids=position_ids,
+                archive_hint=archive_hint, position_embeddings=position_embeddings,
+            )
+        bsz, length, _ = hidden.shape
+        q_proj, k_proj, v_proj, gate_proj = self._project_qkv_gate(hidden)
+        q_raw = self._split_heads(q_proj)
+        q_raw = self._apply_active_query_correction(q_raw)
+        k_raw = self._split_heads(k_proj)
+        v = self._split_heads(v_proj)
+        if position_ids is None:
+            position_ids = torch.arange(length, device=hidden.device, dtype=torch.long)
+        q, k = self._apply_rope(q_raw, k_raw, position_ids, position_embeddings)
+        archive_q_source = q_raw if self.archive_position_invariant else q
+        archive_k_source = k_raw if self.archive_position_invariant else k
+        if not torch.is_grad_enabled():
+            return self._forward_inference(
+                hidden,
+                q,
+                k,
+                v,
+                gate_proj,
+                archive_hint=archive_hint,
+                archive_query_source=archive_q_source,
+                archive_key_source=archive_k_source,
+            )
+        if hidden.is_cuda and length > self.window_size and not self.attention_sink_size and not exact_attention:
+            # CUDA training uses the same bounded block equations as
+            # inference, but keeps the scan differentiable.  This avoids the
+            # O(sequence-length) Python/autograd loop for long retrieval
+            # curriculum examples.
+            if (
+                reset_state
+                or self.archive._numerator.shape[0] != bsz
+                or self.archive._numerator.device != hidden.device
+            ):
+                self.archive.reset_state(bsz, device=hidden.device)
+            return self._forward_train_chunked(
+                hidden,
+                q,
+                k,
+                v,
+                gate_proj,
+                archive_hint=archive_hint,
+                archive_query_source=archive_q_source,
+                archive_key_source=archive_k_source,
+            )
+        if (
+            reset_state
+            or self.archive._numerator.shape[0] != bsz
+            or self.archive._numerator.device != hidden.device
+        ):
             self.archive.reset_state(bsz, device=hidden.device)
 
         local_keys: list[Tensor] = []
+        archive_keys: list[Tensor] = []
         local_values: list[Tensor] = []
         outputs: list[Tensor] = []
         scale = 1.0 / math.sqrt(self.head_dim)
         for t in range(length):
             kt, vt = k[:, :, t], v[:, :, t]
             local_keys.append(kt)
+            archive_keys.append(archive_k_source[:, :, t])
             local_values.append(vt)
             if len(local_keys) > self.window_size:
-                self.archive.update(local_keys.pop(0), local_values.pop(0))
+                evicted_local_key = local_keys.pop(0)
+                evicted_archive_key = archive_keys.pop(0)
+                evicted_value = local_values.pop(0)
+                if t >= self.window_size + self.attention_sink_size:
+                    update_kwargs = {
+                        "exact_key": evicted_local_key,
+                        "exact_query": q[:, :, t],
+                    }
+                    if hasattr(self.archive, "causal_hidden_predictor"):
+                        update_kwargs["hidden"] = hidden[:, t]
+                    self.archive.update(
+                        evicted_archive_key if self.archive_position_invariant else evicted_local_key,
+                        evicted_value,
+                        **update_kwargs,
+                    )
 
             lk = torch.stack(local_keys, dim=2)
             lv = torch.stack(local_values, dim=2)
-            local_logits = torch.einsum("bhd,bhld->bhl", q[:, :, t], lk) * scale
-            local_prob = F.softmax(local_logits, dim=-1)
+            prefix_count = min(self.attention_sink_size, max(0, t - self.window_size + 1))
+            if prefix_count:
+                lk = torch.cat((k[:, :, :prefix_count], lk), dim=2)
+                lv = torch.cat((v[:, :, :prefix_count], lv), dim=2)
+            local_logits = torch.einsum(
+                "bhd,bhld->bhl", q[:, :, t].float(), lk.float()
+            ) * scale
+            local_prob = F.softmax(local_logits, dim=-1).to(lv.dtype)
             local_out = torch.einsum("bhl,bhld->bhd", local_prob, lv)
-            if self.use_archive and t >= self.window_size:
-                archive_out = self.archive.read(q[:, :, t])
-                gate = torch.sigmoid(self.gate(hidden[:, t])).unsqueeze(-1)
-                head_out = gate * local_out + (1.0 - gate) * archive_out
+            if self.use_archive and t >= self.window_size + self.attention_sink_size:
+                archive_out = self.archive.read(archive_q_source[:, :, t], exact_query=q[:, :, t])
+                gate_input = hidden[:, t]
+                gate_weight = getattr(self.gate, "weight", None)
+                if isinstance(gate_weight, Tensor) and gate_weight.dtype != gate_input.dtype:
+                    gate_input = gate_input.to(dtype=gate_weight.dtype)
+                gate = torch.sigmoid(self.gate(gate_input)).to(hidden.dtype).unsqueeze(-1)
+                head_out = self._mix_local_archive(
+                    local_out, archive_out, gate,
+                    local_logits.logsumexp(-1) if exact_attention else None,
+                )
             else:
                 head_out = local_out
-            outputs.append(head_out.transpose(1, 2).reshape(bsz, self.d_model))
+            # Concatenate heads in head-major order, matching the vectorized
+            # inference path and standard multi-head attention layouts.
+            outputs.append(head_out.reshape(bsz, self.d_model))
 
         return self.out_proj(torch.stack(outputs, dim=1))
 
@@ -259,8 +3533,46 @@ class QCCDecoderLayer(nn.Module):
             nn.Dropout(dropout),
         )
 
-    def forward(self, x: Tensor, *, reset_state: bool) -> Tensor:
-        x = x + self.attention(self.norm1(x), reset_state=reset_state)
+    def forward(
+        self,
+        x: Tensor,
+        *,
+        reset_state: bool,
+        position_ids: Optional[Tensor] = None,
+        archive_hint: Optional[Tensor] = None,
+    ) -> Tensor:
+        x = x + self.attention(
+            self.norm1(x), reset_state=reset_state, position_ids=position_ids,
+            archive_hint=archive_hint,
+        )
+        return x + self.mlp(self.norm2(x))
+
+    def step_chunk(
+        self,
+        x: Tensor,
+        *,
+        reset_cache: bool = False,
+        position_ids: Optional[Tensor] = None,
+        archive_hint: Optional[Tensor] = None,
+    ) -> Tensor:
+        x = x + self.attention.step_chunk(
+            self.norm1(x), reset_cache=reset_cache, position_ids=position_ids,
+            archive_hint=archive_hint,
+        )
+        return x + self.mlp(self.norm2(x))
+
+    def step(
+        self,
+        x: Tensor,
+        *,
+        reset_cache: bool = False,
+        position_ids: Optional[Tensor] = None,
+        archive_hint: Optional[Tensor] = None,
+    ) -> Tensor:
+        x = x + self.attention.step(
+            self.norm1(x), reset_cache=reset_cache, position_ids=position_ids,
+            archive_hint=archive_hint,
+        )
         return x + self.mlp(self.norm2(x))
 
 
@@ -277,11 +3589,46 @@ class QCCForCausalLM(nn.Module):
         window_size: int = 128,
         num_codes: int = 16,
         dropout: float = 0.0,
+        position_encoding: str = "sinusoidal",
+        rope_theta: float = 1_000_000.0,
         use_archive: bool = True,
+        use_triton: bool = True,
+        active_codes: Optional[int] = None,
+        lazy_decay: bool = False,
+        archive_read_stride: int = 1,
+        archive_query_cosine_threshold: Optional[float] = None,
+        archive_scan_block_size: int = 1024,
+        archive_content_threshold: Optional[float] = None,
+        archive_persistent_landmark: bool = False,
+        archive_prefix_landmark: bool = False,
+        archive_prefix_pair_landmark: bool = False,
+        archive_landmark_temperature: float = 1.0,
+        archive_global_normalization: bool = True,
+        archive_query_correction_rank: int = 8,
+        archive_lexical_landmark: bool = False,
+        archive_position_invariant: bool = False,
+        archive_decay_rates: Optional[tuple[float, ...]] = None,
     ) -> None:
         super().__init__()
         self.token_embedding = nn.Embedding(vocab_size, d_model)
-        self.position_embedding = nn.Embedding(max_position_embeddings, d_model)
+        if position_encoding == "sinusoidal":
+            self.position_embedding = SinusoidalPositionEmbedding(d_model)
+        elif position_encoding == "learned":
+            self.position_embedding = nn.Embedding(max_position_embeddings, d_model)
+        elif position_encoding == "rope":
+            if rope_theta <= 0:
+                raise ValueError("rope_theta must be positive")
+            self.position_embedding = None
+        elif position_encoding == "none":
+            # Content-only ablation for retrieval experiments.  Keeping this
+            # explicit avoids silently treating a missing positional module as
+            # a production-ready long-context policy.
+            self.position_embedding = None
+        else:
+            raise ValueError(
+                "position_encoding must be 'sinusoidal', 'learned', 'rope', or 'none'"
+            )
+        self.position_encoding = position_encoding
         self.layers = nn.ModuleList(
             QCCDecoderLayer(
                 d_model,
@@ -290,6 +3637,24 @@ class QCCForCausalLM(nn.Module):
                 window_size=window_size,
                 num_codes=num_codes,
                 use_archive=use_archive,
+                use_triton=use_triton,
+                active_codes=active_codes,
+                lazy_decay=lazy_decay,
+                archive_read_stride=archive_read_stride,
+                archive_query_cosine_threshold=archive_query_cosine_threshold,
+                archive_scan_block_size=archive_scan_block_size,
+                archive_content_threshold=archive_content_threshold,
+                archive_persistent_landmark=archive_persistent_landmark,
+                archive_prefix_landmark=archive_prefix_landmark,
+                archive_prefix_pair_landmark=archive_prefix_pair_landmark,
+                archive_landmark_temperature=archive_landmark_temperature,
+                archive_global_normalization=archive_global_normalization,
+                archive_query_correction_rank=archive_query_correction_rank,
+                archive_lexical_landmark=archive_lexical_landmark,
+                archive_position_invariant=archive_position_invariant,
+                rope_theta=rope_theta if position_encoding == "rope" else None,
+                max_position_embeddings=max_position_embeddings,
+                decay_rates=archive_decay_rates,
             )
             for _ in range(num_layers)
         )
@@ -297,6 +3662,7 @@ class QCCForCausalLM(nn.Module):
         self.lm_head = nn.Linear(d_model, vocab_size, bias=False)
         self.lm_head.weight = self.token_embedding.weight
         self.max_position_embeddings = max_position_embeddings
+        self._cache_position = 0
 
     def forward(self, input_ids: Tensor, *, reset_state: bool = True) -> Tensor:
         if input_ids.ndim != 2:
@@ -305,9 +3671,90 @@ class QCCForCausalLM(nn.Module):
         if length > self.max_position_embeddings:
             raise ValueError("sequence exceeds max_position_embeddings")
         positions = torch.arange(length, device=input_ids.device).unsqueeze(0)
-        x = self.token_embedding(input_ids) + self.position_embedding(positions)
+        token = self.token_embedding(input_ids)
+        if self.position_embedding is None:
+            x = token
+        else:
+            x = token + self.position_embedding(positions).to(token.dtype)
         for index, layer in enumerate(self.layers):
-            x = layer(x, reset_state=reset_state or index > 0)
+            x = layer(
+                x,
+                reset_state=reset_state or index > 0,
+                position_ids=positions,
+                archive_hint=token,
+            )
+        return self.lm_head(self.norm(x))
+
+    def reset_cache(self, batch_size: int = 1) -> None:
+        """Reset all layer caches before an independent generation stream."""
+
+        for layer in self.layers:
+            layer.attention.reset_cache(batch_size, device=self.token_embedding.weight.device)
+        self._cache_position = 0
+        self._cache_batch_size = batch_size
+
+    @torch.no_grad()
+    def decode_step(self, input_ids: Tensor, *, reset_cache: bool = False) -> Tensor:
+        """Return logits for one token per batch element using persistent caches."""
+
+        if input_ids.ndim == 2 and input_ids.shape[1] == 1:
+            input_ids = input_ids[:, 0]
+        if input_ids.ndim != 1:
+            raise ValueError("decode_step input_ids must have shape [batch] or [batch, 1]")
+        if self._cache_position >= self.max_position_embeddings:
+            raise ValueError("decode position exceeds max_position_embeddings")
+        bsz = input_ids.shape[0]
+        cache_batch = getattr(self, "_cache_batch_size", None)
+        if reset_cache or self._cache_position == 0 or cache_batch != bsz:
+            for layer in self.layers:
+                layer.attention.reset_cache(bsz, device=input_ids.device)
+            self._cache_position = 0
+            self._cache_batch_size = bsz
+        position = torch.full(
+            (bsz,), self._cache_position, device=input_ids.device, dtype=torch.long
+        )
+        token = self.token_embedding(input_ids)
+        if self.position_embedding is None:
+            x = token
+        else:
+            x = token + self.position_embedding(position).to(token.dtype)
+        for layer in self.layers:
+            x = layer.step(x, position_ids=position, archive_hint=token[:, None, :])
+        self._cache_position += 1
+        return self.lm_head(self.norm(x))
+
+    @torch.no_grad()
+    def decode_chunk(self, input_ids: Tensor, *, reset_cache: bool = False) -> Tensor:
+        """Return logits for a token block using persistent bounded caches."""
+
+        if input_ids.ndim != 2:
+            raise ValueError("decode_chunk input_ids must have shape [batch, sequence]")
+        bsz, length = input_ids.shape
+        if length == 0:
+            return input_ids.new_empty(
+                (bsz, 0, self.lm_head.out_features), dtype=self.lm_head.weight.dtype
+            )
+        if self._cache_position + length > self.max_position_embeddings:
+            raise ValueError("decode positions exceed max_position_embeddings")
+        cache_batch = getattr(self, "_cache_batch_size", None)
+        if reset_cache or self._cache_position == 0 or cache_batch != bsz:
+            for layer in self.layers:
+                layer.attention.reset_cache(bsz, device=input_ids.device)
+            self._cache_position = 0
+            self._cache_batch_size = bsz
+        positions = torch.arange(
+            self._cache_position,
+            self._cache_position + length,
+            device=input_ids.device,
+        ).unsqueeze(0)
+        token = self.token_embedding(input_ids)
+        if self.position_embedding is None:
+            x = token
+        else:
+            x = token + self.position_embedding(positions).to(token.dtype)
+        for layer in self.layers:
+            x = layer.step_chunk(x, position_ids=positions, archive_hint=token)
+        self._cache_position += length
         return self.lm_head(self.norm(x))
 
 
@@ -319,6 +3766,20 @@ def count_archive_elements(model: nn.Module) -> int:
         * layer.attention.archive.num_codes
         * layer.attention.archive.num_scales
         * (layer.attention.archive.head_dim + 1)
+        + (
+            layer.attention.archive.num_heads
+            * layer.attention.archive.num_codes
+            * (2 * layer.attention.archive.head_dim + 1)
+            if layer.attention.archive.persistent_landmark
+            else 0
+        )
+        + (
+            layer.attention.archive.num_heads
+            * layer.attention.archive.num_codes
+            * layer.attention.archive.num_scales
+            if layer.attention.archive.lazy_decay
+            else 0
+        )
         for layer in model.layers
         if isinstance(layer, QCCDecoderLayer)
     )
