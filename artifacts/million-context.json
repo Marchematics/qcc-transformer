@@ -1,0 +1,383 @@
+{
+ "config": {
+  "model": "/root/qcc/models/Qwen2.5-0.5B-Instruct",
+  "lengths": [
+   131072,
+   1048576
+  ],
+  "items": 1,
+  "seeds": 2,
+  "budget": 4096,
+  "lex_cap": 512,
+  "obs": 64,
+  "nsink": 4,
+  "pool": 7,
+  "dilate": 9,
+  "hops": 6,
+  "key_chunk": 4096,
+  "max_new": 24,
+  "prefill_chunk": 8192,
+  "arms": [
+   "full",
+   "bounded"
+  ],
+  "attn_impl": "flash_attention_2",
+  "yarn": "auto",
+  "value_style": "digits",
+  "value_digits": 2,
+  "answer_prefix": true,
+  "out": "artifacts/million-context.json"
+ },
+ "summary": {
+  "131072": {
+   "records": 2,
+   "full_recall": 1.0,
+   "bounded_recall": 0.5,
+   "matched_records": 2,
+   "retention": 0.5,
+   "state_mib": 54.0,
+   "full_state_gib": 1.4999542236328125,
+   "tpot_ms": {
+    "full": 24.875,
+    "bounded": 23.27
+   },
+   "prefill_s": 15.0
+  },
+  "1048576": {
+   "records": 2,
+   "full_recall": 0.0,
+   "bounded_recall": 0.0,
+   "matched_records": 0,
+   "retention": null,
+   "state_mib": 54.0,
+   "full_state_gib": 11.999954223632812,
+   "tpot_ms": {
+    "full": 25.91,
+    "bounded": 23.095
+   },
+   "prefill_s": 850.65
+  }
+ },
+ "results": [
+  {
+   "length": 131072,
+   "true_tokens": 131068,
+   "seed": 0,
+   "items": 1,
+   "arm": "full",
+   "recall": 1.0,
+   "prediction": "7. \n\nThe answer is 97. \n\nThe committee reviewed the record and noted that the programme continues on schedule",
+   "values": [
+    "97"
+   ],
+   "keys": [
+    "trace-c53edf"
+   ],
+   "needle_positions": [
+    116686,
+    116687,
+    116688,
+    116689,
+    116690,
+    116691,
+    116692,
+    116693
+   ],
+   "rope_scaling": {
+    "rope_type": "yarn",
+    "factor": 4.0,
+    "original_max_position_embeddings": 32768,
+    "rope_theta": 1000000.0
+   },
+   "prefill_s": 15.1,
+   "peak_gib": 3.37,
+   "kept_slots": 131092,
+   "kept_bytes": 1610563584,
+   "full_kv_bytes": 1610563584,
+   "compression": 1.0,
+   "generated": 24,
+   "tpot_ms": 26.68,
+   "decode_s": 0.64
+  },
+  {
+   "length": 131072,
+   "true_tokens": 131068,
+   "seed": 0,
+   "items": 1,
+   "arm": "bounded",
+   "recall": 0.0,
+   "prediction": "7. \n\nThis is because the question asks for the \"magic number\" for the \"estimate for the coming year,\"",
+   "values": [
+    "97"
+   ],
+   "keys": [
+    "trace-c53edf"
+   ],
+   "needle_positions": [
+    116686,
+    116687,
+    116688,
+    116689,
+    116690,
+    116691,
+    116692,
+    116693
+   ],
+   "rope_scaling": {
+    "rope_type": "yarn",
+    "factor": 4.0,
+    "original_max_position_embeddings": 32768,
+    "rope_theta": 1000000.0
+   },
+   "prefill_s": 15.1,
+   "peak_gib": 3.37,
+   "kept_slots": 4632,
+   "kept_bytes": 56623104,
+   "full_kv_bytes": 1610563584,
+   "compression": 28.4,
+   "generated": 24,
+   "tpot_ms": 23.64,
+   "decode_s": 0.567
+  },
+  {
+   "length": 131072,
+   "true_tokens": 131068,
+   "seed": 1,
+   "items": 1,
+   "arm": "full",
+   "recall": 1.0,
+   "prediction": "2. \n\nThe answer is 72. \n\nThe committee reviewed the record and noted that the magic number for trace",
+   "values": [
+    "72"
+   ],
+   "keys": [
+    "trace-44cb63"
+   ],
+   "needle_positions": [
+    111074,
+    111075,
+    111076,
+    111077,
+    111078,
+    111079,
+    111080,
+    111081
+   ],
+   "rope_scaling": {
+    "rope_type": "yarn",
+    "factor": 4.0,
+    "original_max_position_embeddings": 32768,
+    "rope_theta": 1000000.0
+   },
+   "prefill_s": 14.9,
+   "peak_gib": 3.46,
+   "kept_slots": 131092,
+   "kept_bytes": 1610563584,
+   "full_kv_bytes": 1610563584,
+   "compression": 1.0,
+   "generated": 24,
+   "tpot_ms": 23.07,
+   "decode_s": 0.554
+  },
+  {
+   "length": 131072,
+   "true_tokens": 131068,
+   "seed": 1,
+   "items": 1,
+   "arm": "bounded",
+   "recall": 1.0,
+   "prediction": "2. \n\nThis is because the magic number for the year 2023 is 72, and it",
+   "values": [
+    "72"
+   ],
+   "keys": [
+    "trace-44cb63"
+   ],
+   "needle_positions": [
+    111074,
+    111075,
+    111076,
+    111077,
+    111078,
+    111079,
+    111080,
+    111081
+   ],
+   "rope_scaling": {
+    "rope_type": "yarn",
+    "factor": 4.0,
+    "original_max_position_embeddings": 32768,
+    "rope_theta": 1000000.0
+   },
+   "prefill_s": 14.9,
+   "peak_gib": 3.46,
+   "kept_slots": 4632,
+   "kept_bytes": 56623104,
+   "full_kv_bytes": 1610563584,
+   "compression": 28.4,
+   "generated": 24,
+   "tpot_ms": 22.9,
+   "decode_s": 0.55
+  },
+  {
+   "length": 1048576,
+   "true_tokens": 1048572,
+   "seed": 0,
+   "items": 1,
+   "arm": "full",
+   "recall": 0.0,
+   "prediction": "3. The magic number is 53. The magic number is 53. The magic number is 5",
+   "values": [
+    "97"
+   ],
+   "keys": [
+    "trace-c53edf"
+   ],
+   "needle_positions": [
+    933488,
+    933489,
+    933490,
+    933491,
+    933492,
+    933493,
+    933494,
+    933495
+   ],
+   "rope_scaling": {
+    "rope_type": "yarn",
+    "factor": 32.0,
+    "original_max_position_embeddings": 32768,
+    "rope_theta": 1000000.0
+   },
+   "prefill_s": 849.8,
+   "peak_gib": 14.06,
+   "kept_slots": 1048596,
+   "kept_bytes": 12884852736,
+   "full_kv_bytes": 12884852736,
+   "compression": 1.0,
+   "generated": 24,
+   "tpot_ms": 25.97,
+   "decode_s": 0.623
+  },
+  {
+   "length": 1048576,
+   "true_tokens": 1048572,
+   "seed": 0,
+   "items": 1,
+   "arm": "bounded",
+   "recall": 0.0,
+   "prediction": ". 5 is the magic number for trace-53. 5 is the magic number for trace-53",
+   "values": [
+    "97"
+   ],
+   "keys": [
+    "trace-c53edf"
+   ],
+   "needle_positions": [
+    933488,
+    933489,
+    933490,
+    933491,
+    933492,
+    933493,
+    933494,
+    933495
+   ],
+   "rope_scaling": {
+    "rope_type": "yarn",
+    "factor": 32.0,
+    "original_max_position_embeddings": 32768,
+    "rope_theta": 1000000.0
+   },
+   "prefill_s": 849.8,
+   "peak_gib": 14.06,
+   "kept_slots": 4632,
+   "kept_bytes": 56623104,
+   "full_kv_bytes": 12884852736,
+   "compression": 227.6,
+   "generated": 24,
+   "tpot_ms": 22.83,
+   "decode_s": 0.548
+  },
+  {
+   "length": 1048576,
+   "true_tokens": 1048572,
+   "seed": 1,
+   "items": 1,
+   "arm": "full",
+   "recall": 0.0,
+   "prediction": ". The record and the magic number is 1. The record and the magic number is 1. The record and",
+   "values": [
+    "72"
+   ],
+   "keys": [
+    "trace-44cb63"
+   ],
+   "needle_positions": [
+    888598,
+    888599,
+    888600,
+    888601,
+    888602,
+    888603,
+    888604,
+    888605
+   ],
+   "rope_scaling": {
+    "rope_type": "yarn",
+    "factor": 32.0,
+    "original_max_position_embeddings": 32768,
+    "rope_theta": 1000000.0
+   },
+   "prefill_s": 851.5,
+   "peak_gib": 14.66,
+   "kept_slots": 1048596,
+   "kept_bytes": 12884852736,
+   "full_kv_bytes": 12884852736,
+   "compression": 1.0,
+   "generated": 24,
+   "tpot_ms": 25.85,
+   "decode_s": 0.62
+  },
+  {
+   "length": 1048576,
+   "true_tokens": 1048572,
+   "seed": 1,
+   "items": 1,
+   "arm": "bounded",
+   "recall": 0.0,
+   "prediction": ". The magic number for trace-44cb63 is 1. The magic number for trace-44",
+   "values": [
+    "72"
+   ],
+   "keys": [
+    "trace-44cb63"
+   ],
+   "needle_positions": [
+    888598,
+    888599,
+    888600,
+    888601,
+    888602,
+    888603,
+    888604,
+    888605
+   ],
+   "rope_scaling": {
+    "rope_type": "yarn",
+    "factor": 32.0,
+    "original_max_position_embeddings": 32768,
+    "rope_theta": 1000000.0
+   },
+   "prefill_s": 851.5,
+   "peak_gib": 14.66,
+   "kept_slots": 4632,
+   "kept_bytes": 56623104,
+   "full_kv_bytes": 12884852736,
+   "compression": 227.6,
+   "generated": 24,
+   "tpot_ms": 23.36,
+   "decode_s": 0.561
+  }
+ ]
+}

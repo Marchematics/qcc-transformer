@@ -1,0 +1,41 @@
+{
+ "model": "/root/qcc/models/Llama-3.2-1B-Instruct",
+ "config": {
+  "model": "/root/qcc/models/Llama-3.2-1B-Instruct",
+  "length": 131072,
+  "batches": [
+   1
+  ],
+  "policies": [
+   "full"
+  ],
+  "budget": 1024,
+  "obs": 64,
+  "nsink": 4,
+  "pool": 7,
+  "max_new": 32,
+  "prefill_chunk": 8192,
+  "seed": 4242,
+  "load_in_4bit": true,
+  "out": "serving_128k_full_4bit.json"
+ },
+ "results": [
+  {
+   "policy": "full",
+   "batch": 1,
+   "context_tokens": 131174,
+   "budget": null,
+   "prefill_s": 50.621,
+   "kept_slots": 131174,
+   "decode_s": 3.371,
+   "decode_tokens_per_s": 9.49,
+   "tpot_ms": 105.352,
+   "peak_cuda_gib": 9.63,
+   "recall": [
+    1.0
+   ],
+   "sample": "7547540.",
+   "status": "ok"
+  }
+ ]
+}

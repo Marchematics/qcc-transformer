@@ -1,0 +1,136 @@
+{
+ "config": {
+  "model": "/root/qcc/models/Qwen2.5-0.5B-Instruct",
+  "lengths": [
+   32768,
+   131072
+  ],
+  "items": 1,
+  "seeds": 1,
+  "budget": 4096,
+  "lex_cap": 512,
+  "obs": 64,
+  "nsink": 4,
+  "pool": 7,
+  "dilate": 9,
+  "hops": 6,
+  "key_chunk": 4096,
+  "max_new": 24,
+  "prefill_chunk": 8192,
+  "arms": [
+   "full"
+  ],
+  "attn_impl": "flash_attention_2",
+  "yarn": "off",
+  "value_style": "digits",
+  "value_digits": 2,
+  "answer_prefix": true,
+  "out": "artifacts/million-proto-yarnoff-items1.json"
+ },
+ "summary": {
+  "32768": {
+   "records": 0,
+   "full_recall": 1.0,
+   "bounded_recall": null,
+   "matched_records": 0,
+   "retention": null,
+   "state_mib": null,
+   "full_state_gib": null,
+   "tpot_ms": {
+    "full": 25.44
+   },
+   "prefill_s": 1.6
+  },
+  "131072": {
+   "records": 0,
+   "full_recall": 1.0,
+   "bounded_recall": null,
+   "matched_records": 0,
+   "retention": null,
+   "state_mib": null,
+   "full_state_gib": null,
+   "tpot_ms": {
+    "full": 22.81
+   },
+   "prefill_s": 14.9
+  }
+ },
+ "results": [
+  {
+   "length": 32768,
+   "true_tokens": 32764,
+   "seed": 0,
+   "items": 1,
+   "arm": "full",
+   "recall": 1.0,
+   "prediction": "7. \n\nThe magic number for trace-c53edf is 97. 97. 9",
+   "values": [
+    "97"
+   ],
+   "keys": [
+    "trace-c53edf"
+   ],
+   "needle_positions": [
+    29171,
+    29172,
+    29173,
+    29174,
+    29175,
+    29176,
+    29177,
+    29178
+   ],
+   "rope_scaling": {
+    "rope_theta": 1000000.0,
+    "rope_type": "default"
+   },
+   "prefill_s": 1.6,
+   "peak_gib": 2.25,
+   "kept_slots": 32788,
+   "kept_bytes": 402604032,
+   "full_kv_bytes": 402604032,
+   "compression": 1.0,
+   "generated": 24,
+   "tpot_ms": 25.44,
+   "decode_s": 0.611
+  },
+  {
+   "length": 131072,
+   "true_tokens": 131068,
+   "seed": 0,
+   "items": 1,
+   "arm": "full",
+   "recall": 1.0,
+   "prediction": "7. \n\nThe magic number for trace-c53edf is 97. \n\nThe magic number is",
+   "values": [
+    "97"
+   ],
+   "keys": [
+    "trace-c53edf"
+   ],
+   "needle_positions": [
+    116686,
+    116687,
+    116688,
+    116689,
+    116690,
+    116691,
+    116692,
+    116693
+   ],
+   "rope_scaling": {
+    "rope_theta": 1000000.0,
+    "rope_type": "default"
+   },
+   "prefill_s": 14.9,
+   "peak_gib": 3.48,
+   "kept_slots": 131092,
+   "kept_bytes": 1610563584,
+   "full_kv_bytes": 1610563584,
+   "compression": 1.0,
+   "generated": 24,
+   "tpot_ms": 22.81,
+   "decode_s": 0.547
+  }
+ ]
+}

@@ -1,0 +1,124 @@
+{
+ "config": {
+  "model": "/root/qcc/models/Qwen2.5-0.5B-Instruct",
+  "lengths": [
+   1048576
+  ],
+  "items": 1,
+  "seeds": 1,
+  "budget": 4096,
+  "lex_cap": 512,
+  "obs": 64,
+  "nsink": 4,
+  "pool": 7,
+  "dilate": 9,
+  "hops": 6,
+  "key_chunk": 4096,
+  "max_new": 24,
+  "prefill_chunk": 8192,
+  "arms": [
+   "full",
+   "bounded"
+  ],
+  "attn_impl": "flash_attention_2",
+  "yarn": "off",
+  "value_style": "digits",
+  "value_digits": 2,
+  "answer_prefix": true,
+  "out": "artifacts/million-context-noyarn.json"
+ },
+ "summary": {
+  "1048576": {
+   "records": 1,
+   "full_recall": 0.0,
+   "bounded_recall": 0.0,
+   "matched_records": 0,
+   "retention": null,
+   "state_mib": 54.0,
+   "full_state_gib": 11.999954223632812,
+   "tpot_ms": {
+    "full": 28.78,
+    "bounded": 23.23
+   },
+   "prefill_s": 848.9
+  }
+ },
+ "results": [
+  {
+   "length": 1048576,
+   "true_tokens": 1048572,
+   "seed": 0,
+   "items": 1,
+   "arm": "full",
+   "recall": 0.0,
+   "prediction": "to the change the change the change the change the change the change the change the change the change the change the change the",
+   "values": [
+    "97"
+   ],
+   "keys": [
+    "trace-c53edf"
+   ],
+   "needle_positions": [
+    933488,
+    933489,
+    933490,
+    933491,
+    933492,
+    933493,
+    933494,
+    933495
+   ],
+   "rope_scaling": {
+    "rope_theta": 1000000.0,
+    "rope_type": "default"
+   },
+   "prefill_s": 848.9,
+   "peak_gib": 13.88,
+   "kept_slots": 1048596,
+   "kept_bytes": 12884852736,
+   "full_kv_bytes": 12884852736,
+   "compression": 1.0,
+   "generated": 24,
+   "tpot_ms": 28.78,
+   "decode_s": 0.691
+  },
+  {
+   "length": 1048576,
+   "true_tokens": 1048572,
+   "seed": 0,
+   "items": 1,
+   "arm": "bounded",
+   "recall": 0.0,
+   "prediction": "to the the continues the continues published and the write to the record the continues published added. the continues the write to",
+   "values": [
+    "97"
+   ],
+   "keys": [
+    "trace-c53edf"
+   ],
+   "needle_positions": [
+    933488,
+    933489,
+    933490,
+    933491,
+    933492,
+    933493,
+    933494,
+    933495
+   ],
+   "rope_scaling": {
+    "rope_theta": 1000000.0,
+    "rope_type": "default"
+   },
+   "prefill_s": 848.9,
+   "peak_gib": 13.88,
+   "kept_slots": 4632,
+   "kept_bytes": 56623104,
+   "full_kv_bytes": 12884852736,
+   "compression": 227.6,
+   "generated": 24,
+   "tpot_ms": 23.23,
+   "decode_s": 0.558
+  }
+ ]
+}

@@ -1,0 +1,60 @@
+{
+  "model": "/datasets/ComfyUI/models/LLM/Phi-3.5-mini-instruct",
+  "record": 6,
+  "config": {
+    "window_size": 4096,
+    "sink_size": 32,
+    "foreground": 384,
+    "background": 128,
+    "block_size": 32,
+    "quality_query_tail": 128,
+    "quality_block_propagation": true,
+    "exact_prefill": true,
+    "stable_code_after_batch_read_revert": true
+  },
+  "full_kv": [
+    {
+      "line": 6,
+      "answers": [
+        "8650260"
+      ],
+      "length_chars": 86964,
+      "tokens": 32030,
+      "task": "niah_multikey_2",
+      "length_bucket": "8-32K",
+      "prediction": "\nThe special magic number for fast-clapboard mentioned in the text is 8650260.\n",
+      "generated_tokens": 27,
+      "reached_output_limit": false,
+      "answer_recall": 1.0,
+      "score": 1.0,
+      "correct": true,
+      "peak_cuda_allocated_bytes": 13701682176
+    }
+  ],
+  "candidate": [
+    {
+      "line": 6,
+      "answers": [
+        "8650260"
+      ],
+      "length_chars": 86964,
+      "tokens": 32030,
+      "task": "niah_multikey_2",
+      "length_bucket": "8-32K",
+      "prediction": "\n\nThe special magic number for fast-clapboard mentioned in the provided text is 9510896.\n",
+      "generated_tokens": 29,
+      "reached_output_limit": false,
+      "answer_recall": 0.0,
+      "score": 0.0,
+      "correct": false,
+      "qcc_runtime_state": {
+        "tensor_storage_by_device": {
+          "cuda:0": 5605851136
+        },
+        "rng_state_bytes": 512,
+        "total_bytes": 5605851648
+      },
+      "peak_cuda_allocated_bytes": 16196514816
+    }
+  ]
+}

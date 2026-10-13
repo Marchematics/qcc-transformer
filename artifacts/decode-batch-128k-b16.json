@@ -1,0 +1,47 @@
+{
+ "config": {
+  "model": "/root/qcc/models/Qwen2.5-0.5B-Instruct",
+  "contexts": [
+   131072
+  ],
+  "budget": 4632,
+  "batches": [
+   16
+  ],
+  "steps": 12,
+  "prefill_chunk": 8192,
+  "attn_impl": "flash_attention_2",
+  "arms": [
+   "full",
+   "bounded"
+  ],
+  "no_graph": false,
+  "out": "artifacts/decode-batch-128k-b16.json"
+ },
+ "results": [
+  {
+   "context": 131072,
+   "arm": "full",
+   "batch": 16,
+   "status": "infeasible",
+   "cache_bytes": 25769803776
+  },
+  {
+   "context": 131072,
+   "arm": "bounded",
+   "batch": 16,
+   "status": "measured",
+   "cache_keys": 4647,
+   "wall_ms_per_step": 21.14752121269703,
+   "steps": 11,
+   "graph_ms_per_step": 6.186396349221468
+  }
+ ],
+ "ratios": {
+  "ctx131072_batch16": {
+   "wall_ratio": null,
+   "graph_ratio": null
+  }
+ },
+ "honesty": "both arms share the operator and the capture path; the ratio is full-KV per-step divided by bounded per-step at the same batch"
+}

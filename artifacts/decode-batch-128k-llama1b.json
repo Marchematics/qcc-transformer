@@ -1,0 +1,97 @@
+{
+ "config": {
+  "model": "/root/qcc/models/Llama-3.2-1B-Instruct",
+  "contexts": [
+   131072
+  ],
+  "budget": 4632,
+  "batches": [
+   1,
+   2,
+   4
+  ],
+  "steps": 12,
+  "prefill_chunk": 8192,
+  "attn_impl": "flash_attention_2",
+  "arms": [
+   "full",
+   "bounded"
+  ],
+  "no_graph": false,
+  "out": "artifacts/decode-batch-128k-llama1b.json"
+ },
+ "results": [
+  {
+   "context": 131072,
+   "arm": "full",
+   "batch": 1,
+   "status": "measured",
+   "cache_keys": 131087,
+   "wall_ms_per_step": 14.317808672785759,
+   "steps": 11,
+   "graph_ms_per_step": 11.997065274044871
+  },
+  {
+   "context": 131072,
+   "arm": "bounded",
+   "batch": 1,
+   "status": "measured",
+   "cache_keys": 4647,
+   "wall_ms_per_step": 13.733750209212303,
+   "steps": 11,
+   "graph_ms_per_step": 5.5370572954416275
+  },
+  {
+   "context": 131072,
+   "arm": "full",
+   "batch": 2,
+   "status": "measured",
+   "cache_keys": 131087,
+   "wall_ms_per_step": 20.13932354748249,
+   "steps": 11,
+   "graph_ms_per_step": 18.55487539432943
+  },
+  {
+   "context": 131072,
+   "arm": "bounded",
+   "batch": 2,
+   "status": "measured",
+   "cache_keys": 4647,
+   "wall_ms_per_step": 15.249432995915413,
+   "steps": 11,
+   "graph_ms_per_step": 6.137009477242827
+  },
+  {
+   "context": 131072,
+   "arm": "full",
+   "batch": 4,
+   "status": "infeasible",
+   "cache_bytes": 17179869184
+  },
+  {
+   "context": 131072,
+   "arm": "bounded",
+   "batch": 4,
+   "status": "measured",
+   "cache_keys": 4647,
+   "wall_ms_per_step": 14.395615085959435,
+   "steps": 11,
+   "graph_ms_per_step": 6.897943443618715
+  }
+ ],
+ "ratios": {
+  "ctx131072_batch1": {
+   "wall_ratio": 1.042527237984981,
+   "graph_ratio": 2.1666861355979528
+  },
+  "ctx131072_batch2": {
+   "wall_ratio": 1.3206604831062796,
+   "graph_ratio": 3.0234392603000466
+  },
+  "ctx131072_batch4": {
+   "wall_ratio": null,
+   "graph_ratio": null
+  }
+ },
+ "honesty": "both arms share the operator and the capture path; the ratio is full-KV per-step divided by bounded per-step at the same batch"
+}

@@ -1,0 +1,152 @@
+{
+  "schema": "qcc-ruler-v1",
+  "pretrained_parameters": 2009140224,
+  "trainable_parameters": 6589440,
+  "trainable_fraction_of_pretrained": 0.0032797312608082055,
+  "benchmark": "ruler",
+  "model": "/datasets/ComfyUI/models/LLM/Phi-3.5-mini-instruct",
+  "model_id": "/datasets/ComfyUI/models/LLM/Phi-3.5-mini-instruct",
+  "run_id": "quality-first-row16-chunked-full-v3",
+  "progress_jsonl": "artifacts/benchmark-quality-first-row16-chunked-full-v3.progress.jsonl",
+  "matched_full_kv": true,
+  "offload_full_kv": true,
+  "full_kv_resident_layers": 8,
+  "scoring": "mean case-insensitive answer recall; output-limit and generation errors score zero",
+  "attention_sink_size": 0,
+  "archive_mix_override": null,
+  "real_model": true,
+  "synthetic": false,
+  "official": true,
+  "attn_implementation": "eager",
+  "chunked_full_attention": true,
+  "full_attention_query_chunk_size": 128,
+  "full_attention_key_chunk_size": 1024,
+  "chunked_full_attention_layers": 32,
+  "use_triton": true,
+  "local_attention_backend": "sdpa",
+  "prefill_chunk_size": 512,
+  "quality_first": true,
+  "quality_block_propagation": false,
+  "quality_prefill_shadow_only": false,
+  "exact_storage_dtype": "float32",
+  "exact_query_correction": false,
+  "active_query_correction": false,
+  "archive_lexical_landmark": false,
+  "causal_coreset": false,
+  "coreset_capacity": null,
+  "coreset_merge_policy": "ward",
+  "coreset_query_probes": 8,
+  "coreset_partition_weight": 1.0,
+  "exact_attention": true,
+  "background_size": 128,
+  "retention_block_size": 32,
+  "quality_query_tail": 128,
+  "exact_num_sets": 24,
+  "exact_ways": 32,
+  "full_suite": false,
+  "qcc_only": false,
+  "qcc_score": 1.0,
+  "full_kv_score": 1.0,
+  "quality_retention": 1.0,
+  "generation_errors": {
+    "full_kv": 0,
+    "qcc": 0
+  },
+  "task_ratios": {
+    "task:niah_multikey_2": 1.0,
+    "length:0-8K": 1.0
+  },
+  "quality_score": 1.0,
+  "native_context_tokens": 131072,
+  "records": 1,
+  "patched_layers": [
+    "model.layers.0.self_attn",
+    "model.layers.1.self_attn",
+    "model.layers.2.self_attn",
+    "model.layers.3.self_attn",
+    "model.layers.4.self_attn",
+    "model.layers.5.self_attn",
+    "model.layers.6.self_attn",
+    "model.layers.7.self_attn",
+    "model.layers.8.self_attn",
+    "model.layers.9.self_attn",
+    "model.layers.10.self_attn",
+    "model.layers.11.self_attn",
+    "model.layers.12.self_attn",
+    "model.layers.13.self_attn",
+    "model.layers.14.self_attn",
+    "model.layers.15.self_attn",
+    "model.layers.16.self_attn",
+    "model.layers.17.self_attn",
+    "model.layers.18.self_attn",
+    "model.layers.19.self_attn",
+    "model.layers.20.self_attn",
+    "model.layers.21.self_attn",
+    "model.layers.22.self_attn",
+    "model.layers.23.self_attn",
+    "model.layers.24.self_attn",
+    "model.layers.25.self_attn",
+    "model.layers.26.self_attn",
+    "model.layers.27.self_attn",
+    "model.layers.28.self_attn",
+    "model.layers.29.self_attn",
+    "model.layers.30.self_attn",
+    "model.layers.31.self_attn"
+  ],
+  "baseline_full_kv": {
+    "correct": 1,
+    "score_sum": 1.0,
+    "accuracy": 1.0,
+    "records": [
+      {
+        "line": 16,
+        "answers": [
+          "6569343"
+        ],
+        "length_chars": 20271,
+        "tokens": 7422,
+        "task": "niah_multikey_2",
+        "length_bucket": "0-8K",
+        "prediction": "\n\nThe special magic number for damaging-newsprint mentioned in the provided text is 6569343.\n\n",
+        "generated_tokens": 30,
+        "reached_output_limit": false,
+        "answer_recall": 1.0,
+        "score": 1.0,
+        "correct": true,
+        "peak_cuda_allocated_bytes": 4477414400
+      }
+    ]
+  },
+  "qcc_retrofit": {
+    "correct": 1,
+    "score_sum": 1.0,
+    "accuracy": 1.0,
+    "records": [
+      {
+        "line": 16,
+        "answers": [
+          "6569343"
+        ],
+        "length_chars": 20271,
+        "tokens": 7422,
+        "task": "niah_multikey_2",
+        "length_bucket": "0-8K",
+        "prediction": "\n\nThe special magic number for damaging-newsprint mentioned in the provided text is 6569343.\n\n",
+        "generated_tokens": 30,
+        "reached_output_limit": false,
+        "answer_recall": 1.0,
+        "score": 1.0,
+        "correct": true,
+        "qcc_runtime_state": {
+          "tensor_storage_by_device": {
+            "cuda:0": 5899964416
+          },
+          "rng_state_bytes": 512,
+          "total_bytes": 5899964928
+        },
+        "peak_cuda_allocated_bytes": 9680987648
+      }
+    ]
+  },
+  "note": "Official RULER record scoring; generation failures count as incorrect and no quality claim is made beyond this split."
+}

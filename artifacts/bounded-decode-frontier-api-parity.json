@@ -1,0 +1,194 @@
+{
+ "model": "/root/qcc/models/Llama-3.2-1B-Instruct",
+ "budget": 4096,
+ "lex_cap": 512,
+ "aggregate": 0.85,
+ "per_task": {
+  "niah_multikey_2": 1.0,
+  "niah_multikey_3": 0.8,
+  "niah_single_1": 1.0,
+  "vt": 0.6
+ },
+ "results": [
+  {
+   "task": "niah_multikey_2",
+   "length": 11795,
+   "kept": 4608,
+   "score": 1.0,
+   "prediction": "7549132.",
+   "seconds": 2.2,
+   "peak_gib": 6.22
+  },
+  {
+   "task": "niah_multikey_2",
+   "length": 11828,
+   "kept": 4608,
+   "score": 1.0,
+   "prediction": " 5528843.",
+   "seconds": 1.7,
+   "peak_gib": 7.1
+  },
+  {
+   "task": "niah_multikey_2",
+   "length": 11807,
+   "kept": 4608,
+   "score": 1.0,
+   "prediction": " 3539476.",
+   "seconds": 1.6,
+   "peak_gib": 7.1
+  },
+  {
+   "task": "niah_multikey_2",
+   "length": 11843,
+   "kept": 4608,
+   "score": 1.0,
+   "prediction": " 2326271.",
+   "seconds": 1.7,
+   "peak_gib": 7.1
+  },
+  {
+   "task": "niah_multikey_2",
+   "length": 11834,
+   "kept": 4608,
+   "score": 1.0,
+   "prediction": " 4291815.",
+   "seconds": 1.6,
+   "peak_gib": 7.11
+  },
+  {
+   "task": "niah_multikey_3",
+   "length": 11685,
+   "kept": 4608,
+   "score": 1.0,
+   "prediction": " f9b81b81-b24d-4b46-bdba-f5f787343daf.",
+   "seconds": 2.0,
+   "peak_gib": 7.06
+  },
+  {
+   "task": "niah_multikey_3",
+   "length": 11678,
+   "kept": 4608,
+   "score": 1.0,
+   "prediction": " 41004534-dab4-440d-8a49-0d5b1afba8f8.",
+   "seconds": 2.0,
+   "peak_gib": 7.02
+  },
+  {
+   "task": "niah_multikey_3",
+   "length": 11640,
+   "kept": 4608,
+   "score": 1.0,
+   "prediction": " 8f138beb-ed8f-4b1e-8558-28efa37e8a9e.",
+   "seconds": 1.9,
+   "peak_gib": 7.01
+  },
+  {
+   "task": "niah_multikey_3",
+   "length": 11694,
+   "kept": 4608,
+   "score": 0.0,
+   "prediction": " 0x0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0",
+   "seconds": 7.0,
+   "peak_gib": 7.01
+  },
+  {
+   "task": "niah_multikey_3",
+   "length": 10189,
+   "kept": 4608,
+   "score": 1.0,
+   "prediction": " 7e9a0715-6468-4807-a51d-bf8f8b2b2dcc.",
+   "seconds": 2.2,
+   "peak_gib": 6.52
+  },
+  {
+   "task": "niah_single_1",
+   "length": 15584,
+   "kept": 4608,
+   "score": 1.0,
+   "prediction": " 4080114.\nThe grass is green. The sky is blue. The sun is ye",
+   "seconds": 8.1,
+   "peak_gib": 7.97
+  },
+  {
+   "task": "niah_single_1",
+   "length": 15575,
+   "kept": 4608,
+   "score": 1.0,
+   "prediction": " 4250981.",
+   "seconds": 3.0,
+   "peak_gib": 9.26
+  },
+  {
+   "task": "niah_single_1",
+   "length": 15584,
+   "kept": 4608,
+   "score": 1.0,
+   "prediction": " 2976288.",
+   "seconds": 2.7,
+   "peak_gib": 9.26
+  },
+  {
+   "task": "niah_single_1",
+   "length": 15578,
+   "kept": 4608,
+   "score": 1.0,
+   "prediction": " 6007513.",
+   "seconds": 2.8,
+   "peak_gib": 9.26
+  },
+  {
+   "task": "niah_single_1",
+   "length": 15584,
+   "kept": 4608,
+   "score": 1.0,
+   "prediction": " 6161932.",
+   "seconds": 2.8,
+   "peak_gib": 9.26
+  },
+  {
+   "task": "vt",
+   "length": 15647,
+   "kept": 4608,
+   "score": 0.8,
+   "prediction": "SBVW VRMKI DTSIG GEKHO VRYZB ZKJ OPG EMA YSBVW VRMKI DTSIG G",
+   "seconds": 5.1,
+   "peak_gib": 9.28
+  },
+  {
+   "task": "vt",
+   "length": 15649,
+   "kept": 4608,
+   "score": 0.4,
+   "prediction": "EEBD NGIIT GQUVY HGM OPU AMQ WTS\n\nMemorize and track the cha",
+   "seconds": 5.3,
+   "peak_gib": 9.3
+  },
+  {
+   "task": "vt",
+   "length": 15642,
+   "kept": 4608,
+   "score": 0.4,
+   "prediction": "QQSK VQVAY UYTIR\n\nMemorize and track the chain(s) of variabl",
+   "seconds": 5.1,
+   "peak_gib": 9.3
+  },
+  {
+   "task": "vt",
+   "length": 15644,
+   "kept": 4608,
+   "score": 0.6,
+   "prediction": "PEYQ LCEIZ RMVYS LCEIZ ZPEYQ\n\nMemorize and track the chain(s",
+   "seconds": 5.1,
+   "peak_gib": 9.29
+  },
+  {
+   "task": "vt",
+   "length": 15646,
+   "kept": 4608,
+   "score": 0.8,
+   "prediction": "CDXF RGDHF QMNPT YQC ORZ LBBNE SCDXF RGDHF QMNPT YQC ORZ LBB",
+   "seconds": 5.0,
+   "peak_gib": 9.3
+  }
+ ]
+}

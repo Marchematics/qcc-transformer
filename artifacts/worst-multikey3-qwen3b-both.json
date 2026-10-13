@@ -1,0 +1,698 @@
+{
+ "model": "/root/qcc/models/Qwen2.5-3B-Instruct",
+ "label": "Qwen2.5-3B-Instruct",
+ "config": {
+  "model": "/root/qcc/models/Qwen2.5-3B-Instruct",
+  "label": null,
+  "ruler_jsonl": "/home/waas/ruler_a10_v1/ruler_subset.jsonl",
+  "tasks": [
+   "niah_multikey_3"
+  ],
+  "limit": 20,
+  "max_prompt_tokens": 32000,
+  "budget": 4096,
+  "lex_cap": 512,
+  "hops": 6,
+  "obs": 64,
+  "nsink": 4,
+  "pool": 7,
+  "dilate": 9,
+  "scoring": "last",
+  "anchor_mode": "both",
+  "min_anchor_len": 3,
+  "max_new": 128,
+  "prefill_chunk": 4096,
+  "key_chunk": 1024,
+  "arms": [
+   "full",
+   "bounded"
+  ],
+  "trust_remote_code": false,
+  "load_4bit": false,
+  "dtype": "bfloat16",
+  "attn_impl": "sdpa",
+  "out": "artifacts/worst-multikey3-qwen3b-both.json"
+ },
+ "summary": {
+  "tasks": {
+   "niah_multikey_3": {
+    "full": {
+     "records": 15,
+     "mean_partial": 0.8,
+     "mean_strict": 0.8,
+     "mean_kept_slots": 17714.5
+    },
+    "bounded": {
+     "records": 15,
+     "mean_partial": 0.7333,
+     "mean_strict": 0.7333,
+     "mean_kept_slots": 4608.0
+    },
+    "retention": {
+     "matched_records": 12,
+     "mean": 0.8333,
+     "worst": 0.0
+    }
+   }
+  },
+  "aggregate": {
+   "tasks": 1,
+   "mean_retention": 0.8333,
+   "worst_task_retention": 0.8333,
+   "worst_record_retention": 0.0,
+   "matched_records": 12
+  }
+ },
+ "records": [
+  {
+   "row": 0,
+   "task": "niah_multikey_3",
+   "ruler_index": 3281,
+   "nominal_length": 16330,
+   "prompt_tokens": 15250,
+   "arm": "full",
+   "kept_slots": 15250,
+   "slots_per_token": 1.0,
+   "prediction": "f9b81b81-b24d-4b46-bdba-f5f787343daf.",
+   "generated": 31,
+   "outputs": [
+    "f9b81b81-b24d-4b46-bdba-f5f787343daf"
+   ],
+   "recall_partial": 1.0,
+   "recall_strict": 1.0,
+   "prefill_s": 3.44,
+   "decode_s": 0.99,
+   "peak_gib": 9.5,
+   "pinned_rope": false
+  },
+  {
+   "row": 0,
+   "task": "niah_multikey_3",
+   "ruler_index": 3281,
+   "nominal_length": 16330,
+   "prompt_tokens": 15250,
+   "arm": "bounded",
+   "kept_slots": 4608,
+   "slots_per_token": 0.3022,
+   "prediction": "f9b81b81-b24d-4b46-bdba-f5f787343daf.",
+   "generated": 31,
+   "outputs": [
+    "f9b81b81-b24d-4b46-bdba-f5f787343daf"
+   ],
+   "recall_partial": 1.0,
+   "recall_strict": 1.0,
+   "prefill_s": 3.47,
+   "decode_s": 0.9,
+   "peak_gib": 10.75,
+   "pinned_rope": false
+  },
+  {
+   "row": 1,
+   "task": "niah_multikey_3",
+   "ruler_index": 4421,
+   "nominal_length": 16365,
+   "prompt_tokens": 15314,
+   "arm": "full",
+   "kept_slots": 15314,
+   "slots_per_token": 1.0,
+   "prediction": "41004534-dab4-440d-8a49-0d5b1afba8f8.",
+   "generated": 35,
+   "outputs": [
+    "41004534-dab4-440d-8a49-0d5b1afba8f8"
+   ],
+   "recall_partial": 1.0,
+   "recall_strict": 1.0,
+   "prefill_s": 3.15,
+   "decode_s": 1.01,
+   "peak_gib": 10.75,
+   "pinned_rope": false
+  },
+  {
+   "row": 1,
+   "task": "niah_multikey_3",
+   "ruler_index": 4421,
+   "nominal_length": 16365,
+   "prompt_tokens": 15314,
+   "arm": "bounded",
+   "kept_slots": 4608,
+   "slots_per_token": 0.3009,
+   "prediction": "41004534-dab4-440d-8a49-0d5b1afba8f8.",
+   "generated": 35,
+   "outputs": [
+    "41004534-dab4-440d-8a49-0d5b1afba8f8"
+   ],
+   "recall_partial": 1.0,
+   "recall_strict": 1.0,
+   "prefill_s": 3.39,
+   "decode_s": 1.01,
+   "peak_gib": 10.78,
+   "pinned_rope": false
+  },
+  {
+   "row": 2,
+   "task": "niah_multikey_3",
+   "ruler_index": 21179,
+   "nominal_length": 16378,
+   "prompt_tokens": 15289,
+   "arm": "full",
+   "kept_slots": 15289,
+   "slots_per_token": 1.0,
+   "prediction": "8f138beb-ed8f-4b1e-8558-28efa37e8a9e.",
+   "generated": 33,
+   "outputs": [
+    "8f138beb-ed8f-4b1e-8558-28efa37e8a9e"
+   ],
+   "recall_partial": 1.0,
+   "recall_strict": 1.0,
+   "prefill_s": 3.15,
+   "decode_s": 0.97,
+   "peak_gib": 10.78,
+   "pinned_rope": false
+  },
+  {
+   "row": 2,
+   "task": "niah_multikey_3",
+   "ruler_index": 21179,
+   "nominal_length": 16378,
+   "prompt_tokens": 15289,
+   "arm": "bounded",
+   "kept_slots": 4608,
+   "slots_per_token": 0.3014,
+   "prediction": "8f138beb-ed8f-4b1e-8558-28efa37e8a9e.",
+   "generated": 33,
+   "outputs": [
+    "8f138beb-ed8f-4b1e-8558-28efa37e8a9e"
+   ],
+   "recall_partial": 1.0,
+   "recall_strict": 1.0,
+   "prefill_s": 3.4,
+   "decode_s": 0.97,
+   "peak_gib": 10.77,
+   "pinned_rope": false
+  },
+  {
+   "row": 3,
+   "task": "niah_multikey_3",
+   "ruler_index": 22661,
+   "nominal_length": 16369,
+   "prompt_tokens": 15302,
+   "arm": "full",
+   "kept_slots": 15302,
+   "slots_per_token": 1.0,
+   "prediction": "e1e09d8e-8c87-4e5c-8e08-0651450a2a0e.",
+   "generated": 38,
+   "outputs": [
+    "9b84e2c0-b782-4d38-9e13-f215c85b4657"
+   ],
+   "recall_partial": 0.0,
+   "recall_strict": 0.0,
+   "prefill_s": 3.15,
+   "decode_s": 1.13,
+   "peak_gib": 10.77,
+   "pinned_rope": false
+  },
+  {
+   "row": 3,
+   "task": "niah_multikey_3",
+   "ruler_index": 22661,
+   "nominal_length": 16369,
+   "prompt_tokens": 15302,
+   "arm": "bounded",
+   "kept_slots": 4608,
+   "slots_per_token": 0.3011,
+   "prediction": "e1e09d8e-8c87-4e5c-8e08-0651450a2a0e.",
+   "generated": 38,
+   "outputs": [
+    "9b84e2c0-b782-4d38-9e13-f215c85b4657"
+   ],
+   "recall_partial": 0.0,
+   "recall_strict": 0.0,
+   "prefill_s": 3.42,
+   "decode_s": 1.24,
+   "peak_gib": 10.77,
+   "pinned_rope": false
+  },
+  {
+   "row": 4,
+   "task": "niah_multikey_3",
+   "ruler_index": 7271,
+   "nominal_length": 14348,
+   "prompt_tokens": 13378,
+   "arm": "full",
+   "kept_slots": 13378,
+   "slots_per_token": 1.0,
+   "prediction": "7e9a0715-6468-4807-a51d-bf8f8b2b2dcc.",
+   "generated": 35,
+   "outputs": [
+    "7e9a0715-6468-4807-a51d-bf8f8b2b2dcc"
+   ],
+   "recall_partial": 1.0,
+   "recall_strict": 1.0,
+   "prefill_s": 2.61,
+   "decode_s": 1.04,
+   "peak_gib": 10.77,
+   "pinned_rope": false
+  },
+  {
+   "row": 4,
+   "task": "niah_multikey_3",
+   "ruler_index": 7271,
+   "nominal_length": 14348,
+   "prompt_tokens": 13378,
+   "arm": "bounded",
+   "kept_slots": 4608,
+   "slots_per_token": 0.3444,
+   "prediction": "7e9a0715-6468-4807-a51d-bf8f8b2b2b2b. \n\nPlease note that the uuid you provided in the question (7e9a0715-6468-4807-a51d-bf8f8b2b2b2b) is different from the one provided in the text (7e9a0715-6468-4807-a51d-bf8f8b2b2b2b).",
+   "generated": 128,
+   "outputs": [
+    "7e9a0715-6468-4807-a51d-bf8f8b2b2dcc"
+   ],
+   "recall_partial": 0.0,
+   "recall_strict": 0.0,
+   "prefill_s": 2.84,
+   "decode_s": 3.74,
+   "peak_gib": 9.96,
+   "pinned_rope": false
+  },
+  {
+   "row": 5,
+   "task": "niah_multikey_3",
+   "ruler_index": 32351,
+   "nominal_length": 32723,
+   "prompt_tokens": 30695,
+   "arm": "full",
+   "kept_slots": 30695,
+   "slots_per_token": 1.0,
+   "prediction": "20a8be5-a274-47d8-838b-42290d0453a1.",
+   "generated": 35,
+   "outputs": [
+    "e20a8be5-a274-47d8-838b-42290d0453a1"
+   ],
+   "recall_partial": 0.0,
+   "recall_strict": 0.0,
+   "prefill_s": 8.74,
+   "decode_s": 1.05,
+   "peak_gib": 10.11,
+   "pinned_rope": false
+  },
+  {
+   "row": 5,
+   "task": "niah_multikey_3",
+   "ruler_index": 32351,
+   "nominal_length": 32723,
+   "prompt_tokens": 30695,
+   "arm": "bounded",
+   "kept_slots": 4608,
+   "slots_per_token": 0.1501,
+   "prediction": "20a8be5-a274-47d8-838b-42290d0453a1. \n\nTo find this, I looked for the uuid associated with the UUID string \"e1894ee4-e08f-4013-9387-98891980fedf\" in the text, which was given as \"e20a8be5-a274-47d8-838b-42290d0453a1\".",
+   "generated": 128,
+   "outputs": [
+    "e20a8be5-a274-47d8-838b-42290d0453a1"
+   ],
+   "recall_partial": 1.0,
+   "recall_strict": 1.0,
+   "prefill_s": 9.13,
+   "decode_s": 3.75,
+   "peak_gib": 10.51,
+   "pinned_rope": false
+  },
+  {
+   "row": 6,
+   "task": "niah_multikey_3",
+   "ruler_index": 3965,
+   "nominal_length": 32766,
+   "prompt_tokens": 30769,
+   "arm": "full",
+   "kept_slots": 30769,
+   "slots_per_token": 1.0,
+   "prediction": "01a8e04-d157-4536-974b-699ba31f70a8.",
+   "generated": 35,
+   "outputs": [
+    "a01a8e04-d157-4536-974b-699ba31f70a8"
+   ],
+   "recall_partial": 0.0,
+   "recall_strict": 0.0,
+   "prefill_s": 8.77,
+   "decode_s": 1.03,
+   "peak_gib": 10.51,
+   "pinned_rope": false
+  },
+  {
+   "row": 6,
+   "task": "niah_multikey_3",
+   "ruler_index": 3965,
+   "nominal_length": 32766,
+   "prompt_tokens": 30769,
+   "arm": "bounded",
+   "kept_slots": 4608,
+   "slots_per_token": 0.1498,
+   "prediction": "01a8e04-d157-4536-974b-699ba31f70a8.",
+   "generated": 35,
+   "outputs": [
+    "a01a8e04-d157-4536-974b-699ba31f70a8"
+   ],
+   "recall_partial": 0.0,
+   "recall_strict": 0.0,
+   "prefill_s": 9.17,
+   "decode_s": 1.03,
+   "peak_gib": 10.54,
+   "pinned_rope": false
+  },
+  {
+   "row": 7,
+   "task": "niah_multikey_3",
+   "ruler_index": 43409,
+   "nominal_length": 32679,
+   "prompt_tokens": 30682,
+   "arm": "full",
+   "kept_slots": 30682,
+   "slots_per_token": 1.0,
+   "prediction": "359de7a2-8efc-4945-bdb6-0ae78bc11c41.",
+   "generated": 33,
+   "outputs": [
+    "359de7a2-8efc-4945-bdb6-0ae78bc11c41"
+   ],
+   "recall_partial": 1.0,
+   "recall_strict": 1.0,
+   "prefill_s": 8.73,
+   "decode_s": 0.97,
+   "peak_gib": 10.54,
+   "pinned_rope": false
+  },
+  {
+   "row": 7,
+   "task": "niah_multikey_3",
+   "ruler_index": 43409,
+   "nominal_length": 32679,
+   "prompt_tokens": 30682,
+   "arm": "bounded",
+   "kept_slots": 4608,
+   "slots_per_token": 0.1502,
+   "prediction": "359de7a2-8efc-4945-bdb6-0ae78bc11c41. \n\nThis can be seen from the text where it states: \"One of the special magic uuids for 137a06ca-287d-4d5f-a0c3-86c6f95a3a92 is: 359de7a2-8efc-4945-bdb6-0ae78bc11c41.\" \n\nThe uuids are associated",
+   "generated": 128,
+   "outputs": [
+    "359de7a2-8efc-4945-bdb6-0ae78bc11c41"
+   ],
+   "recall_partial": 1.0,
+   "recall_strict": 1.0,
+   "prefill_s": 9.12,
+   "decode_s": 3.75,
+   "peak_gib": 10.5,
+   "pinned_rope": false
+  },
+  {
+   "row": 8,
+   "task": "niah_multikey_3",
+   "ruler_index": 43067,
+   "nominal_length": 32616,
+   "prompt_tokens": 30643,
+   "arm": "full",
+   "kept_slots": 30643,
+   "slots_per_token": 1.0,
+   "prediction": "ad4e6fab-6724-43c6-aa00-cb2ff64acaa9.",
+   "generated": 30,
+   "outputs": [
+    "ad4e6fab-6724-43c6-aa00-cb2ff64acaa9"
+   ],
+   "recall_partial": 1.0,
+   "recall_strict": 1.0,
+   "prefill_s": 8.74,
+   "decode_s": 0.89,
+   "peak_gib": 10.5,
+   "pinned_rope": false
+  },
+  {
+   "row": 8,
+   "task": "niah_multikey_3",
+   "ruler_index": 43067,
+   "nominal_length": 32616,
+   "prompt_tokens": 30643,
+   "arm": "bounded",
+   "kept_slots": 4608,
+   "slots_per_token": 0.1504,
+   "prediction": "ad4e6fab-6724-43c6-aa00-cb2ff64acaa9.",
+   "generated": 30,
+   "outputs": [
+    "ad4e6fab-6724-43c6-aa00-cb2ff64acaa9"
+   ],
+   "recall_partial": 1.0,
+   "recall_strict": 1.0,
+   "prefill_s": 9.12,
+   "decode_s": 0.88,
+   "peak_gib": 10.48,
+   "pinned_rope": false
+  },
+  {
+   "row": 9,
+   "task": "niah_multikey_3",
+   "ruler_index": 10007,
+   "nominal_length": 32632,
+   "prompt_tokens": 30635,
+   "arm": "full",
+   "kept_slots": 30635,
+   "slots_per_token": 1.0,
+   "prediction": "ddf5d372-265e-4596-8088-34db7037ccc3.",
+   "generated": 34,
+   "outputs": [
+    "ddf5d372-265e-4596-8088-34db7037ccc3"
+   ],
+   "recall_partial": 1.0,
+   "recall_strict": 1.0,
+   "prefill_s": 8.74,
+   "decode_s": 1.0,
+   "peak_gib": 10.48,
+   "pinned_rope": false
+  },
+  {
+   "row": 9,
+   "task": "niah_multikey_3",
+   "ruler_index": 10007,
+   "nominal_length": 32632,
+   "prompt_tokens": 30635,
+   "arm": "bounded",
+   "kept_slots": 4608,
+   "slots_per_token": 0.1504,
+   "prediction": "c5400000-0000-0000-0000-000000000000. \n\nHowever, it's important to note that this uuid is not one of the special magic uuids provided in the text. The text only lists uuids for specific uuids, and the uuid in question does not appear in the list. \n\nIf you have any other questions or need further clarification, feel free to ask!",
+   "generated": 103,
+   "outputs": [
+    "ddf5d372-265e-4596-8088-34db7037ccc3"
+   ],
+   "recall_partial": 0.0,
+   "recall_strict": 0.0,
+   "prefill_s": 9.13,
+   "decode_s": 3.0,
+   "peak_gib": 10.48,
+   "pinned_rope": false
+  },
+  {
+   "row": 10,
+   "task": "niah_multikey_3",
+   "ruler_index": 8183,
+   "nominal_length": 8125,
+   "prompt_tokens": 7559,
+   "arm": "full",
+   "kept_slots": 7559,
+   "slots_per_token": 1.0,
+   "prediction": "4b81b190-e2ef-49c0-b907-195bf0ff1b28.",
+   "generated": 34,
+   "outputs": [
+    "4b81b190-e2ef-49c0-b907-195bf0ff1b28"
+   ],
+   "recall_partial": 1.0,
+   "recall_strict": 1.0,
+   "prefill_s": 1.21,
+   "decode_s": 0.99,
+   "peak_gib": 10.04,
+   "pinned_rope": false
+  },
+  {
+   "row": 10,
+   "task": "niah_multikey_3",
+   "ruler_index": 8183,
+   "nominal_length": 8125,
+   "prompt_tokens": 7559,
+   "arm": "bounded",
+   "kept_slots": 4608,
+   "slots_per_token": 0.6096,
+   "prediction": "4b81b190-e2ef-49c0-b907-195bf0ff1b28.",
+   "generated": 34,
+   "outputs": [
+    "4b81b190-e2ef-49c0-b907-195bf0ff1b28"
+   ],
+   "recall_partial": 1.0,
+   "recall_strict": 1.0,
+   "prefill_s": 1.39,
+   "decode_s": 1.0,
+   "peak_gib": 11.22,
+   "pinned_rope": false
+  },
+  {
+   "row": 11,
+   "task": "niah_multikey_3",
+   "ruler_index": 6245,
+   "nominal_length": 8094,
+   "prompt_tokens": 7525,
+   "arm": "full",
+   "kept_slots": 7525,
+   "slots_per_token": 1.0,
+   "prediction": "a3ea9e2b-d442-41bb-80b7-265a4946b2ff.",
+   "generated": 34,
+   "outputs": [
+    "a3ea9e2b-d442-41bb-80b7-265a4946b2ff"
+   ],
+   "recall_partial": 1.0,
+   "recall_strict": 1.0,
+   "prefill_s": 1.19,
+   "decode_s": 1.07,
+   "peak_gib": 11.21,
+   "pinned_rope": false
+  },
+  {
+   "row": 11,
+   "task": "niah_multikey_3",
+   "ruler_index": 6245,
+   "nominal_length": 8094,
+   "prompt_tokens": 7525,
+   "arm": "bounded",
+   "kept_slots": 4608,
+   "slots_per_token": 0.6124,
+   "prediction": "a3ea9e2b-d442-41bb-80b7-265a4946b2ff.",
+   "generated": 34,
+   "outputs": [
+    "a3ea9e2b-d442-41bb-80b7-265a4946b2ff"
+   ],
+   "recall_partial": 1.0,
+   "recall_strict": 1.0,
+   "prefill_s": 1.36,
+   "decode_s": 1.02,
+   "peak_gib": 11.19,
+   "pinned_rope": false
+  },
+  {
+   "row": 12,
+   "task": "niah_multikey_3",
+   "ruler_index": 1343,
+   "nominal_length": 8145,
+   "prompt_tokens": 7565,
+   "arm": "full",
+   "kept_slots": 7565,
+   "slots_per_token": 1.0,
+   "prediction": "24a4ad5d-4eb3-478f-b19c-0b63cc2bf8c1.",
+   "generated": 34,
+   "outputs": [
+    "24a4ad5d-4eb3-478f-b19c-0b63cc2bf8c1"
+   ],
+   "recall_partial": 1.0,
+   "recall_strict": 1.0,
+   "prefill_s": 1.21,
+   "decode_s": 0.98,
+   "peak_gib": 11.21,
+   "pinned_rope": false
+  },
+  {
+   "row": 12,
+   "task": "niah_multikey_3",
+   "ruler_index": 1343,
+   "nominal_length": 8145,
+   "prompt_tokens": 7565,
+   "arm": "bounded",
+   "kept_slots": 4608,
+   "slots_per_token": 0.6091,
+   "prediction": "24a4ad5d-4eb3-478f-b19c-0b63cc2bf8c1.",
+   "generated": 34,
+   "outputs": [
+    "24a4ad5d-4eb3-478f-b19c-0b63cc2bf8c1"
+   ],
+   "recall_partial": 1.0,
+   "recall_strict": 1.0,
+   "prefill_s": 1.38,
+   "decode_s": 0.98,
+   "peak_gib": 11.23,
+   "pinned_rope": false
+  },
+  {
+   "row": 13,
+   "task": "niah_multikey_3",
+   "ruler_index": 2939,
+   "nominal_length": 8156,
+   "prompt_tokens": 7556,
+   "arm": "full",
+   "kept_slots": 7556,
+   "slots_per_token": 1.0,
+   "prediction": "6b3b360f-b528-41c7-b240-25ebbeeec0ed.",
+   "generated": 32,
+   "outputs": [
+    "6b3b360f-b528-41c7-b240-25ebbeeec0ed"
+   ],
+   "recall_partial": 1.0,
+   "recall_strict": 1.0,
+   "prefill_s": 1.21,
+   "decode_s": 0.94,
+   "peak_gib": 11.23,
+   "pinned_rope": false
+  },
+  {
+   "row": 13,
+   "task": "niah_multikey_3",
+   "ruler_index": 2939,
+   "nominal_length": 8156,
+   "prompt_tokens": 7556,
+   "arm": "bounded",
+   "kept_slots": 4608,
+   "slots_per_token": 0.6098,
+   "prediction": "6b3b360f-b528-41c7-b240-25ebbeeec0ed.",
+   "generated": 32,
+   "outputs": [
+    "6b3b360f-b528-41c7-b240-25ebbeeec0ed"
+   ],
+   "recall_partial": 1.0,
+   "recall_strict": 1.0,
+   "prefill_s": 1.39,
+   "decode_s": 0.96,
+   "peak_gib": 11.22,
+   "pinned_rope": false
+  },
+  {
+   "row": 14,
+   "task": "niah_multikey_3",
+   "ruler_index": 8867,
+   "nominal_length": 8157,
+   "prompt_tokens": 7556,
+   "arm": "full",
+   "kept_slots": 7556,
+   "slots_per_token": 1.0,
+   "prediction": "87bc049c-96fa-49ee-8bc2-7b3911491a98.",
+   "generated": 35,
+   "outputs": [
+    "87bc049c-96fa-49ee-8bc2-7b3911491a98"
+   ],
+   "recall_partial": 1.0,
+   "recall_strict": 1.0,
+   "prefill_s": 1.21,
+   "decode_s": 1.05,
+   "peak_gib": 11.22,
+   "pinned_rope": false
+  },
+  {
+   "row": 14,
+   "task": "niah_multikey_3",
+   "ruler_index": 8867,
+   "nominal_length": 8157,
+   "prompt_tokens": 7556,
+   "arm": "bounded",
+   "kept_slots": 4608,
+   "slots_per_token": 0.6098,
+   "prediction": "87bc049c-96fa-49ee-8bc2-7b3911491a98.",
+   "generated": 35,
+   "outputs": [
+    "87bc049c-96fa-49ee-8bc2-7b3911491a98"
+   ],
+   "recall_partial": 1.0,
+   "recall_strict": 1.0,
+   "prefill_s": 1.39,
+   "decode_s": 1.06,
+   "peak_gib": 11.22,
+   "pinned_rope": false
+  }
+ ]
+}

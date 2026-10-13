@@ -1,0 +1,88 @@
+{
+  "config": {
+    "compare_full": true,
+    "device": "mps",
+    "lengths": [
+      8192,
+      16384
+    ],
+    "quality_lengths": [
+      1024,
+      2048
+    ],
+    "run_latency": true
+  },
+  "elapsed_seconds": 19.508585999999923,
+  "latency": {
+    "16384": {
+      "full": {
+        "prefill_seconds": 4.5074557089974405,
+        "tpot_ms": 4012.177167001937,
+        "tpot_speedup": 247.14022152609144,
+        "ttft_speedup": 1.0951991861298724
+      },
+      "qcc_prefill_seconds": 4.115649250001297,
+      "qcc_tpot_ms": 16.234416001680074
+    },
+    "8192": {
+      "full": {
+        "prefill_seconds": 1.6661797920023673,
+        "tpot_ms": 277.46741699957056,
+        "tpot_speedup": 2.0843732034224693,
+        "ttft_speedup": 0.7696496922030178
+      },
+      "qcc_prefill_seconds": 2.1648547500008135,
+      "qcc_tpot_ms": 133.11791599699063
+    }
+  },
+  "quality": {
+    "1024": {
+      "gate": {
+        "status": "pass",
+        "threshold": 0.99,
+        "value": 0.9990124553442001
+      },
+      "mean_logit_cosine": 0.9990124553442001,
+      "per_logit_mse": 2152.7345581054688
+    },
+    "2048": {
+      "gate": {
+        "status": "pass",
+        "threshold": 0.99,
+        "value": 0.9982927516102791
+      },
+      "mean_logit_cosine": 0.9982927516102791,
+      "per_logit_mse": 3720.1365966796875
+    }
+  },
+  "retrieval": {
+    "reason": "--checkpoint and --dataset are both required",
+    "status": "missing"
+  },
+  "state": {
+    "16384": {
+      "report": {
+        "full_kv_bytes": 67108864.0,
+        "full_kv_elements": 16777216.0,
+        "qcc_bytes": 659456.0,
+        "qcc_elements": 164864.0,
+        "reduction": 101.7639751552795,
+        "state_fraction_percent": 0.982666015625
+      },
+      "under_0.1pct": false,
+      "under_0.5pct": false
+    },
+    "8192": {
+      "report": {
+        "full_kv_bytes": 33554432.0,
+        "full_kv_elements": 8388608.0,
+        "qcc_bytes": 659456.0,
+        "qcc_elements": 164864.0,
+        "reduction": 50.88198757763975,
+        "state_fraction_percent": 1.96533203125
+      },
+      "under_0.1pct": false,
+      "under_0.5pct": false
+    }
+  }
+}

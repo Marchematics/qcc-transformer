@@ -1,0 +1,48 @@
+{
+  "model": "/datasets/ComfyUI/models/LLM/Phi-3.5-mini-instruct",
+  "record": 5,
+  "layer": 17,
+  "window": 512,
+  "short_tokens": 3948,
+  "events": 3436,
+  "target_token_in_short": 2924,
+  "cases": [
+    {
+      "capacity": 32,
+      "seconds": 0.14851737022399902,
+      "mean_cosine": 0.5053569674491882,
+      "mean_relative_squared_error": 13.853509902954102,
+      "min_cosine": -0.32773256301879883,
+      "max_relative_squared_error": 87.61298370361328,
+      "state_bytes": 786432
+    },
+    {
+      "capacity": 64,
+      "seconds": 0.08413958549499512,
+      "mean_cosine": 0.5288385152816772,
+      "mean_relative_squared_error": 14.967735290527344,
+      "min_cosine": -0.23336629569530487,
+      "max_relative_squared_error": 103.23296356201172,
+      "state_bytes": 1572864
+    },
+    {
+      "capacity": 128,
+      "seconds": 0.0855870246887207,
+      "mean_cosine": 0.9018501043319702,
+      "mean_relative_squared_error": 0.9757176637649536,
+      "min_cosine": 0.17618834972381592,
+      "max_relative_squared_error": 26.150249481201172,
+      "state_bytes": 3145728
+    },
+    {
+      "capacity": 256,
+      "seconds": 0.08515262603759766,
+      "mean_cosine": 0.6626616716384888,
+      "mean_relative_squared_error": 18.272111892700195,
+      "min_cosine": 0.0795232281088829,
+      "max_relative_squared_error": 179.7167510986328,
+      "state_bytes": 6291456
+    }
+  ],
+  "note": "Offline per-head k-means over the full teacher history; this is an upper bound and not a causal writer or task score."
+}

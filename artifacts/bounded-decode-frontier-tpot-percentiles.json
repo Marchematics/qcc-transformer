@@ -1,0 +1,260 @@
+{
+ "31898:bounded_dynamic": {
+  "repeats": 1,
+  "ok": 1,
+  "p50": 16.866,
+  "p95": 16.866,
+  "min": 16.866,
+  "max": 16.866,
+  "mean": 16.866,
+  "errors": []
+ },
+ "31898:bounded_graph": {
+  "repeats": 1,
+  "ok": 1,
+  "p50": 11.012,
+  "p95": 11.012,
+  "min": 11.012,
+  "max": 11.012,
+  "mean": 11.012,
+  "errors": []
+ },
+ "31898:full_kv_dynamic": {
+  "repeats": 1,
+  "ok": 0,
+  "p50": null,
+  "p95": null,
+  "min": null,
+  "max": null,
+  "mean": null,
+  "errors": [
+   "CUDA out of memory. Tried to allocate 32.00 MiB. GPU 0 has a"
+  ]
+ },
+ "31898:full_kv_graph": {
+  "repeats": 1,
+  "ok": 1,
+  "p50": 53.679,
+  "p95": 53.679,
+  "min": 53.679,
+  "max": 53.679,
+  "mean": 53.679,
+  "errors": []
+ },
+ "32839:bounded_dynamic": {
+  "repeats": 1,
+  "ok": 1,
+  "p50": 16.796,
+  "p95": 16.796,
+  "min": 16.796,
+  "max": 16.796,
+  "mean": 16.796,
+  "errors": []
+ },
+ "32839:bounded_graph": {
+  "repeats": 1,
+  "ok": 1,
+  "p50": 11.014,
+  "p95": 11.014,
+  "min": 11.014,
+  "max": 11.014,
+  "mean": 11.014,
+  "errors": []
+ },
+ "32839:full_kv_dynamic": {
+  "repeats": 1,
+  "ok": 0,
+  "p50": null,
+  "p95": null,
+  "min": null,
+  "max": null,
+  "mean": null,
+  "errors": [
+   "CUDA out of memory. Tried to allocate 34.00 MiB. GPU 0 has a"
+  ]
+ },
+ "32839:full_kv_graph": {
+  "repeats": 1,
+  "ok": 1,
+  "p50": 55.239,
+  "p95": 55.239,
+  "min": 55.239,
+  "max": 55.239,
+  "mean": 55.239,
+  "errors": []
+ },
+ "32858:bounded_dynamic": {
+  "repeats": 1,
+  "ok": 1,
+  "p50": 16.777,
+  "p95": 16.777,
+  "min": 16.777,
+  "max": 16.777,
+  "mean": 16.777,
+  "errors": []
+ },
+ "32858:bounded_graph": {
+  "repeats": 1,
+  "ok": 1,
+  "p50": 11.009,
+  "p95": 11.009,
+  "min": 11.009,
+  "max": 11.009,
+  "mean": 11.009,
+  "errors": []
+ },
+ "32858:full_kv_dynamic": {
+  "repeats": 1,
+  "ok": 0,
+  "p50": null,
+  "p95": null,
+  "min": null,
+  "max": null,
+  "mean": null,
+  "errors": [
+   "CUDA out of memory. Tried to allocate 34.00 MiB. GPU 0 has a"
+  ]
+ },
+ "32858:full_kv_graph": {
+  "repeats": 1,
+  "ok": 1,
+  "p50": 55.188,
+  "p95": 55.188,
+  "min": 55.188,
+  "max": 55.188,
+  "mean": 55.188,
+  "errors": []
+ },
+ "127152:bounded_dynamic": {
+  "repeats": 1,
+  "ok": 1,
+  "p50": 16.625,
+  "p95": 16.625,
+  "min": 16.625,
+  "max": 16.625,
+  "mean": 16.625,
+  "errors": []
+ },
+ "127152:bounded_graph": {
+  "repeats": 1,
+  "ok": 1,
+  "p50": 11.013,
+  "p95": 11.013,
+  "min": 11.013,
+  "max": 11.013,
+  "mean": 11.013,
+  "errors": []
+ },
+ "127152:full_kv_dynamic": {
+  "repeats": 1,
+  "ok": 0,
+  "p50": null,
+  "p95": null,
+  "min": null,
+  "max": null,
+  "mean": null,
+  "errors": [
+   "CUDA out of memory. Tried to allocate 126.00 MiB. GPU 0 has "
+  ]
+ },
+ "127152:full_kv_graph": {
+  "repeats": 1,
+  "ok": 0,
+  "p50": null,
+  "p95": null,
+  "min": null,
+  "max": null,
+  "mean": null,
+  "errors": [
+   "CUDA out of memory. Tried to allocate 498.00 MiB. GPU 0 has "
+  ]
+ },
+ "131080:bounded_dynamic": {
+  "repeats": 1,
+  "ok": 1,
+  "p50": 16.725,
+  "p95": 16.725,
+  "min": 16.725,
+  "max": 16.725,
+  "mean": 16.725,
+  "errors": []
+ },
+ "131080:bounded_graph": {
+  "repeats": 1,
+  "ok": 1,
+  "p50": 11.015,
+  "p95": 11.015,
+  "min": 11.015,
+  "max": 11.015,
+  "mean": 11.015,
+  "errors": []
+ },
+ "131080:full_kv_dynamic": {
+  "repeats": 1,
+  "ok": 0,
+  "p50": null,
+  "p95": null,
+  "min": null,
+  "max": null,
+  "mean": null,
+  "errors": [
+   "CUDA out of memory. Tried to allocate 130.00 MiB. GPU 0 has "
+  ]
+ },
+ "131080:full_kv_graph": {
+  "repeats": 1,
+  "ok": 0,
+  "p50": null,
+  "p95": null,
+  "min": null,
+  "max": null,
+  "mean": null,
+  "errors": [
+   "CUDA out of memory. Tried to allocate 514.00 MiB. GPU 0 has "
+  ]
+ },
+ "131361:bounded_dynamic": {
+  "repeats": 1,
+  "ok": 1,
+  "p50": 16.808,
+  "p95": 16.808,
+  "min": 16.808,
+  "max": 16.808,
+  "mean": 16.808,
+  "errors": []
+ },
+ "131361:bounded_graph": {
+  "repeats": 1,
+  "ok": 1,
+  "p50": 11.013,
+  "p95": 11.013,
+  "min": 11.013,
+  "max": 11.013,
+  "mean": 11.013,
+  "errors": []
+ },
+ "131361:full_kv_dynamic": {
+  "repeats": 1,
+  "ok": 0,
+  "p50": null,
+  "p95": null,
+  "min": null,
+  "max": null,
+  "mean": null,
+  "errors": [
+   "CUDA out of memory. Tried to allocate 130.00 MiB. GPU 0 has "
+  ]
+ },
+ "131361:full_kv_graph": {
+  "repeats": 1,
+  "ok": 0,
+  "p50": null,
+  "p95": null,
+  "min": null,
+  "max": null,
+  "mean": null,
+  "errors": [
+   "CUDA out of memory. Tried to allocate 514.00 MiB. GPU 0 has "
+  ]
+ }
+}

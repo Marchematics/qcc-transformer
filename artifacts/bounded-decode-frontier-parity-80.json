@@ -1,0 +1,107 @@
+{
+ "harness_file": "artifacts/bounded-decode-frontier-ruler-v6.json",
+ "package_file": "artifacts/bounded-decode-frontier-multimodel-llama1b.json",
+ "policy": "lex_obs",
+ "budget": 4096,
+ "arm": "bounded",
+ "compared": 80,
+ "unmatched_package_rows": 0,
+ "predictions_identical": 75,
+ "partial_agreement": 80,
+ "strict_agreement": 80,
+ "package_mean_partial": 0.765,
+ "harness_mean_partial": 0.765,
+ "per_task": {
+  "niah_multikey_2": {
+   "records": 20,
+   "identical": 20,
+   "package_mean_partial": 0.95,
+   "harness_mean_partial": 0.95
+  },
+  "niah_multikey_3": {
+   "records": 20,
+   "identical": 20,
+   "package_mean_partial": 0.45,
+   "harness_mean_partial": 0.45
+  },
+  "niah_single_1": {
+   "records": 20,
+   "identical": 15,
+   "package_mean_partial": 1.0,
+   "harness_mean_partial": 1.0
+  },
+  "vt": {
+   "records": 20,
+   "identical": 20,
+   "package_mean_partial": 0.66,
+   "harness_mean_partial": 0.66
+  }
+ },
+ "differences": [
+  {
+   "task": "niah_single_1",
+   "prompt_tokens": 31319,
+   "harness_prediction": "4250981.",
+   "package_prediction": "4250981.\nThe final answer is: 4250981.",
+   "harness_partial": 1.0,
+   "package_partial": 1.0,
+   "harness_strict": 1.0,
+   "package_strict": 1.0,
+   "outputs": [
+    "4250981"
+   ]
+  },
+  {
+   "task": "niah_single_1",
+   "prompt_tokens": 31328,
+   "harness_prediction": "2976288.\nThe final answer is: 2976288.",
+   "package_prediction": "2976288.",
+   "harness_partial": 1.0,
+   "package_partial": 1.0,
+   "harness_strict": 1.0,
+   "package_strict": 1.0,
+   "outputs": [
+    "2976288"
+   ]
+  },
+  {
+   "task": "niah_single_1",
+   "prompt_tokens": 62768,
+   "harness_prediction": "2976288.\nThe final answer is: 2976288.",
+   "package_prediction": "2976288.",
+   "harness_partial": 1.0,
+   "package_partial": 1.0,
+   "harness_strict": 1.0,
+   "package_strict": 1.0,
+   "outputs": [
+    "2976288"
+   ]
+  },
+  {
+   "task": "niah_single_1",
+   "prompt_tokens": 62765,
+   "harness_prediction": "7939122.",
+   "package_prediction": "7939122.\nThe final answer is: 7939122.",
+   "harness_partial": 1.0,
+   "package_partial": 1.0,
+   "harness_strict": 1.0,
+   "package_strict": 1.0,
+   "outputs": [
+    "7939122"
+   ]
+  },
+  {
+   "task": "niah_single_1",
+   "prompt_tokens": 7127,
+   "harness_prediction": "4250981.",
+   "package_prediction": "4250981.\nThe grass is green. The sky is blue. The sun is yel",
+   "harness_partial": 1.0,
+   "package_partial": 1.0,
+   "harness_strict": 1.0,
+   "package_strict": 1.0,
+   "outputs": [
+    "4250981"
+   ]
+  }
+ ]
+}

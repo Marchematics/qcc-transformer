@@ -1,0 +1,147 @@
+{
+  "model": "/datasets/ComfyUI/models/LLM/Phi-3.5-mini-instruct",
+  "record": 5,
+  "layer": 17,
+  "window": 512,
+  "short_tokens": 3948,
+  "events": 3436,
+  "target_token_in_short": 2924,
+  "cases": [
+    {
+      "capacity": 32,
+      "method": "top_norm",
+      "mean_cosine": 0.2526867687702179,
+      "mean_relative_squared_error": 93.2208480834961,
+      "min_cosine": -0.23276154696941376,
+      "max_relative_squared_error": 1148.2066650390625,
+      "state_bytes": 786432
+    },
+    {
+      "capacity": 32,
+      "method": "uniform",
+      "mean_cosine": 0.7354000806808472,
+      "mean_relative_squared_error": 0.45694687962532043,
+      "min_cosine": 0.23658406734466553,
+      "max_relative_squared_error": 1.2468771934509277,
+      "state_bytes": 786432
+    },
+    {
+      "capacity": 32,
+      "method": "random",
+      "mean_cosine": 0.363527774810791,
+      "mean_relative_squared_error": 45.175907135009766,
+      "min_cosine": -0.2576018273830414,
+      "max_relative_squared_error": 417.01287841796875,
+      "state_bytes": 786432
+    },
+    {
+      "capacity": 32,
+      "method": "top_query_oracle",
+      "mean_cosine": 0.9369910359382629,
+      "mean_relative_squared_error": 0.1245613694190979,
+      "min_cosine": 0.5409873723983765,
+      "max_relative_squared_error": 0.7254310250282288,
+      "state_bytes": 786432
+    },
+    {
+      "capacity": 32,
+      "method": "kcenter",
+      "mean_cosine": 0.6607692241668701,
+      "mean_relative_squared_error": 0.5409226417541504,
+      "min_cosine": -0.23302623629570007,
+      "max_relative_squared_error": 1.3475463390350342,
+      "state_bytes": 786432
+    },
+    {
+      "capacity": 64,
+      "method": "top_norm",
+      "mean_cosine": 0.27740389108657837,
+      "mean_relative_squared_error": 87.7819595336914,
+      "min_cosine": -0.23460304737091064,
+      "max_relative_squared_error": 988.9706420898438,
+      "state_bytes": 1572864
+    },
+    {
+      "capacity": 64,
+      "method": "uniform",
+      "mean_cosine": 0.7548426389694214,
+      "mean_relative_squared_error": 0.40784475207328796,
+      "min_cosine": -0.17374804615974426,
+      "max_relative_squared_error": 1.2266452312469482,
+      "state_bytes": 1572864
+    },
+    {
+      "capacity": 64,
+      "method": "random",
+      "mean_cosine": 0.44435709714889526,
+      "mean_relative_squared_error": 41.730445861816406,
+      "min_cosine": -0.27550584077835083,
+      "max_relative_squared_error": 359.22503662109375,
+      "state_bytes": 1572864
+    },
+    {
+      "capacity": 64,
+      "method": "top_query_oracle",
+      "mean_cosine": 0.9613247513771057,
+      "mean_relative_squared_error": 0.07705191522836685,
+      "min_cosine": 0.6414168477058411,
+      "max_relative_squared_error": 0.5898943543434143,
+      "state_bytes": 1572864
+    },
+    {
+      "capacity": 64,
+      "method": "kcenter",
+      "mean_cosine": 0.7413152456283569,
+      "mean_relative_squared_error": 0.46068477630615234,
+      "min_cosine": 0.10688123106956482,
+      "max_relative_squared_error": 1.2204324007034302,
+      "state_bytes": 1572864
+    },
+    {
+      "capacity": 128,
+      "method": "top_norm",
+      "mean_cosine": 0.3010970950126648,
+      "mean_relative_squared_error": 75.7581558227539,
+      "min_cosine": -0.20734618604183197,
+      "max_relative_squared_error": 785.2443237304688,
+      "state_bytes": 3145728
+    },
+    {
+      "capacity": 128,
+      "method": "uniform",
+      "mean_cosine": 0.7755377888679504,
+      "mean_relative_squared_error": 0.38658684492111206,
+      "min_cosine": 0.12174129486083984,
+      "max_relative_squared_error": 1.0183253288269043,
+      "state_bytes": 3145728
+    },
+    {
+      "capacity": 128,
+      "method": "random",
+      "mean_cosine": 0.48312678933143616,
+      "mean_relative_squared_error": 28.314289093017578,
+      "min_cosine": -0.26455163955688477,
+      "max_relative_squared_error": 252.2197723388672,
+      "state_bytes": 3145728
+    },
+    {
+      "capacity": 128,
+      "method": "top_query_oracle",
+      "mean_cosine": 0.9779943227767944,
+      "mean_relative_squared_error": 0.04426921159029007,
+      "min_cosine": 0.7570173740386963,
+      "max_relative_squared_error": 0.43015536665916443,
+      "state_bytes": 3145728
+    },
+    {
+      "capacity": 128,
+      "method": "kcenter",
+      "mean_cosine": 0.7860350608825684,
+      "mean_relative_squared_error": 0.43495994806289673,
+      "min_cosine": 0.14239394664764404,
+      "max_relative_squared_error": 1.4384527206420898,
+      "state_bytes": 3145728
+    }
+  ],
+  "note": "Real Phi-3.5 teacher layer; selected original K/V post hoc. top_query is an oracle upper bound; other static selections are diagnostic, not end-to-end task scores."
+}

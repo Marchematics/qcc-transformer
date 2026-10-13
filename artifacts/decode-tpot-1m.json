@@ -1,0 +1,97 @@
+{
+ "config": {
+  "model": "/root/qcc/models/Qwen2.5-0.5B-Instruct",
+  "sizes": [
+   1048576,
+   131072,
+   4632,
+   512
+  ],
+  "steps": 12,
+  "prefill_chunk": 8192,
+  "attn_impl": "flash_attention_2",
+  "decode": "flash",
+  "profile": true,
+  "mask": "on",
+  "out": "artifacts/decode-tpot-1m.json"
+ },
+ "results": [
+  {
+   "decode": "flash",
+   "mask": true,
+   "cache_keys": 1048576,
+   "median_ms": 25.934956967830658,
+   "min_ms": 25.683624669909477,
+   "p95_ms": 67.35100597143173,
+   "steps": 11
+  },
+  {
+   "decode": "flash",
+   "mask": true,
+   "profile": true,
+   "cache_keys": 1048576,
+   "gpu_ms_per_step": 125.0092481999997,
+   "steps": 5,
+   "wall_ms_same_cache": 25.934956967830658,
+   "profile_exceeds_wall": true
+  },
+  {
+   "decode": "flash",
+   "mask": true,
+   "cache_keys": 131072,
+   "median_ms": 27.17030420899391,
+   "min_ms": 26.79974026978016,
+   "p95_ms": 27.84859947860241,
+   "steps": 11
+  },
+  {
+   "decode": "flash",
+   "mask": true,
+   "profile": true,
+   "cache_keys": 131072,
+   "gpu_ms_per_step": 20.485682800000085,
+   "steps": 5,
+   "wall_ms_same_cache": 27.17030420899391,
+   "profile_exceeds_wall": false
+  },
+  {
+   "decode": "flash",
+   "mask": true,
+   "cache_keys": 4632,
+   "median_ms": 28.327684849500656,
+   "min_ms": 27.813514694571495,
+   "p95_ms": 28.491239994764328,
+   "steps": 11
+  },
+  {
+   "decode": "flash",
+   "mask": true,
+   "profile": true,
+   "cache_keys": 4632,
+   "gpu_ms_per_step": 5.647954600000061,
+   "steps": 5,
+   "wall_ms_same_cache": 28.327684849500656,
+   "profile_exceeds_wall": false
+  },
+  {
+   "decode": "flash",
+   "mask": true,
+   "cache_keys": 512,
+   "median_ms": 27.20591425895691,
+   "min_ms": 26.94067545235157,
+   "p95_ms": 27.401572093367577,
+   "steps": 11
+  },
+  {
+   "decode": "flash",
+   "mask": true,
+   "profile": true,
+   "cache_keys": 512,
+   "gpu_ms_per_step": 5.1319467999999535,
+   "steps": 5,
+   "wall_ms_same_cache": 27.20591425895691,
+   "profile_exceeds_wall": false
+  }
+ ],
+ "honesty": "per-step wall time is the measured quantity; the profiler kernel sum is retained only when it is below the wall time for the same cache (see profile_exceeds_wall)"
+}

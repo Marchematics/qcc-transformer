@@ -1,0 +1,74 @@
+{
+  "record": 3,
+  "model": "/datasets/ComfyUI/models/LLM/Phi-3.5-mini-instruct",
+  "window_size": 4096,
+  "sink_size": 32,
+  "scope": "teacher last-prompt-query diagnostic; oracle top-k and offline retention are not serving implementations",
+  "layers": [
+    {
+      "layer": 0,
+      "tokens": 16181,
+      "remote_attention_mass_mean": 0.5030670166015625,
+      "remote_attention_mass_max": 0.7480955719947815,
+      "archive_relative_squared_error": 0.372685045003891,
+      "archive_cosine_mean": 0.7542084455490112,
+      "oracle_top1_relative_squared_error": 3.9005703926086426,
+      "oracle_top16_relative_squared_error": 1.4461160898208618,
+      "oracle_top128_relative_squared_error": 1.2156226634979248,
+      "retained512_cosine_softmax_relative_squared_error": 0.6424070000648499,
+      "retained512_dot_softmax_relative_squared_error": 1.2198866605758667
+    },
+    {
+      "layer": 7,
+      "tokens": 16181,
+      "remote_attention_mass_mean": 0.04336624965071678,
+      "remote_attention_mass_max": 0.21216607093811035,
+      "archive_relative_squared_error": 0.3660834729671478,
+      "archive_cosine_mean": 0.7726255655288696,
+      "oracle_top1_relative_squared_error": 2.718327045440674,
+      "oracle_top16_relative_squared_error": 0.4938480854034424,
+      "oracle_top128_relative_squared_error": 0.1892419457435608,
+      "retained512_cosine_softmax_relative_squared_error": 0.4826502501964569,
+      "retained512_dot_softmax_relative_squared_error": 0.4931754469871521
+    },
+    {
+      "layer": 15,
+      "tokens": 16181,
+      "remote_attention_mass_mean": 0.31577372550964355,
+      "remote_attention_mass_max": 0.9489984512329102,
+      "archive_relative_squared_error": 0.5432652831077576,
+      "archive_cosine_mean": 0.591856062412262,
+      "oracle_top1_relative_squared_error": 0.7928549647331238,
+      "oracle_top16_relative_squared_error": 0.19078168272972107,
+      "oracle_top128_relative_squared_error": 0.05460486188530922,
+      "retained512_cosine_softmax_relative_squared_error": 0.374820739030838,
+      "retained512_dot_softmax_relative_squared_error": 0.32080063223838806
+    },
+    {
+      "layer": 23,
+      "tokens": 16181,
+      "remote_attention_mass_mean": 0.22167937457561493,
+      "remote_attention_mass_max": 0.6383102536201477,
+      "archive_relative_squared_error": 1.5566060543060303,
+      "archive_cosine_mean": 0.4296322464942932,
+      "oracle_top1_relative_squared_error": 2.0513858795166016,
+      "oracle_top16_relative_squared_error": 0.22974103689193726,
+      "oracle_top128_relative_squared_error": 0.046370599418878555,
+      "retained512_cosine_softmax_relative_squared_error": 0.5905427932739258,
+      "retained512_dot_softmax_relative_squared_error": 0.6594329476356506
+    },
+    {
+      "layer": 31,
+      "tokens": 16181,
+      "remote_attention_mass_mean": 0.334200918674469,
+      "remote_attention_mass_max": 0.5097523927688599,
+      "archive_relative_squared_error": 3.873837947845459,
+      "archive_cosine_mean": 0.37598076462745667,
+      "oracle_top1_relative_squared_error": 0.5716540217399597,
+      "oracle_top16_relative_squared_error": 0.2717854976654053,
+      "oracle_top128_relative_squared_error": 0.09580963850021362,
+      "retained512_cosine_softmax_relative_squared_error": 0.2675687074661255,
+      "retained512_dot_softmax_relative_squared_error": 0.3006068468093872
+    }
+  ]
+}

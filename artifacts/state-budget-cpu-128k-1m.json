@@ -1,0 +1,29 @@
+{
+  "scope": "synthetic QCCForCausalLM state-only accounting; not pretrained quality or serving speed",
+  "config": {
+    "d_model": 256,
+    "layers": 2,
+    "heads": 8,
+    "head_dim": 32,
+    "window_size": 128,
+    "num_codes": 16,
+    "dtype_bytes": 4
+  },
+  "results": [
+    {
+      "length": 128000,
+      "qcc_state_bytes": 659456,
+      "full_kv_bytes": 524288000,
+      "state_fraction_percent": 0.125781,
+      "reduction": 795.03
+    },
+    {
+      "length": 1000000,
+      "qcc_state_bytes": 659456,
+      "full_kv_bytes": 4096000000,
+      "state_fraction_percent": 0.0161,
+      "reduction": 6211.18
+    }
+  ],
+  "state_growth_ratio_1m_over_128k": 1.0
+}

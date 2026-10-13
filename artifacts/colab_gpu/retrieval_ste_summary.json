@@ -1,0 +1,46 @@
+{
+  "runtime": {
+    "platform": "Google Colab",
+    "session": "qcc-train",
+    "gpu": "Tesla T4",
+    "code_commit": "f7405d1"
+  },
+  "method": {
+    "checkpoint": "checkpoints/qcc_curriculum.pt",
+    "position_encoding": "none",
+    "archive_content_threshold": 0.5,
+    "train_length": 512,
+    "query_curriculum": "uniform integer positions 32..500",
+    "max_position_embeddings": 128001,
+    "steps": 1500,
+    "seed": 43
+  },
+  "retrieval": [
+    {
+      "dataset": "independent random values, length=512, query=384",
+      "examples": 50,
+      "correct": 50,
+      "accuracy": 1.0,
+      "passed_target_0.98": true
+    },
+    {
+      "dataset": "independent random values, length=128000, query=384",
+      "examples": 20,
+      "correct": 20,
+      "accuracy": 1.0,
+      "passed_target_0.98": true
+    },
+    {
+      "dataset": "independent random values, length=128000, query=96000",
+      "examples": 20,
+      "correct": 20,
+      "accuracy": 1.0,
+      "passed_target_0.98": true
+    }
+  ],
+  "notes": [
+    "These are synthetic marker/value retrieval diagnostics, not RULER or pretrained-LM quality.",
+    "The 1M-context fixed-query checkpoint is separate (checkpoints/qcc_ste_1m.pt): query=500000 scored 5/5, while query=900000 scored 1/5.",
+    "No 1M retrieval target is claimed as passed; the 1M result remains an open limitation."
+  ]
+}

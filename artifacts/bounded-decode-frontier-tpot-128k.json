@@ -1,0 +1,35 @@
+{
+ "context_tokens": 127465,
+ "budget": 1024,
+ "kept_slots": 1024,
+ "model": "/root/qcc/models/Llama-3.2-1B-Instruct",
+ "max_new": 32,
+ "variants": {
+  "full_kv_dynamic": {
+   "tpot_ms": 17.537,
+   "state_bytes": 4176773120,
+   "speedup_vs_full_kv_dynamic": 1.0
+  },
+  "full_kv_static": {
+   "error": "CUDA out of memory. Tried to allocate 500.00 MiB. GPU 0 has a total capacity of 23.55 GiB of which 116.25 MiB is free. Process 2790558 has 23.43 GiB memory in use. Of the allocated memory 21.66 GiB is allocated by PyTorch, and 1.47 GiB is reserved by PyTorch but unallocated. If reserved but unalloca"
+  },
+  "full_kv_graph": {
+   "error": "CUDA out of memory. Tried to allocate 500.00 MiB. GPU 0 has a total capacity of 23.55 GiB of which 72.25 MiB is free. Process 2790558 has 23.47 GiB memory in use. Of the allocated memory 21.67 GiB is allocated by PyTorch, and 1.49 GiB is reserved by PyTorch but unallocated. If reserved but unallocat"
+  },
+  "bounded_dynamic": {
+   "tpot_ms": 15.856,
+   "state_bytes": 33554432,
+   "speedup_vs_full_kv_dynamic": 1.106
+  },
+  "bounded_static": {
+   "tpot_ms": 23.908,
+   "state_bytes": 33554432,
+   "speedup_vs_full_kv_dynamic": 0.734
+  },
+  "bounded_graph": {
+   "tpot_ms": 6.86,
+   "state_bytes": 33554432,
+   "speedup_vs_full_kv_dynamic": 2.556
+  }
+ }
+}

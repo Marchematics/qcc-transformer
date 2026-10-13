@@ -1,0 +1,44 @@
+{
+ "schema": "qcc-million-prefill-blocker-v1",
+ "question": "why the exact 1M prefill does not complete on this stack, with the KV memory blocker removed by choosing a 12 KiB/token checkpoint",
+ "model": "/root/qcc/models/Qwen2.5-0.5B-Instruct",
+ "kv_bytes_per_token": 12288,
+ "implied_1m_kv_gib": 12.0,
+ "stack": {
+  "transformers": "5.16.1",
+  "torch": "2.8.0+cu128",
+  "attn_implementation": "sdpa",
+  "flash_attn_installed": false
+ },
+ "measurements": [
+  {
+   "path": "explicit 2-D attention mask, chunked prefill with cache",
+   "chunk": 4096,
+   "tokens": 131072,
+   "peak_gib": 21.5,
+   "note": "prefill did not finish in ~10 minutes; GPU utilisation ~20%"
+  },
+  {
+   "path": "attention_mask=None, chunked prefill with cache",
+   "chunk": 2048,
+   "tokens": 131072,
+   "peak_gib": 22.45,
+   "note": "OutOfMemoryError before the chunk loop finished"
+  },
+  {
+   "path": "raw fused SDPA, is_causal=True, enable_gqa=True, forced flash kernel",
+   "q_tokens": 2048,
+   "kv_tokens": 131072,
+   "heads": 14,
+   "head_dim": 64,
+   "seconds": 1.6,
+   "peak_gib": 0.32,
+   "note": "torch.nn.attention.sdpa_kernel(enable_flash=True, enable_math=False, enable_mem_efficient=False); same computation the model needs, and the default dispatch does not select it because Hugging Face passes a mask for the chunked-prefill case"
+  }
+ ],
+ "conclusion": "the remaining 1M blocker is the prefill software path, not the cache policy: install flash-attn or route the chunked case through is_causal=True, which is valid because a chunk's queries are the last n positions of the cached keys",
+ "commands": {
+  "harness": "python benchmarks/benchmark_million_context.py --model /root/qcc/models/Qwen2.5-0.5B-Instruct --lengths 131072 1048576 --items 4 --seeds 2 --budget 4096 --lex-cap 512 --out artifacts/million-context.json",
+  "probe": "python /tmp/sdpa_probe.py  (the three-row table above)"
+ }
+}

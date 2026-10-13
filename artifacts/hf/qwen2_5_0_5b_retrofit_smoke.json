@@ -1,0 +1,17 @@
+{
+  "model": "Qwen/Qwen2.5-0.5B-Instruct",
+  "model_snapshot": "local HF snapshot used for smoke test",
+  "architecture": "Qwen2 decoder, 24 layers, GQA (14 query / 2 KV heads)",
+  "retrofit": {
+    "window_size": 128,
+    "num_codes": 64,
+    "kv_head_policy": "repeat",
+    "patched_layers": 24
+  },
+  "prompt_tokens": 13,
+  "mean_logit_cosine": 0.7900015115737915,
+  "top1_agreement": 0.5384615659713745,
+  "quality_gate": 0.99,
+  "fidelity_passed": false,
+  "note": "Real pretrained HF GQA retrofit executed successfully. Uncalibrated archive changes logits; this is a negative smoke result, not a RULER/LongBench quality claim."
+}

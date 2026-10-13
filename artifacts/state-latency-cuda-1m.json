@@ -1,0 +1,15 @@
+{
+  "scope": "synthetic QCCForCausalLM CUDA stream; QCC-only, no Full-KV comparison",
+  "device": "cuda",
+  "length": 1000000,
+  "chunk_size": 256,
+  "decode_warmup": 2,
+  "decode_steps": 8,
+  "qcc_state_bytes": 659456,
+  "full_kv_bytes_hypothetical": 4096000000,
+  "state_fraction_percent": 0.0161,
+  "reduction": 6211.18,
+  "processed_tokens": 1000000,
+  "prefill_seconds": 16.727258,
+  "tpot_ms": 2.654
+}

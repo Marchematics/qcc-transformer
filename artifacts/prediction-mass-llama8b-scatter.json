@@ -1,0 +1,806 @@
+{
+ "model": "/datasets/ComfyUI/models/LLM/Meta-Llama-3.1-8B-Instruct",
+ "label": "Meta-Llama-3.1-8B-Instruct",
+ "config": {
+  "family": [
+   "needles"
+  ],
+  "items": [
+   8
+  ],
+  "distractors": null,
+  "seeds": 3,
+  "length": 32768,
+  "lengths": [
+   32768
+  ],
+  "budgets": [
+   2048
+  ],
+  "aggregate": "sum",
+  "placement": "scatter",
+  "obs": 128,
+  "nsink": 4,
+  "pool": 7,
+  "dilate": 9,
+  "lex_cap": 512,
+  "hops": 6,
+  "anchor_mode": "pattern",
+  "min_anchor_len": 3,
+  "scoring": "last",
+  "prefill_chunk": 8192,
+  "key_chunk": 4096,
+  "max_new": null,
+  "required_tol": 0.0,
+  "model": "/datasets/ComfyUI/models/LLM/Meta-Llama-3.1-8B-Instruct",
+  "tokenizer": null,
+  "dtype": "bfloat16",
+  "device": "cuda",
+  "attn_impl": "sdpa",
+  "load_4bit": true,
+  "trust_remote_code": false,
+  "shared_prefill": true,
+  "label": null,
+  "out": "artifacts/prediction-mass-llama8b-scatter.json"
+ },
+ "summary": {
+  "rows": 6,
+  "lengths": [
+   32768
+  ],
+  "budgets": [
+   2048
+  ],
+  "required_budget_rule": "smallest tested budget whose mean accuracy on the record set is within `required_tol` of the Full-KV arm's mean accuracy and strictly positive; null when Full-KV scores zero (see `full_kv_unsolved`) or no tested budget reaches it",
+  "required_tol": 0.0,
+  "accuracy": {
+   "needles": {
+    "8": {
+     "full": 1.0,
+     "2048": 0.3333
+    }
+   }
+  },
+  "partial_recall": {
+   "needles": {
+    "8": {
+     "full": 1.0,
+     "2048": 0.625
+    }
+   }
+  },
+  "required_budget": {
+   "needles": {
+    "8": null
+   }
+  },
+  "accuracy_by_distractors": {},
+  "required_budget_by_distractors": {},
+  "full_kv_unsolved": {
+   "rule": "cells whose Full-KV accuracy is 0; required_budget stays null for them and they must not be read as bounded-retention failures",
+   "count": 0,
+   "cells": {}
+  },
+  "by_length": {
+   "32768": {
+    "accuracy": {
+     "needles": {
+      "8": {
+       "full": 1.0,
+       "2048": 0.3333
+      }
+     }
+    },
+    "required_budget": {
+     "needles": {
+      "8": null
+     }
+    },
+    "accuracy_by_distractors": {},
+    "required_budget_by_distractors": {},
+    "full_kv_unsolved": {
+     "rule": "cells whose Full-KV accuracy is 0; required_budget stays null for them and they must not be read as bounded-retention failures",
+     "count": 0,
+     "cells": {}
+    }
+   }
+  },
+  "cells": {
+   "needles": {
+    "8": {
+     "seeds": 3,
+     "records": 3,
+     "distractors": null,
+     "statement_tokens": 134.0,
+     "tokens_per_item": 16.75,
+     "mean_item_spacing": 4079.37,
+     "required_set_tokens": 134.0,
+     "required_set_tokens_rule": "items x mean tokens per item statement (the tokens the item statements occupy); `statement_tokens` is the whole block",
+     "mean_kept_slots_bounded": 2560.0,
+     "mean_kept_slots_full": 32769.0,
+     "full_kv_accuracy": 1.0,
+     "mean_partial_recall_bounded": 0.625,
+     "mean_partial_recall_full": 1.0,
+     "truncation_rate_bounded": 0.6667,
+     "truncation_rate_full": 1.0,
+     "mean_anchor_sites": 8.0,
+     "lex_cap": [
+      512
+     ],
+     "placement": [
+      "scatter"
+     ],
+     "full_kv_unsolved": false,
+     "budgets": {
+      "2048": {
+       "covered": {
+        "rows": 3,
+        "cells": 1,
+        "mean_accuracy": 0.3333,
+        "mean_partial_recall": 0.625,
+        "mean_kept_slots": 2560.0,
+        "mean_required_set_tokens": 134.0
+       },
+       "not_covered": {
+        "rows": 0,
+        "cells": 0,
+        "mean_accuracy": null,
+        "mean_partial_recall": null,
+        "mean_kept_slots": null,
+        "mean_required_set_tokens": null
+       },
+       "mean_kept_slots": 2560.0,
+       "mean_partial_recall": 0.625,
+       "truncation_rate": 0.6667,
+       "mean_required_coverage": 1.0,
+       "mean_required_mass": 0.029451,
+       "mean_items_covered": 8.0
+      }
+     }
+    }
+   }
+  },
+  "budget_covers_required_set": {
+   "rule": "a bounded row's budget covers its required set when required_set_tokens <= kept_slots, where kept_slots is the measured retained width of the bounded arm (not the nominal budget) and required_set_tokens is the mean tokens per item statement times the number of items the answer needs",
+   "prediction": "prediction 2 of docs/MECHANISM.md: accuracy is high when the budget covers the required set and collapses when it does not; `separation` is the measured size of the cliff",
+   "covered": {
+    "rows": 3,
+    "cells": 1,
+    "mean_accuracy": 0.3333,
+    "mean_partial_recall": 0.625,
+    "mean_kept_slots": 2560.0,
+    "mean_required_set_tokens": 134.0
+   },
+   "not_covered": {
+    "rows": 0,
+    "cells": 0,
+    "mean_accuracy": null,
+    "mean_partial_recall": null,
+    "mean_kept_slots": null,
+    "mean_required_set_tokens": null
+   },
+   "separation": {
+    "accuracy": null,
+    "partial_recall": null
+   },
+   "by_family": {
+    "needles": {
+     "covered": {
+      "rows": 3,
+      "cells": 1,
+      "mean_accuracy": 0.3333,
+      "mean_partial_recall": 0.625,
+      "mean_kept_slots": 2560.0,
+      "mean_required_set_tokens": 134.0
+     },
+     "not_covered": {
+      "rows": 0,
+      "cells": 0,
+      "mean_accuracy": null,
+      "mean_partial_recall": null,
+      "mean_kept_slots": null,
+      "mean_required_set_tokens": null
+     },
+     "separation": {
+      "accuracy": null,
+      "partial_recall": null
+     }
+    }
+   },
+   "by_cell": {
+    "needles": {
+     "8": {
+      "covered": {
+       "rows": 3,
+       "cells": 1,
+       "mean_accuracy": 0.3333,
+       "mean_partial_recall": 0.625,
+       "mean_kept_slots": 2560.0,
+       "mean_required_set_tokens": 134.0
+      },
+      "not_covered": {
+       "rows": 0,
+       "cells": 0,
+       "mean_accuracy": null,
+       "mean_partial_recall": null,
+       "mean_kept_slots": null,
+       "mean_required_set_tokens": null
+      },
+      "separation": {
+       "accuracy": null,
+       "partial_recall": null
+      }
+     }
+    }
+   },
+   "by_budget": {
+    "2048": {
+     "covered": {
+      "rows": 3,
+      "cells": 1,
+      "mean_accuracy": 0.3333,
+      "mean_partial_recall": 0.625,
+      "mean_kept_slots": 2560.0,
+      "mean_required_set_tokens": 134.0
+     },
+     "not_covered": {
+      "rows": 0,
+      "cells": 0,
+      "mean_accuracy": null,
+      "mean_partial_recall": null,
+      "mean_kept_slots": null,
+      "mean_required_set_tokens": null
+     },
+     "separation": {
+      "accuracy": null,
+      "partial_recall": null
+     }
+    }
+   }
+  },
+  "required_span_coverage": {
+   "rule": "`required_coverage` is the share of the item statements' own tokens that survived selection, measured against the kept index set of the bounded arm; a row is fully covered when every statement kept every token",
+   "prediction": "prediction 2 of docs/MECHANISM.md in its measured form: accuracy is high when the item statements are in the retained support, and the two means below are the cliff",
+   "covered": {
+    "rows": 3,
+    "cells": 1,
+    "mean_accuracy": 0.3333,
+    "mean_partial_recall": 0.625,
+    "mean_kept_slots": 2560.0,
+    "mean_required_set_tokens": 134.0
+   },
+   "not_covered": {
+    "rows": 0,
+    "cells": 0,
+    "mean_accuracy": null,
+    "mean_partial_recall": null,
+    "mean_kept_slots": null,
+    "mean_required_set_tokens": null
+   },
+   "separation": {
+    "accuracy": null,
+    "partial_recall": null
+   },
+   "mean_coverage": 1.0,
+   "by_cell": {
+    "needles": {
+     "8": {
+      "mean_coverage": 1.0,
+      "mean_items_covered": 8.0,
+      "items_required": 8.0,
+      "covered": {
+       "rows": 3,
+       "cells": 1,
+       "mean_accuracy": 0.3333,
+       "mean_partial_recall": 0.625,
+       "mean_kept_slots": 2560.0,
+       "mean_required_set_tokens": 134.0
+      },
+      "not_covered": {
+       "rows": 0,
+       "cells": 0,
+       "mean_accuracy": null,
+       "mean_partial_recall": null,
+       "mean_kept_slots": null,
+       "mean_required_set_tokens": null
+      },
+      "separation": {
+       "accuracy": null,
+       "partial_recall": null
+      }
+     }
+    }
+   },
+   "by_budget": {
+    "2048": {
+     "mean_coverage": 1.0,
+     "mean_items_covered": 8.0,
+     "covered": {
+      "rows": 3,
+      "cells": 1,
+      "mean_accuracy": 0.3333,
+      "mean_partial_recall": 0.625,
+      "mean_kept_slots": 2560.0,
+      "mean_required_set_tokens": 134.0
+     },
+     "not_covered": {
+      "rows": 0,
+      "cells": 0,
+      "mean_accuracy": null,
+      "mean_partial_recall": null,
+      "mean_kept_slots": null,
+      "mean_required_set_tokens": null
+     },
+     "separation": {
+      "accuracy": null,
+      "partial_recall": null
+     }
+    }
+   }
+  },
+  "prediction_checks": {
+   "required_budget_flat_in_length": null,
+   "required_budget_flat_cells": 0,
+   "required_budget_grows_with_items": null,
+   "required_budget_grows_cells": 0,
+   "required_budget_grows_with_distractors": null,
+   "required_budget_grows_with_distractors_cells": 0,
+   "cliff": {
+    "mean_accuracy_budget_covers_required_set": 0.3333,
+    "mean_accuracy_budget_below_required_set": null,
+    "cells_above": 3,
+    "cells_below": 0,
+    "required_set_tokens_rule": "items x mean tokens per item statement",
+    "budget_comparison": "nominal budget, not the measured kept slots",
+    "measured_kept_slots_block": "budget_covers_required_set",
+    "measured_separation_accuracy": null
+   }
+  }
+ },
+ "records": [
+  {
+   "family": "needles",
+   "items": 8,
+   "seed": 0,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": null,
+   "key_count": 8,
+   "arm": "full",
+   "budget": null,
+   "prompt_tokens": 32769,
+   "kept_slots": 32769,
+   "prediction": "The final answer is: 342867,208877,116432,619552,139396,448465,759352,549604.**The report continues with a description of the surrounding conditions. Several observations were recorded during the earlier part of the session. A short pause followed while the instrument settled into a",
+   "expected": "619552, 448465, 116432, 208877, 759352, 139396, 342867, 549604",
+   "references": [
+    "619552",
+    "448465",
+    "116432",
+    "208877",
+    "759352",
+    "139396",
+    "342867",
+    "549604"
+   ],
+   "correct": true,
+   "parsed": "342867208877116432619552139396448465759352549604",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "619552",
+    "448465",
+    "116432",
+    "208877",
+    "759352",
+    "139396",
+    "342867",
+    "549604"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "342867208877116432619552139396448465759352549604"
+   ],
+   "generated_tokens": 64,
+   "max_new": 64,
+   "statement_tokens": 132,
+   "placement": "scatter",
+   "anchor_sites": null,
+   "anchor_sites_total": null,
+   "lex_cap": 512,
+   "required_span_tokens": 132,
+   "required_kept_tokens": null,
+   "required_coverage": null,
+   "items_covered": null,
+   "items_required": 8,
+   "required_mass": null,
+   "tokens_per_item": 16.5,
+   "mean_item_spacing": 4079.6,
+   "required_set_tokens": 132.0,
+   "budget_covers_required_set": null,
+   "prefill_s": 19.04,
+   "decode_s": 3.19,
+   "peak_mib": 15695.3,
+   "peak_rss_mib": 16932.2,
+   "target_key": null,
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "needles",
+   "items": 8,
+   "seed": 0,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": null,
+   "key_count": 8,
+   "arm": "b2048",
+   "budget": 2048,
+   "prompt_tokens": 32769,
+   "kept_slots": 2560,
+   "prediction": "## Step 1: Identify the magic numbers for each key\nThe problem provides a list of keys with their corresponding magic numbers. We need to extract these numbers for each key.\n\n## Step 2: Extract the magic numbers for each key\nFrom the given text, we can see that the magic numbers are:\n-",
+   "expected": "619552, 448465, 116432, 208877, 759352, 139396, 342867, 549604",
+   "references": [
+    "619552",
+    "448465",
+    "116432",
+    "208877",
+    "759352",
+    "139396",
+    "342867",
+    "549604"
+   ],
+   "correct": false,
+   "parsed": "1",
+   "partial": 0.0,
+   "partial_recall": 0.0,
+   "exact_set_match": false,
+   "present": [],
+   "missing": [
+    "619552",
+    "448465",
+    "116432",
+    "208877",
+    "759352",
+    "139396",
+    "342867",
+    "549604"
+   ],
+   "distractor_hit": false,
+   "candidates": [
+    "1",
+    "2"
+   ],
+   "generated_tokens": 64,
+   "max_new": 64,
+   "statement_tokens": 132,
+   "placement": "scatter",
+   "anchor_sites": 8,
+   "anchor_sites_total": 8,
+   "lex_cap": 512,
+   "required_span_tokens": 132,
+   "required_kept_tokens": 132,
+   "required_coverage": 1.0,
+   "items_covered": 8,
+   "items_required": 8,
+   "required_mass": 0.027638,
+   "tokens_per_item": 16.5,
+   "mean_item_spacing": 4079.6,
+   "required_set_tokens": 132.0,
+   "budget_covers_required_set": true,
+   "prefill_s": 19.04,
+   "decode_s": 2.29,
+   "peak_mib": 17817.8,
+   "peak_rss_mib": 16932.2,
+   "target_key": null,
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "needles",
+   "items": 8,
+   "seed": 1,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": null,
+   "key_count": 8,
+   "arm": "full",
+   "budget": null,
+   "prompt_tokens": 32769,
+   "kept_slots": 32769,
+   "prediction": "Answer: 133910, 245241, 348427, 118058, 176442, 774250, 856563, 779213\nThe magic numbers for trace-6d4af9, trace-242a9b, trace-f3673d, trace-45bf77",
+   "expected": "118058, 779213, 245241, 176442, 348427, 774250, 133910, 856563",
+   "references": [
+    "118058",
+    "779213",
+    "245241",
+    "176442",
+    "348427",
+    "774250",
+    "133910",
+    "856563"
+   ],
+   "correct": true,
+   "parsed": "133910",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "118058",
+    "779213",
+    "245241",
+    "176442",
+    "348427",
+    "774250",
+    "133910",
+    "856563"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "133910",
+    "245241",
+    "348427",
+    "118058",
+    "176442",
+    "774250",
+    "856563",
+    "779213"
+   ],
+   "generated_tokens": 64,
+   "max_new": 64,
+   "statement_tokens": 136,
+   "placement": "scatter",
+   "anchor_sites": null,
+   "anchor_sites_total": null,
+   "lex_cap": 512,
+   "required_span_tokens": 136,
+   "required_kept_tokens": null,
+   "required_coverage": null,
+   "items_covered": null,
+   "items_required": 8,
+   "required_mass": null,
+   "tokens_per_item": 17.0,
+   "mean_item_spacing": 4079.1,
+   "required_set_tokens": 136.0,
+   "budget_covers_required_set": null,
+   "prefill_s": 18.93,
+   "decode_s": 2.75,
+   "peak_mib": 16028.5,
+   "peak_rss_mib": 16932.2,
+   "target_key": null,
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "needles",
+   "items": 8,
+   "seed": 1,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": null,
+   "key_count": 8,
+   "arm": "b2048",
+   "budget": 2048,
+   "prompt_tokens": 32769,
+   "kept_slots": 2560,
+   "prediction": "Answer: 133910, 245241, 348427, 779213, 176442, 774250, 856563, 118058.<|eot_id|>",
+   "expected": "118058, 779213, 245241, 176442, 348427, 774250, 133910, 856563",
+   "references": [
+    "118058",
+    "779213",
+    "245241",
+    "176442",
+    "348427",
+    "774250",
+    "133910",
+    "856563"
+   ],
+   "correct": true,
+   "parsed": "133910",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "118058",
+    "779213",
+    "245241",
+    "176442",
+    "348427",
+    "774250",
+    "133910",
+    "856563"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "133910",
+    "245241",
+    "348427",
+    "779213",
+    "176442",
+    "774250",
+    "856563",
+    "118058"
+   ],
+   "generated_tokens": 35,
+   "max_new": 64,
+   "statement_tokens": 136,
+   "placement": "scatter",
+   "anchor_sites": 8,
+   "anchor_sites_total": 8,
+   "lex_cap": 512,
+   "required_span_tokens": 136,
+   "required_kept_tokens": 136,
+   "required_coverage": 1.0,
+   "items_covered": 8,
+   "items_required": 8,
+   "required_mass": 0.028555,
+   "tokens_per_item": 17.0,
+   "mean_item_spacing": 4079.1,
+   "required_set_tokens": 136.0,
+   "budget_covers_required_set": true,
+   "prefill_s": 18.93,
+   "decode_s": 1.8,
+   "peak_mib": 17817.8,
+   "peak_rss_mib": 16932.2,
+   "target_key": null,
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "needles",
+   "items": 8,
+   "seed": 2,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": null,
+   "key_count": 8,
+   "arm": "full",
+   "budget": null,
+   "prompt_tokens": 32769,
+   "kept_slots": 32769,
+   "prediction": "Answer: 430452, 907434, 584486, 501776, 125067, 985349, 849839, 559070\nThe question is asking for the magic numbers associated with the keys trace-f42b75, trace-7aeecb, trace-01ea47",
+   "expected": "907434, 125067, 985349, 430452, 849839, 584486, 501776, 559070",
+   "references": [
+    "907434",
+    "125067",
+    "985349",
+    "430452",
+    "849839",
+    "584486",
+    "501776",
+    "559070"
+   ],
+   "correct": true,
+   "parsed": "430452",
+   "partial": 1.0,
+   "partial_recall": 1.0,
+   "exact_set_match": true,
+   "present": [
+    "907434",
+    "125067",
+    "985349",
+    "430452",
+    "849839",
+    "584486",
+    "501776",
+    "559070"
+   ],
+   "missing": [],
+   "distractor_hit": false,
+   "candidates": [
+    "430452",
+    "907434",
+    "584486",
+    "501776",
+    "125067",
+    "985349",
+    "849839",
+    "559070"
+   ],
+   "generated_tokens": 64,
+   "max_new": 64,
+   "statement_tokens": 134,
+   "placement": "scatter",
+   "anchor_sites": null,
+   "anchor_sites_total": null,
+   "lex_cap": 512,
+   "required_span_tokens": 134,
+   "required_kept_tokens": null,
+   "required_coverage": null,
+   "items_covered": null,
+   "items_required": 8,
+   "required_mass": null,
+   "tokens_per_item": 16.75,
+   "mean_item_spacing": 4079.4,
+   "required_set_tokens": 134.0,
+   "budget_covers_required_set": null,
+   "prefill_s": 18.92,
+   "decode_s": 2.95,
+   "peak_mib": 16024.9,
+   "peak_rss_mib": 16932.2,
+   "target_key": null,
+   "target_status": null,
+   "shared_prefill": true
+  },
+  {
+   "family": "needles",
+   "items": 8,
+   "seed": 2,
+   "length": 32768,
+   "aggregate": null,
+   "distractors": null,
+   "key_count": 8,
+   "arm": "b2048",
+   "budget": 2048,
+   "prompt_tokens": 32769,
+   "kept_slots": 2560,
+   "prediction": "Answer: 430452, 907434, 584486, 501776, 125067, 849839, 559070, 584486. \nExplanation: The question is asking for the magic numbers for all of the keys mentioned. The keys are trace-f42b75, trace-7",
+   "expected": "907434, 125067, 985349, 430452, 849839, 584486, 501776, 559070",
+   "references": [
+    "907434",
+    "125067",
+    "985349",
+    "430452",
+    "849839",
+    "584486",
+    "501776",
+    "559070"
+   ],
+   "correct": false,
+   "parsed": "430452",
+   "partial": 0.875,
+   "partial_recall": 0.875,
+   "exact_set_match": false,
+   "present": [
+    "907434",
+    "125067",
+    "430452",
+    "849839",
+    "584486",
+    "501776",
+    "559070"
+   ],
+   "missing": [
+    "985349"
+   ],
+   "distractor_hit": false,
+   "candidates": [
+    "430452",
+    "907434",
+    "584486",
+    "501776",
+    "125067",
+    "849839",
+    "559070",
+    "584486"
+   ],
+   "generated_tokens": 64,
+   "max_new": 64,
+   "statement_tokens": 134,
+   "placement": "scatter",
+   "anchor_sites": 8,
+   "anchor_sites_total": 8,
+   "lex_cap": 512,
+   "required_span_tokens": 134,
+   "required_kept_tokens": 134,
+   "required_coverage": 1.0,
+   "items_covered": 8,
+   "items_required": 8,
+   "required_mass": 0.032159,
+   "tokens_per_item": 16.75,
+   "mean_item_spacing": 4079.4,
+   "required_set_tokens": 134.0,
+   "budget_covers_required_set": true,
+   "prefill_s": 18.92,
+   "decode_s": 2.82,
+   "peak_mib": 17817.8,
+   "peak_rss_mib": 16932.2,
+   "target_key": null,
+   "target_status": null,
+   "shared_prefill": true
+  }
+ ]
+}

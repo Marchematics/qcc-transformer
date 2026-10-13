@@ -1,0 +1,21 @@
+{
+  "device": "NVIDIA RTX 3090 (CUDA device 1)",
+  "length": 4000000,
+  "d_model": 64,
+  "layers": 2,
+  "heads": 8,
+  "window_size": 16,
+  "num_codes": 32,
+  "archive_lexical_landmark": true,
+  "chunk_size": 256,
+  "qcc_state_bytes": 106496,
+  "full_kv_bytes": 4096000000,
+  "state_fraction_percent": 0.0026,
+  "state_reduction": 38461.54,
+  "processed_tokens": 4000000,
+  "prefill_seconds": 55.805414,
+  "steady_state_tpot_ms_median": 2.248,
+  "decode_warmup": 4,
+  "decode_steps": 16,
+  "note": "QCC-only 4M stream; FullAttention execution was not attempted"
+}

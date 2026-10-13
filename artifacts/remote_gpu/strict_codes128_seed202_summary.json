@@ -1,0 +1,35 @@
+{
+  "device": "cuda:0",
+  "checkpoint": "runs/strict_codes128_seed202.pt",
+  "dataset": "runs/strict_codes128_seed202.jsonl",
+  "configuration": {
+    "d_model": 32,
+    "layers": 1,
+    "heads": 4,
+    "num_codes": 128,
+    "window_size": 16,
+    "position_encoding": "none",
+    "persistent_landmark": true,
+    "prefix_landmark": true,
+    "prefix_pair_landmark": true,
+    "lexical_landmark": true,
+    "training_steps": 4000,
+    "training_batch": 16,
+    "random_marker": true,
+    "random_filler": true
+  },
+  "results": {
+    "contexts": [128000, 1000000],
+    "examples_per_context": 29,
+    "correct": 56,
+    "total": 58,
+    "accuracy": 0.9655172413793104,
+    "target_accuracy": 0.98,
+    "passed": false,
+    "failures": [
+      {"line": 44, "context": 1000000, "query_position": 900000, "answer": 29, "prediction": 4},
+      {"line": 58, "context": 1000000, "query_position": 900000, "answer": 19, "prediction": 3}
+    ]
+  },
+  "note": "Independent strict random retrieval diagnostic; increasing codebook size alone did not reach the 98% gate. This is not RULER, LongBench, or pretrained-LM quality evidence."
+}

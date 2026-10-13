@@ -1,0 +1,68 @@
+{
+  "config": {
+    "compare_full": false,
+    "device": "cuda",
+    "lengths": [
+      4096
+    ],
+    "quality_lengths": [
+      1024,
+      2048,
+      4096
+    ],
+    "run_latency": false
+  },
+  "elapsed_seconds": 1.8068835139274597,
+  "latency": {
+    "4096": {
+      "status": "not_run"
+    }
+  },
+  "quality": {
+    "1024": {
+      "gate": {
+        "status": "pass",
+        "threshold": 0.99,
+        "value": 0.9993970543146133
+      },
+      "mean_logit_cosine": 0.9993970543146133,
+      "per_logit_mse": 320.9040946960449
+    },
+    "2048": {
+      "gate": {
+        "status": "pass",
+        "threshold": 0.99,
+        "value": 0.9989309459924698
+      },
+      "mean_logit_cosine": 0.9989309459924698,
+      "per_logit_mse": 568.8353080749512
+    },
+    "4096": {
+      "gate": {
+        "status": "pass",
+        "threshold": 0.99,
+        "value": 0.9982317313551903
+      },
+      "mean_logit_cosine": 0.9982317313551903,
+      "per_logit_mse": 935.0251426696777
+    }
+  },
+  "retrieval": {
+    "reason": "--checkpoint and --dataset are both required",
+    "status": "missing"
+  },
+  "state": {
+    "4096": {
+      "report": {
+        "full_kv_bytes": 2097152.0,
+        "full_kv_elements": 524288.0,
+        "qcc_bytes": 82432.0,
+        "qcc_elements": 20608.0,
+        "reduction": 25.440993788819874,
+        "state_fraction_percent": 3.9306640625
+      },
+      "under_0.1pct": false,
+      "under_0.5pct": false
+    }
+  }
+}

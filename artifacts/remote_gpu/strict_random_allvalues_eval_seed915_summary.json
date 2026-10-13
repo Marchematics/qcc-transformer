@@ -1,0 +1,15 @@
+{
+  "device": "cuda",
+  "checkpoint": "runs/lexical_pair_random_seed915.pt",
+  "dataset": "runs/strict_random_allvalues_seed916.jsonl",
+  "examples": 58,
+  "correct": 55,
+  "accuracy": 0.9482758620689655,
+  "target_accuracy": 0.98,
+  "passed": false,
+  "context_lengths": [128000, 1000000],
+  "value_ids": "3-31",
+  "random_marker": true,
+  "random_filler": true,
+  "note": "Synthetic strict retrieval diagnostic only; not RULER, LongBench, PG-19, or pretrained-LM quality evidence."
+}

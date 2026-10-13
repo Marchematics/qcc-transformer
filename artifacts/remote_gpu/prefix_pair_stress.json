@@ -1,0 +1,28 @@
+{
+  "runtime": "tsinghua3090-X11DPG-OT",
+  "gpus_available": 10,
+  "gpu": "NVIDIA GeForce RTX 3090",
+  "code_commit": "310b4eb",
+  "configuration": {
+    "d_model": 32,
+    "layers": 1,
+    "heads": 4,
+    "num_codes": 32,
+    "window_size": 16,
+    "position_encoding": "none",
+    "persistent_landmark": true,
+    "prefix_landmark": true,
+    "prefix_pair_landmark": true,
+    "training_steps": 1800,
+    "training_batch": 32,
+    "seed": 46
+  },
+  "stress": {
+    "contexts": [128000, 1000000],
+    "values_per_context": 29,
+    "examples": 58,
+    "correct": 1,
+    "accuracy": 0.0172413793
+  },
+  "interpretation": "Successor-bound prefix slots did not solve multi-value long-tail generalization. This negative ablation rules out a simple marker-to-successor overwrite fix; it is not evidence for the 1M retrieval target."
+}

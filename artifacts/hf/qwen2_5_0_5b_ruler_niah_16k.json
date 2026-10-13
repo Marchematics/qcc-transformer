@@ -1,0 +1,103 @@
+{
+  "model": "/home/frankwang122222/qcc-work/models/qwen2.5-0.5b",
+  "records": 3,
+  "patched_layers": [
+    "model.layers.0.self_attn",
+    "model.layers.1.self_attn",
+    "model.layers.2.self_attn",
+    "model.layers.3.self_attn",
+    "model.layers.4.self_attn",
+    "model.layers.5.self_attn",
+    "model.layers.6.self_attn",
+    "model.layers.7.self_attn",
+    "model.layers.8.self_attn",
+    "model.layers.9.self_attn",
+    "model.layers.10.self_attn",
+    "model.layers.11.self_attn",
+    "model.layers.12.self_attn",
+    "model.layers.13.self_attn",
+    "model.layers.14.self_attn",
+    "model.layers.15.self_attn",
+    "model.layers.16.self_attn",
+    "model.layers.17.self_attn",
+    "model.layers.18.self_attn",
+    "model.layers.19.self_attn",
+    "model.layers.20.self_attn",
+    "model.layers.21.self_attn",
+    "model.layers.22.self_attn",
+    "model.layers.23.self_attn"
+  ],
+  "baseline_full_kv": {
+    "correct": 0,
+    "accuracy": 0.0,
+    "records": [
+      {
+        "line": 1,
+        "answers": [
+          "9276183"
+        ],
+        "length_chars": 60851,
+        "tokens": 16218,
+        "prediction": " To find the special magic number for thinkable-chime, let's analyze the",
+        "correct": false
+      },
+      {
+        "line": 2,
+        "answers": [
+          "3356171"
+        ],
+        "length_chars": 60853,
+        "tokens": 16220,
+        "prediction": " To find the special magic number for screeching-grant, let's analyze",
+        "correct": false
+      },
+      {
+        "line": 3,
+        "answers": [
+          "2570478"
+        ],
+        "length_chars": 60853,
+        "tokens": 16218,
+        "prediction": " To find the special magic number for pleasant-puritan, let's analyze the",
+        "correct": false
+      }
+    ]
+  },
+  "qcc_retrofit": {
+    "correct": 0,
+    "accuracy": 0.0,
+    "records": [
+      {
+        "line": 1,
+        "answers": [
+          "9276183"
+        ],
+        "length_chars": 60851,
+        "tokens": 16218,
+        "prediction": " The Yellow.\n\nTheascus\n\nIs It's own\n \nIt is a whole",
+        "correct": false
+      },
+      {
+        "line": 2,
+        "answers": [
+          "3356171"
+        ],
+        "length_chars": 60853,
+        "tokens": 16220,
+        "prediction": " The whole. It's\n\nTheascus\n\u00a0\n\nIs it is a very",
+        "correct": false
+      },
+      {
+        "line": 3,
+        "answers": [
+          "2570478"
+        ],
+        "length_chars": 60853,
+        "tokens": 16218,
+        "prediction": " The whole. It's\n\nTheascus\n1. \n\u00a0\n\nIs it",
+        "correct": false
+      }
+    ]
+  },
+  "note": "Official RULER record scoring; generation failures count as incorrect and no quality claim is made beyond this split."
+}
