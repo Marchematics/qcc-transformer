@@ -1,7 +1,6 @@
 # QCC-Transformer
 
-> **Public showcase:** project presentation and recorded measurements remain available.
-> The implementation and runnable experiment code are temporarily withheld pending publication.
+> **Code availability:** Source code and implementation-specific documents are temporarily private pending publication. The instructions below describe the full project.
 
 [![python](https://img.shields.io/badge/python-3.10%2B-blue)](pyproject.toml)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -50,8 +49,8 @@ This is the central systems property of QCC.
 
 ## Headline measurements
 
-All reported numbers are backed by stored per-run artifacts. Implementation and
-reproduction code are temporarily withheld pending publication.
+All reported numbers are backed by stored per-run artifacts and reproduction
+commands.
 
 | Measurement | Configuration | Result |
 |---|---|---:|
@@ -145,8 +144,8 @@ At matched retained width on the stored RULER evaluation:
 | window-mean selection | 0.880 |
 | **QCC** | **1.008** |
 
-The public evidence also contains matched measurements against H2O-, TOVA-,
-Quest-, PyramidKV- and SnapKV-shaped policies.
+The repository also contains matched measurements against H2O-, TOVA-, Quest-,
+PyramidKV- and SnapKV-shaped policies.
 
 ## Deployment model
 
@@ -170,8 +169,8 @@ work served by the same GPU fleet.
 The core retention path, exact chunked prefill, fixed-width cache compilation,
 ragged batching, quality benchmarks and serving benchmarks are implemented.
 
-Hugging Face integration and the vLLM integration are maintained in the private
-implementation. The vLLM path is being hardened for production deployment.
+Hugging Face integration is available. vLLM integration is already present in
+the repository and is being hardened for production deployment.
 
 The next engineering phase expands the same runtime to:
 
@@ -181,17 +180,31 @@ The next engineering phase expands the same runtime to:
 - workload-aware automatic budget selection;
 - multi-GPU continuous batching.
 
-## Public showcase and code availability
+## Install
 
-The public repository retains the project overview, performance tables and stored
-measurement evidence. Source code, executable examples, benchmark implementations,
-tests, kernels and implementation-specific reproduction notes are withheld until
-publication. The API example above is documentation, not an installable public
-implementation.
+```bash
+python -m venv .venv
+. .venv/bin/activate
+pip install -e '.[dev,hf]'
+pytest -q
+```
+
+## Repository
+
+```text
+qcc_transformer/   core runtime and integrations
+benchmarks/        quality, memory and serving benchmarks
+artifacts/         per-run predictions, scores, timings and memory records
+docs/              mechanism, measurements and reproduction notes
+examples/          runnable examples
+tests/             unit and regression tests
+```
 
 - [`docs/REPORT.md`](docs/REPORT.md) — technical measurement summary
-- [`docs/EVIDENCE.md`](docs/EVIDENCE.md) — measurement-to-artifact index
-- [`artifacts/`](artifacts/) — unchanged stored measurement records
+- [`docs/MECHANISM.md`](docs/MECHANISM.md) — retention mechanism and scaling analysis
+- [`docs/EVIDENCE.md`](docs/EVIDENCE.md) — measurement-to-artifact-to-command index
+- [`docs/REPRODUCING.md`](docs/REPRODUCING.md) — reproduction instructions
+- [`docs/NOVELTY.md`](docs/NOVELTY.md) — relation to prior bounded-memory attention work
 
 > **Complexity convention.** The O(1) statements above are with respect to
 > prefilled context length `L` at fixed retained budget `B`, and refer to
