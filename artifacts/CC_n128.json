@@ -1,0 +1,41 @@
+{
+ "model": "/home/zhangjh/projects/codex-managed/MLSys/qcc-dev/cache/models/Llama-3.2-1B-Instruct",
+ "length": 1152,
+ "max_new": 128,
+ "engine": "vllm",
+ "arm": "stock",
+ "config": {
+  "model": "/home/zhangjh/projects/codex-managed/MLSys/qcc-dev/cache/models/Llama-3.2-1B-Instruct",
+  "length": 1152,
+  "batches": [
+   128
+  ],
+  "max_new": 128,
+  "gpu_memory_utilization": 0.9,
+  "max_num_seqs": 128,
+  "out": "/home/zhangjh/projects/codex-managed/MLSys/qcc-dev/repo-paper/artifacts/CC_n128.json",
+  "arm": "stock",
+  "query_correction_rank": 0,
+  "adapter": null
+ },
+ "rows": [
+  {
+   "arm": "stock",
+   "batch": 128,
+   "prompt_tokens": 1149,
+   "metrics_attrs": null,
+   "decode_only_tokens_per_s": 15966.1,
+   "decode_only_tpot_ms": 8.02,
+   "engine_load_s": 25.3,
+   "wall_s": 1.02,
+   "generated_tokens": 16384,
+   "metrics_available": false,
+   "prefill_s": null,
+   "decode_s": null,
+   "decode_tokens_per_s": null,
+   "tpot_ms": null,
+   "e2e_tokens_per_s": 16091.9,
+   "ok": true
+  }
+ ]
+}

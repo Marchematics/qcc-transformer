@@ -1,0 +1,72 @@
+{
+ "model": "/home/zhangjh/projects/codex-managed/MLSys/qcc-dev/cache/models/Llama-3.2-1B-Instruct",
+ "length": 130816,
+ "max_new": 128,
+ "engine": "vllm",
+ "config": {
+  "model": "/home/zhangjh/projects/codex-managed/MLSys/qcc-dev/cache/models/Llama-3.2-1B-Instruct",
+  "length": 130816,
+  "batches": [
+   1,
+   2,
+   4
+  ],
+  "max_new": 128,
+  "gpu_memory_utilization": 0.6,
+  "max_num_seqs": 4,
+  "out": "artifacts/E19_stock_vllm_128k_llama1b.json"
+ },
+ "rows": [
+  {
+   "batch": 1,
+   "prompt_tokens": 130817,
+   "metrics_attrs": null,
+   "decode_only_tokens_per_s": 88.9,
+   "decode_only_tpot_ms": 11.25,
+   "engine_load_s": 34.7,
+   "wall_s": 1.43,
+   "generated_tokens": 128,
+   "metrics_available": false,
+   "prefill_s": null,
+   "decode_s": null,
+   "decode_tokens_per_s": null,
+   "tpot_ms": null,
+   "e2e_tokens_per_s": 89.6,
+   "ok": true
+  },
+  {
+   "batch": 2,
+   "prompt_tokens": 130817,
+   "metrics_attrs": null,
+   "decode_only_tokens_per_s": 115.2,
+   "decode_only_tpot_ms": 17.37,
+   "engine_load_s": 11.2,
+   "wall_s": 2.21,
+   "generated_tokens": 256,
+   "metrics_available": false,
+   "prefill_s": null,
+   "decode_s": null,
+   "decode_tokens_per_s": null,
+   "tpot_ms": null,
+   "e2e_tokens_per_s": 116.1,
+   "ok": true
+  },
+  {
+   "batch": 4,
+   "prompt_tokens": 130817,
+   "metrics_attrs": null,
+   "decode_only_tokens_per_s": 164.4,
+   "decode_only_tpot_ms": 24.33,
+   "engine_load_s": 11.1,
+   "wall_s": 3.09,
+   "generated_tokens": 512,
+   "metrics_available": false,
+   "prefill_s": null,
+   "decode_s": null,
+   "decode_tokens_per_s": null,
+   "tpot_ms": null,
+   "e2e_tokens_per_s": 165.7,
+   "ok": true
+  }
+ ]
+}
