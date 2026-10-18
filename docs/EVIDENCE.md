@@ -34,15 +34,26 @@ mean.
 
 State bytes factor as `(L / B) x (16 / d)`: which slots are kept, and how many bits each costs.
 Quantisation is applied **after** selection, so a quality delta is attributable to bits rather than to
-a changed working set. 50,146-token retrieval context, 20 rows:
+a changed working set.
+
+**75,003-token retrieval context, 20 rows, all retained:**
+
+| retained state | mean | rows at parity | time | space | **total** |
+|---|---:|---:|---:|---:|---:|
+| 128 slots, bf16 | 1.0000 | **20/20** | 586× | 1× | 586× |
+| **128 slots, int4** | **1.0000** | **20/20** | 586× | 4× | **2,344×** |
+
+`P6_b128.json`, `CQ_p6_b128_int4.json`, `P6_full.json`
+
+**50,146-token context**, the earlier point, where the same composition holds:
 
 | retained state | mean | rows at parity | time | space | **total** |
 |---|---:|---:|---:|---:|---:|
 | 160 slots, bf16 | 1.0000 | **20/20** | 313× | 1× | 313× |
 | 160 slots, int8 | 1.0000 | **20/20** | 313× | 2× | **627×** |
-| **160 slots, int4** | **1.0000** | **20/20** | 313× | 4× | **2,344×** |
+| 160 slots, int4 | 1.0000 | **20/20** | 313× | 4× | **1,254×** |
 
-`P6_b128.json`, `CQ_p6_b128_int4.json`, `CQ_p4_b160_int8.json`, `P6_full.json`
+`DP_p4_b160.json`, `CQ_p4_b160_int8.json`, `CQ_p4_b160_int4.json`
 
 **Both quantisation modes are free at this budget.** They are not free at every budget: at 4,096
 slots int4 halves quality (0.8250 → 0.4625) while int8 remains free
@@ -51,26 +62,37 @@ unambiguously enough that 4-bit values do not flip it.**
 
 ### Where the budget stops working
 
-| budget | time axis | rows at parity |
-|---:|---:|---:|
-| 192 | 261× | 20/20 |
-| **160** | **313×** | **20/20** |
-| 144 | 348× | 19/20 |
-| 128 | 392× | 18/20 |
+| context | budget | time axis | rows at parity |
+|---|---:|---:|---:|
+| 50,146 | 192 | 261× | 20/20 |
+| 50,146 | **160** | **313×** | **20/20** |
+| 50,146 | 144 | 348× | 19/20 |
+| 50,146 | 128 | 392× | 18/20 |
+| **75,003** | **128** | **586×** | **20/20** |
+| 75,003 | 144 | 521× | 20/20 |
+| 75,003 | 160 | 469× | 20/20 |
 
-`R4_p4_b192.json`, `DP_p4_b144.json`, `R4_p4_b128.json`
+`R4_p4_b192.json`, `DP_p4_b144.json`, `R4_p4_b128.json`, `P6_b128.json`, `P6_b144.json`, `P6_b160.json`
 
 ### The state-demand exponent
 
-| context | smallest budget at parity | compression | evidence |
-|---|---:|---:|---|
-| 12,714 | **≤ 96 slots** | **132×** | `LB_p1_b96.json` |
-| 50,146 | **(128, 160]** | **313×** | `DP_p4_b160.json`, `DP_p4_b144.json` |
+| context | smallest budget at parity | compression | rows |
+|---|---:|---:|---:|
+| 12,714 | **≤ 96 slots** | **132×** | 20/20 |
+| 50,146 | **160 slots** | **313×** | 20/20 |
+| **75,003** | **≤ 128 slots** | **586×** | **20/20** |
 
-**A 3.94× increase in context needs about 2.0× more state, so `beta ≈ 0.505`** — and the compression
-ratio therefore grows as `sqrt(L)`: 132× at 12.7K, 313× at 50.1K, with `(50,146/12,714)^0.505 = 2.00`
-predicted against `313/132 = 2.37` measured. **Longer contexts are the favourable regime**, because the
-state grows at half the rate of the context.
+`LB_p1_b96.json`, `DP_p4_b160.json`, `P6_b128.json`
+
+**Over a 5.90× span of context the budget rises by at most 1.33× (96 → 128), so `beta ≤ 0.162`.** The
+compression ratio therefore grows nearly linearly: **132× at 12.7K, 586× at 75.0K — a 4.44× increase
+for 5.90× more context.** The state is very nearly a property of the task, and the advantage improves
+with scale.
+
+The per-length frontiers are not monotone across padding amounts — 128 slots fail at 50,146 and succeed
+at 75,003 — because `--pad-factor` draws filler from other rows' passages, so the amount of padding
+changes which competing passages are present. **The bound above uses the smallest and largest lengths
+measured and does not depend on monotonicity in between.**
 
 ### Serving, measured in stock vLLM
 
