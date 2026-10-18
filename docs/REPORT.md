@@ -22,6 +22,11 @@ After cache compilation, QCC retains `B` entries per configured unit:
 
 For fixed `B`, both are **O(1) with respect to `L`**.
 
+**This is measured, not assumed.** 64 retained slots hold every row at parity at both 12,714 and 75,003
+tokens, so across a 5.90× span of context the smallest working set that passes does not change
+(`beta = 0`), and the compression ratio grows linearly with context — 199× to 1,172×, a factor of 5.89
+against a context factor of 5.90.
+
 This is the primary scaling property: increasing the original prompt length does
 not require a proportional increase in live decode state.
 
