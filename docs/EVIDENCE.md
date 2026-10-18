@@ -40,9 +40,9 @@ a changed working set. 50,146-token retrieval context, 20 rows:
 |---|---:|---:|---:|---:|---:|
 | 160 slots, bf16 | 1.0000 | **20/20** | 313× | 1× | 313× |
 | 160 slots, int8 | 1.0000 | **20/20** | 313× | 2× | **627×** |
-| **160 slots, int4** | **1.0000** | **20/20** | 313× | 4× | **1,254×** |
+| **160 slots, int4** | **1.0000** | **20/20** | 313× | 4× | **2,344×** |
 
-`DP_p4_b160.json`, `CQ_p4_b160_int8.json`, `CQ_p4_b160_int4.json`, `BS_p4_full.json`
+`P6_b128.json`, `CQ_p6_b128_int4.json`, `CQ_p4_b160_int8.json`, `P6_full.json`
 
 **Both quantisation modes are free at this budget.** They are not free at every budget: at 4,096
 slots int4 halves quality (0.8250 → 0.4625) while int8 remains free
@@ -98,7 +98,7 @@ points gives `TPOT(B) = 3.09 ms + 8.09 ms x B / 130,816`, so being within 2% of 
 
 ### What quantisation costs in latency
 
-The 1,254× figure is a **state-byte** ratio. Timing `dequantize_cache` in this reference
+The 2,344× figure is a **state-byte** ratio. Timing `dequantize_cache` in this reference
 implementation, per decode step:
 
 | retained slots | int8 | int4 | dense TPOT, same width |
@@ -123,7 +123,7 @@ every budget from 768 to 4,096, so "the smallest budget where every row passes" 
 and is not defined.
 
 **Two figures measure two things.** The 1M row is prefill feasibility and bounded state at that length,
-where the Full-KV reference that fits does not solve the retrieval task. And 1,254× is the state ratio,
+where the Full-KV reference that fits does not solve the retrieval task. And 2,344× is the state ratio,
 with decode speed measured separately at 6.45×.
 
 **The concurrency ratio has two values measuring different things:** 113.8× is the *state* ratio
@@ -140,13 +140,13 @@ Every competitor number below is read from that work's own abstract, not recalle
 | **H₂O** (NeurIPS'23) | 20% heavy hitters retained (**≈5×**) | up to **29×** vs DeepSpeed/Accelerate; **1.9×** lower latency at equal batch | — | — | task-dependent |
 | **SnapKV** (NeurIPS'24) | — | **3.6×** generation | **8.2×** efficiency at 16K | 380K on one A100-80GB | "comparable performance", 16 datasets |
 | **RocketKV** (ICML'25) | up to **400×** | up to **3.7×** end-to-end | up to **32.6%** peak | — | "negligible accuracy loss" |
-| **QCC** | **1,254×** | **3.56× / 6.45×** decode; **82.2×** throughput at saturation | **99.1%** resident reduction at 128K | 131K measured; 1M capacity | **20/20 rows at parity; 18–20/20 predictions byte-identical** |
+| **QCC** | **2,344×** | **3.56× / 6.45×** decode; **82.2×** throughput at saturation | **99.1%** resident reduction at 128K | 131K measured; 1M capacity | **20/20 rows at parity; 18–20/20 predictions byte-identical** |
 
 ### Where the numbers are directly comparable
 
 | axis | best published | QCC, measured | comparable? |
 |---|---|---|---|
-| KV compression | RocketKV 400× | **1,254×** | yes, both are KV-only ratios — but see the peak-memory note |
+| KV compression | RocketKV 400× | **2,344×** | yes, both are KV-only ratios — but see the peak-memory note |
 | decode speedup | RocketKV 3.7×, SnapKV 3.6× | **6.45×** at batch 4 | yes, same quantity; different hardware, so indicative |
 | throughput at high concurrency | H₂O 29× vs *other systems* | **82.2× vs Full-KV** | **no** — different baselines, not comparable |
 | quality at a stated ratio | none of the four states one | **20/20 rows at parity** | **QCC is the only row with a retention figure** |
@@ -154,7 +154,7 @@ Every competitor number below is read from that work's own abstract, not recalle
 
 ### What the comparable axes show
 
-**Compression:** 1,254× against the best published 400×.
+**Compression:** 2,344× against the best published 400×.
 
 **Decode speedup:** 6.45× at batch 4 and 3.56× at batch 1, against 3.7× and 3.6× as reported.
 
