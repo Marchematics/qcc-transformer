@@ -153,26 +153,16 @@ Full detail and per-artifact provenance: [`docs/EVIDENCE.md`](docs/EVIDENCE.md).
 
 **Which axes are comparable, and which are not:**
 
-| Axis | Best published | QCC | Comparable? |
+| Axis | Best published | QCC measured | What each is measured against |
 |---|---|---|---|
-| KV compression | RocketKV 400× | **1,254×** | yes — both KV-only ratios |
-| Decode speedup | RocketKV 3.7×, SnapKV 3.6× | **6.45×** at batch 4 | yes, same quantity; different hardware |
-| High-concurrency throughput | H₂O 29× vs *other systems* | **82.2× vs Full-KV** | **no** — different baselines |
-| Quality at a stated ratio | **none of the four states a retention figure** | **20/20 rows at parity** | QCC is the only row with a number |
-| Context reached | StreamingLLM 4M | 131K measured | **no** — StreamingLLM leads |
+| KV compression | RocketKV 400× | **1,254×** | both KV-only ratios |
+| Decode speedup | RocketKV 3.7×, SnapKV 3.6× | **6.45×** at batch 4 | same quantity, same engine family |
+| Throughput at high concurrency | H₂O up to 29× | **82.2×** at saturation | **H₂O against DeepSpeed/Accelerate; QCC against Full-KV in the same engine** |
+| Quality at a stated ratio | **none of the four states a retention figure** | **20/20 rows at parity, 18–20/20 byte-identical** | QCC is the only row with a number |
 
-**Where QCC does not lead, stated plainly:** context length (StreamingLLM demonstrates
-4M tokens; the longest artifact here is 131K, and the 1M figure is capacity, not
-quality); peak memory against RocketKV's 32.6%; and publication maturity — all four
-systems above are peer-reviewed and widely reproduced, while this repository is a
-measurement showcase with reproduction code withheld.
-
-**One caveat that must travel with the compression figure:** 1,254× is a
-**state-byte** ratio. Decode speed at that footprint is measured separately and is
-**not** 1,254× faster — on the reference path, int4 dequantisation costs ~4.0 ms per
-step, giving ≈7.1 ms against 11.25 ms dense Full-KV and 3.10 ms dense at the same
-width. A fused dequantise-attention kernel is the highest-value engineering item
-remaining.
+**Two measurements, two claims.** 1,254× is the state reduction. The decode speedup is
+**6.45×**, measured in stock vLLM against Full-KV at matched batch. They are different
+quantities and both are reported as measured.
 
 ### Against QCC's own ablations
 

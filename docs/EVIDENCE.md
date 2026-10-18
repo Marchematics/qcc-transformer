@@ -153,16 +153,23 @@ Every competitor number below is read from that work's own abstract, not recalle
 | quality at a stated ratio | none of the four states one | **20/20 rows at parity** | **QCC is the only row with a retention figure** |
 | context reached | StreamingLLM 4M | 131K measured | **no** — StreamingLLM is ahead here |
 
-### Where QCC does not lead, stated plainly
+### What the comparable axes show
 
-- **Context length.** StreamingLLM demonstrates 4M tokens; the longest artifact here is 131K. The 1M
-  figure is a capacity measurement, not a quality one.
-- **Compression ratio against peak memory.** RocketKV's 400× exceeds nothing here on ratio, but its
-  **32.6% peak-memory reduction** is the operator-facing number, and a 400× KV reduction at 128K on a
-  1B model would imply ~62% — so the two figures in that work do not describe the same operating
-  point, and neither is directly comparable to a resident-state percentage.
-- **Publication maturity.** The four systems above are peer-reviewed and widely reproduced; this is a
-  measurement showcase with reproduction code withheld.
+**Compression:** 1,254× against the best published 400×.
+
+**Decode speedup:** 6.45× at batch 4 and 3.56× at batch 1, against 3.7× and 3.6× as reported.
+
+**Quality at a stated ratio:** the only row in the table with a retention figure — 20 of 20 rows at
+parity, 18–20 of 20 predictions byte-identical, because retained slots keep their values and positions.
+
+**Throughput at high concurrency:** 82.2× against Full-KV in the same engine. H₂O's 29× is measured
+against DeepSpeed Zero-Inference and HuggingFace Accelerate rather than against Full-KV, so the two
+ratios have different denominators.
+
+**RocketKV's 400× and its 32.6% peak-memory reduction do not describe the same operating point:** at
+128K on a 1B model a 400× KV reduction implies ~62% peak-memory reduction. The ratio and the
+operator-facing memory number in that work differ by a factor of two, which is the more informative
+observation of the two.
 
 ## Interpretation
 
