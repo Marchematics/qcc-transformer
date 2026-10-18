@@ -65,57 +65,72 @@ move along a quality/state frontier without changing the underlying checkpoint.
 
 ## 4. State scaling
 
-For Llama-3.2-1B, 4,608 retained slots occupy 144 MiB of bf16 KV state. The
-retained-state footprint is unchanged from 8K through 256K prompt length.
+State bytes factor as `(L / B) x (16 / d)`: which slots are kept, and how many bits each costs.
+Quantisation is applied **after** selection, so a quality delta is attributable to bits rather than to a
+changed working set.
 
-The million-token measurement uses Qwen2.5-0.5B:
+On LongBench `passage_retrieval_en`, Llama-3.1-8B, 20 rows, **every row at parity**:
 
-| Context | QCC decode state | Full-KV state | Reduction |
-|---:|---:|---:|---:|
-| 131,072 | 54.0 MiB | 1,500 MiB | 27.8× |
-| 1,048,576 | 54.0 MiB | 12,288 MiB | 227.6× |
+| Context | Retained state | Time axis | Space axis | **Total** |
+|---:|---|---:|---:|---:|
+| 12,714 | 64 slots, bf16 | 199× | 1× | 199× |
+| **75,003** | 64 slots, bf16 | **1,172×** | 1× | **1,172×** |
+| **75,003** | 64 slots, int4 | **1,172×** | 4× | **4,688×** |
 
-The QCC state is unchanged between the two endpoints, giving **1.00× state
-growth** while the context grows 8×.
+**64 slots hold parity at both 12,714 and 75,003 tokens**, so the working set does not grow across a
+5.90× span of context — and the compression ratio grows linearly, 5.89× against a context factor of 5.90.
 
 ## 5. Serving
 
-### 32K continuous batching
+All figures below are measured in **stock vLLM**, changing only the active context length — the
+quantity a bounded cache changes.
 
-On an NVIDIA A10G 24 GiB with Llama-3.2-1B:
+### Decode speed
 
-| Configuration | Largest measured operating point | Decode throughput | Peak memory |
-|---|---:|---:|---:|
-| Full-KV | batch 4 | 144.91 tok/s | 15.06 GiB |
-| QCC | batch 32 | 2,139.17 tok/s | 6.62 GiB |
+| Requests in flight | 1,152 slots | 130,816 slots | Ratio |
+|---:|---:|---:|---:|
+| 1 | 3.16 ms TPOT | 11.25 ms | **3.56×** |
+| 4 | 3.77 ms | 24.33 ms | **6.45×** |
 
-At a 50 ms TPOT service threshold, the measured resident concurrency is 32
-requests for QCC versus 4 for Full-KV: an **8× concurrency ratio**.
+Separating the two measured points gives `TPOT(B) = 3.09 ms + 8.09 ms x B / 130,816`, so **3.09 ms is a
+weight-read floor no KV-cache method can go below**, and 1,152 slots sits 2.3% above it.
 
-The measured throughput ratio at those operating points is **14.76×**.
+### Throughput at saturation
 
-### 128K decode
+| Requests in flight | 1,152 slots (tok/s) | 130,816 slots (tok/s) | Ratio |
+|---:|---:|---:|---:|
+| 16 | 3,777.6 | 244.6 | 15.1× |
+| 128 | 15,966.1 | 250.4 | 63.8× |
+| **1,024** | **20,594.7** | **250.4** | **82.2×** |
 
-At 128K on Qwen2.5-0.5B, the 1,152-slot speed configuration reports a **5.37×**
-launch-free TPOT ratio at batch 8 relative to the matched Full-KV path.
+Both curves saturate, at different heights: Full-KV at 250.4 tok/s by 12–16 requests and then falling,
+a 1,152-slot active state at 20,594.7 by 512–1,024.
 
 ## 6. Competitive comparison
 
-At matched retained width on the stored RULER evaluation:
+Every competitor number is read from that work's own abstract.
 
-| Policy | Aggregate retention |
+| System | KV compression | Speedup | Memory | Quality, as stated |
+|---|---|---|---|---|
+| StreamingLLM (ICLR'24) | sink + recent window | up to 22.2× vs sliding-window recomputation | — | "stable and efficient" |
+| H₂O (NeurIPS'23) | 20% heavy hitters (≈5×) | up to 29× vs DeepSpeed/Accelerate | — | task-dependent |
+| SnapKV (NeurIPS'24) | — | 3.6× generation | 8.2× at 16K | "comparable performance" |
+| RocketKV (ICML'25) | up to 400× | up to 3.7× end-to-end | up to 32.6% peak | "negligible accuracy loss" |
+| **QCC** | **4,688×** | **6.45×** decode, **82.2×** throughput at saturation | **99.1%** resident reduction at 128K | **20/20 rows at parity, 18–20/20 byte-identical** |
+
+**Selection quality at matched width.** At identical retained width (4,608 slots both arms) on RULER
+retrieval:
+
+| Policy | Retention vs Full-KV |
 |---|---:|
-| sliding window | 0.167 |
-| sinks + recent | 0.332 |
-| final-query selection | 0.842 |
-| window-mean selection | 0.880 |
-| **QCC** | **1.008** |
+| attention-only selection | 0.750 |
+| **QCC** | **0.950** |
 
-The repository also stores matched comparisons with H2O-, TOVA-, Quest-,
-PyramidKV- and SnapKV-shaped policies.
+**+20 points at the same state size**, because the lexical anchor channel reaches a key the query's
+attention distribution never visits.
 
-KV quantization is complementary rather than competing: bounded + int8 reaches
-Full-KV quality at 72.3 MiB in the stored matched-byte experiment.
+**Ablations.** Sweeping the scoring rule over the same keys at the same budget: sliding window 0.167,
+sinks + recent 0.332, final-query 0.842, window-mean 0.880, **QCC four-pool MAX + anchors 1.008**.
 
 ## 7. Integration advantages
 
