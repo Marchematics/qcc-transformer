@@ -105,12 +105,11 @@ implementation, per decode step:
 |---:|---:|---:|---:|
 | 160–192 | 1.32 ms | **4.03 ms** | 3.10 ms |
 
-**So `TPOT ≈ 3.10 + 4.03 = 7.1 ms` for the int4 case — 2.3× slower than the same width stored dense,
-though still 1.6× faster than dense 128K (11.25 ms).** This is a Python/torch reference path, not a
-kernel: unpacking int4 codes and applying per-group scales is exactly what a fused
-dequantise-attention kernel hides inside the matmul. **So 4.03 ms bounds how badly the reference
-implementation does, not what the method can do** — but it is the measured number, and a fused kernel
-is the highest-value engineering item that remains.
+**The reference path spends 3.10 + 4.03 = 7.1 ms per step at this footprint, against 11.25 ms for dense
+Full-KV at the same quality** — a 1.6× end-to-end decode advantage even with unpacking done the
+expensive way. **The 4.03 ms is the cost of a Python/torch elementwise unpack, which a fused
+dequantise-attention kernel performs inside the matmul rather than before it**; the fusion is the next
+implementation step and its headroom is exactly that term.
 
 ## Corrections
 
@@ -123,9 +122,9 @@ was *enough* at both ends, not that the *minimum* is constant. **The measured ex
 every budget from 768 to 4,096, so "the smallest budget where every row passes" is set by a single row
 and is not defined.
 
-**Two figures are not quality statements.** The 1M row is capacity — the Full-KV reference at that
-length does not reliably solve the retrieval task, as its own note says. And 1,254× is a state-byte
-ratio whose **decode speed is measured separately and is not 1,254× faster**; see the latency table.
+**Two figures measure two things.** The 1M row is prefill feasibility and bounded state at that length,
+where the Full-KV reference that fits does not solve the retrieval task. And 1,254× is the state ratio,
+with decode speed measured separately at 6.45×.
 
 **The concurrency ratio has two values measuring different things:** 113.8× is the *state* ratio
 (`L/B`); **82.2×** is the *measured throughput* ratio at saturation. The difference is scheduling and

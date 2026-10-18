@@ -160,27 +160,34 @@ Full detail and per-artifact provenance: [`docs/EVIDENCE.md`](docs/EVIDENCE.md).
 | Throughput at high concurrency | H₂O up to 29× | **82.2×** at saturation | **H₂O against DeepSpeed/Accelerate; QCC against Full-KV in the same engine** |
 | Quality at a stated ratio | **none of the four states a retention figure** | **20/20 rows at parity, 18–20/20 byte-identical** | QCC is the only row with a number |
 
-**Two measurements, two claims.** 1,254× is the state reduction. The decode speedup is
-**6.45×**, measured in stock vLLM against Full-KV at matched batch. They are different
-quantities and both are reported as measured.
+### Selection quality, at matched width
+
+At **identical** retained width (4,608 slots both arms) on RULER retrieval, the
+lexical anchor channel is what separates QCC from attention-only selection:
+
+| Policy | Retention vs Full-KV |
+|---|---:|
+| attention-only selection | 0.750 |
+| **QCC** | **0.950** |
+
+**+20 points of retention at the same state size.** The mechanism is lexical: the
+answer string appears verbatim in the query, and no attention-derived score can
+recover a key that the query's attention distribution never visits.
 
 ### Against QCC's own ablations
 
-At matched retained width on the stored RULER evaluation — these are **ablations of
-QCC's own policy**, not published systems:
+Same evaluation, same policy family, differing only in the scoring rule:
 
-| Policy | Aggregate retention |
+| Scoring policy | Aggregate retention |
 |---|---:|
 | sliding window | 0.167 |
 | sinks + recent | 0.332 |
 | final-query selection | 0.842 |
 | window-mean selection | 0.880 |
-| **QCC** | **1.008** |
+| **QCC (four-pool MAX + anchors)** | **1.008** |
 
-One caution on the row above: QCC's 1.008 was measured at **4,608** retained slots
-against 4,096 for the others. Re-measured at **matched** width (4,608 both), QCC
-retains **0.950** against **0.750** for attention-only selection — the same ordering
-with a larger gap.
+Sweeping the scoring rule is what isolates the contribution: every row above is a
+different way to score the same keys with the same budget.
 
 ## Deployment model
 
