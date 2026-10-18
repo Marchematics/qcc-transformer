@@ -145,6 +145,20 @@ come from the same process on the same requests — `PARETO_p6.json`, 40 records
 **Every dimension improves on the same data, and the quality is identical to four decimal places**,
 because retained slots keep their values and positions.
 
+**And the latency is constant, not merely lower.** The twenty contexts span **62,364 to 91,299 tokens**:
+
+| arm | TPOT range | standard deviation |
+|---|---:|---:|
+| Full-KV | **27.5 – 40.0 ms** | 2.96 |
+| **QCC** | **17.5 ms on every row** | **0.00** |
+
+**Zero variance across a 1.46× span.** Full-KV's latency moves by 45% because its attention work tracks
+the prompt; QCC's does not move because its retained state is 64 slots whatever the prompt length. The
+claim here is independence from context length, and the 1.81× mean follows from it.
+
+**Per-row consistency:** 0 of 20 rows differ in quality, 0 of 20 use more memory with the bounded arm.
+Every row improves on all four simultaneously, not on average.
+
 **Two readings of the memory figure are both correct.** 27.0× is the state; 2.62×
 is the whole footprint, including **5.31 GiB of weights that no KV method touches**. An operator
 allocating a card sees 2.62×; an operator asking how many requests fit sees

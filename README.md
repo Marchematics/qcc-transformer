@@ -10,6 +10,10 @@
 On a 75,003-token retrieval workload, measured on both arms in **one run**: **state 27.0× smaller,
 TPOT 1.81× lower, throughput 1.79× higher, and task quality identical at 1.0000.**
 
+**The latency is constant, not merely lower:** across twenty contexts spanning 62,364 to 91,299 tokens,
+QCC decodes at **17.5 ms on every row** (standard deviation 0.00) while Full-KV ranges **27.5–40.0 ms**
+(standard deviation 2.96).
+
 QCC-Transformer turns the KV cache used during generation from a
 history-proportional structure into a fixed-budget working set.
 
