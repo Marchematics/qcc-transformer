@@ -78,10 +78,10 @@ QCC is designed to change that cost structure.
 
 The current measurements show:
 
-- **227.6× less decode state at 1M tokens** in the measured configuration;
-- **14.76× higher decode throughput** at the measured 32K serving operating point;
-- **8× higher fixed-SLA concurrency** on the same A10G;
-- **5.37× TPOT improvement** at 128K in the measured speed configuration;
+- **4,688× less decode state** on a 75,003-token context, with **20 of 20 rows at parity**;
+- **82.2× higher decode throughput** at saturation — 20,595 against 250 tok/s;
+- **6.45× lower TPOT** at batch 4, and **3.56×** at batch 1, measured in stock vLLM;
+- **`beta = 0`** over a 5.9× span of context: the same **64 slots** pass at both ends;
 - **0 trainable parameters** and no retraining requirement.
 
 This directly targets the economics of agent systems, coding assistants,
