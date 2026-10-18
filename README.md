@@ -54,21 +54,39 @@ commands.
 
 | Measurement | Configuration | Result |
 |---|---|---:|
+| **State compression, two axes** | Llama-3.1-8B, 75,003 tokens, 64 slots + int4 | **4,688×** at **20/20 rows at parity** |
+| **Throughput at saturation** | Llama-3.2-1B, stock vLLM, 1,024 vs 12–16 requests | **82.2×** — 20,595 vs 250 tok/s |
+| **Decode speed vs active state** | same engine, only the active context changed, batch 4 | **6.45×** (1,152 vs 130,816 slots) |
+| **Decode speed at batch 1** | same | **3.56×** — 3.16 ms against a 3.09 ms weight floor |
+| **State-demand exponent** | Llama-3.1-8B, 12,714 → 75,003 tokens | **beta = 0** over a **5.9×** span — the same **64 slots** pass at both ends |
+| Exactness | every configuration checked | **18–20 of 20 predictions byte-identical to Full-KV** |
+| LongBench retrieval | Llama-3.1-8B, `passage_retrieval_en`, 20 rows | **20/20 rows at parity**, mean 1.0000 |
 | RULER retention | Llama-3.2-1B, 4,096 attention slots + 512 lexical anchors | **1.007 aggregate, 1.000 worst task** |
-| LongBench retention | Llama-3.2-1B, nine-task evaluation | **0.9939 aggregate** |
+| LongBench, nine tasks | Llama-3.2-1B | **0.9939 aggregate** |
 | Decode-state growth | 8K → 256K, 4,608 retained slots | **1.00×**; 144 MiB at both endpoints |
 | 1M decode state | Qwen2.5-0.5B, 1,048,576 tokens | **54 MiB vs 12,288 MiB Full-KV — 227.6× reduction** |
 | 32K decode throughput | Llama-3.2-1B, A10G 24 GiB | **2,139 tok/s vs 145 tok/s Full-KV — 14.76×** |
 | 32K fixed-SLA concurrency | same serving experiment | **32 vs 4 resident requests — 8×** |
-| 128K launch-free TPOT | Qwen2.5-0.5B, batch 8, speed configuration | **5.37×** |
-| **State compression, two axes** | Llama-3.1-8B, 75,003 tokens, 64 slots + int4 | **4,688×** at **20/20 rows at parity** |
-| **Decode speed vs active state** | Llama-3.2-1B, stock vLLM, batch 4 | **6.45×** (1,152 vs 130,816 slots) |
-| **Throughput at saturation** | same, 1,024 vs 12–16 requests | **82.2×** |
-| **State-demand exponent** | Llama-3.1-8B, 12,714 → 75,003 tokens | **beta = 0** over a **5.9×** span — the same **64 slots** pass at both ends |
 | Trainable parameters added | all configurations | **0** |
 
 The measured scaling trend is the key result: the context can become much longer
 without forcing the decode cache to grow proportionally.
+
+### What changed since the first measurement set
+
+Four headline figures from the original set now have stronger measured counterparts. Both are kept —
+the original numbers are still true of the configurations they were measured in.
+
+| Original | Configuration | **Now** | Configuration |
+|---|---|---|---|
+| 227.6× state reduction | 1M tokens, capacity only, no quality measurement | **4,688×** | 75,003 tokens, **20/20 rows at parity** |
+| 14.76× decode throughput | 32K, bounded vs Full-KV | **82.2×** | 128K active context, saturated, stock vLLM |
+| 8× fixed-SLA concurrency | 32 vs 4 resident requests | **1,024 vs 12–16** | 20,595 vs 250 tok/s at saturation |
+| 5.37× TPOT | 128K, batch 8, speed configuration | **6.45×** | 128K, batch 4, stock vLLM |
+
+The first row is the one that matters most: the 227.6× was a **capacity** measurement at a length where
+the Full-KV reference does not solve the retrieval task, so it could not carry a quality claim. The
+4,688× is at 75,003 tokens with **every row at parity**, so it can.
 
 ## Why this matters
 
