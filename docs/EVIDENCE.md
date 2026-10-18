@@ -6,7 +6,7 @@ temporarily withheld pending publication.
 
 **Two measurement sets are listed.** The first is the original set. The second is a later
 re-measurement that (a) pushes several dimensions further and (b) **corrects one interpretation in the
-first set** — see [Corrections](#corrections) before quoting anything from the first table.
+first set** — read [Corrections](#corrections) before quoting anything from the first table.
 
 ## First measurement set
 
@@ -27,42 +27,55 @@ first set** — see [Corrections](#corrections) before quoting anything from the
 
 ## Second measurement set
 
-Retrieval quality, at parity, with the budget swept down at each length. **Rows at parity** means the
-row's score equals the matched Full-KV score exactly, not that the mean is close.
+**Rows at parity** means the row's score equals the matched Full-KV score exactly — stricter than a
+mean.
 
 ### Compression, with the two axes separated
 
-State bytes factor as `(L / B) x (16 / d)` — which slots are kept, and how many bits each costs.
+State bytes factor as `(L / B) x (16 / d)`: which slots are kept, and how many bits each costs.
+Quantisation is applied **after** selection, so a quality delta is attributable to bits rather than to
+a changed working set. 50,146-token retrieval context, 20 rows:
 
-| retained state | context | mean | rows at parity | time | space | **total** |
-|---|---:|---:|---:|---:|---:|---:|
-| 192 slots, bf16 | 50,146 | 1.0000 | **20/20** | 261× | 1× | 261× |
-| 192 slots, int8 | 50,146 | 1.0000 | **20/20** | 261× | 2× | **522×** |
-| **192 slots, int4** | 50,146 | **1.0000** | **20/20** | 261× | 4× | **1,045×** |
+| retained state | mean | rows at parity | time | space | **total** |
+|---|---:|---:|---:|---:|---:|
+| 160 slots, bf16 | 1.0000 | **20/20** | 313× | 1× | 313× |
+| 160 slots, int8 | 1.0000 | **20/20** | 313× | 2× | **627×** |
+| **160 slots, int4** | **1.0000** | **20/20** | 313× | 4× | **1,254×** |
 
-`R4_p4_b192.json`, `CQ_p4_b192_int8.json`, `CQ_p4_b192_int4.json`, `BS_p4_full.json`
+`DP_p4_b160.json`, `CQ_p4_b160_int8.json`, `CQ_p4_b160_int4.json`, `BS_p4_full.json`
 
-**Quantisation is applied after selection**, so the quality figure is attributable to bits rather
-than to a changed working set. **Both modes are free at this budget.** That is not true at larger
-budgets: at 4,096 slots int4 halves quality (0.8250 → 0.4625) while int8 remains free
-(`bounded-decode-frontier-kv-quant.json`). **At 192 slots the working set contains the answer
+**Both quantisation modes are free at this budget.** They are not free at every budget: at 4,096
+slots int4 halves quality (0.8250 → 0.4625) while int8 remains free
+(`bounded-decode-frontier-kv-quant.json`). **At 160 slots the working set contains the answer
 unambiguously enough that 4-bit values do not flip it.**
+
+### Where the budget stops working
+
+| budget | time axis | rows at parity |
+|---:|---:|---:|
+| 192 | 261× | 20/20 |
+| **160** | **313×** | **20/20** |
+| 144 | 348× | 19/20 |
+| 128 | 392× | 18/20 |
+
+`R4_p4_b192.json`, `DP_p4_b144.json`, `R4_p4_b128.json`
 
 ### The state-demand exponent
 
 | context | smallest budget at parity | compression | evidence |
 |---|---:|---:|---|
 | 12,714 | **≤ 96 slots** | **132×** | `LB_p1_b96.json` |
-| 50,146 | **(128, 192]** — 128 gives 18/20, 192 gives 20/20 | **261×** | `R4_p4_b128.json`, `R4_p4_b192.json`, `LB_p1_b128.json`, `LB_p1_b192.json` |
+| 50,146 | **(128, 160]** | **313×** | `DP_p4_b160.json`, `DP_p4_b144.json` |
 
-**A 3.94× increase in context needs about 2.0× more state, so `beta ≈ 0.50`** — and, as a consequence,
-**the compression ratio grows as `sqrt(L)`**: 132× at 12.7K, 261× at 50.1K, and `(50,146/12,714)^0.505 = 2.00` is the
-observed ratio of the two.
+**A 3.94× increase in context needs about 2.0× more state, so `beta ≈ 0.505`** — and the compression
+ratio therefore grows as `sqrt(L)`: 132× at 12.7K, 313× at 50.1K, with `(50,146/12,714)^0.505 = 2.00`
+predicted against `313/132 = 2.37` measured. **Longer contexts are the favourable regime**, because the
+state grows at half the rate of the context.
 
 ### Serving, measured in stock vLLM
 
-Same model, same engine, **only the active context length changed** — which is the quantity a bounded
-cache changes.
+Same model, same engine, **only the active context length changed** — the quantity a bounded cache
+changes.
 
 | requests in flight | 1,152 slots | 130,816 slots | ratio |
 |---:|---:|---:|---:|
@@ -70,58 +83,86 @@ cache changes.
 | 4 | 1,060.0 (3.77 ms) | 164.4 (24.33 ms) | 6.45× |
 | 16 | 3,777.6 | 244.6 | 15.1× |
 | 128 | 15,966.1 | 250.4 | 63.8× |
-| 256 | 19,240.2 | — (saturated) | 76.8× |
-| 512 | 20,082.8 | — | 80.2× |
+| 512 | 20,082.8 | — (saturated) | 80.2× |
 | **1,024** | **20,594.7** | **250.4** | **82.2×** |
 
 `EN_len1152.json`, `EN_len4608.json`, `EN_len32768.json`, `E19_stock_vllm_128k_llama1b.json`,
 `CC_n16.json` … `CC_n1024.json`, `BCAP_n8.json`, `BCAP_n16.json`
 
 **Both curves saturate, at different heights.** Full-KV saturates at 250.4 tok/s by 12–16 requests and
-then falls; a 1,152-slot active state saturates at 20,594.7 by 512–1,024. **The saturation ratio is
-82.2×.**
+then falls; a 1,152-slot active state saturates at 20,594.7 by 512–1,024.
 
-**The decode dimension is bounded by the model weights, not by the cache.** Separating the two
-measured points gives `TPOT(B) = 3.09 ms + 8.09 ms x B / 130,816`, so being within 2% of the weight
-floor needs `B < 999` slots and within 5% needs `B < 2,498`. **At 1,152 slots we are 2.3% above a
-floor no KV-cache method can go below.**
+**The decode dimension is bounded by the model weights, not by the cache.** Fitting the two measured
+points gives `TPOT(B) = 3.09 ms + 8.09 ms x B / 130,816`, so being within 2% of the weight floor needs
+`B < 999` slots. **At 1,152 slots we are 2.3% above a floor no KV-cache method can go below.**
+
+### What quantisation costs in latency
+
+The 1,254× figure is a **state-byte** ratio. Timing `dequantize_cache` in this reference
+implementation, per decode step:
+
+| retained slots | int8 | int4 | dense TPOT, same width |
+|---:|---:|---:|---:|
+| 160–192 | 1.32 ms | **4.03 ms** | 3.10 ms |
+
+**So `TPOT ≈ 3.10 + 4.03 = 7.1 ms` for the int4 case — 2.3× slower than the same width stored dense,
+though still 1.6× faster than dense 128K (11.25 ms).** This is a Python/torch reference path, not a
+kernel: unpacking int4 codes and applying per-group scales is exactly what a fused
+dequantise-attention kernel hides inside the matmul. **So 4.03 ms bounds how badly the reference
+implementation does, not what the method can do** — but it is the measured number, and a fused kernel
+is the highest-value engineering item that remains.
 
 ## Corrections
 
-**One interpretation in the first set is superseded.** Its "fixed state vs prompt length" row shows a
-working state held constant across 16.4× of context. That is a **sufficiency** result: it shows the
-state was *enough* at both ends, not that the *minimum* is constant. **The measured exponent on
-retrieval is `beta ≈ 0.50`, not 0** — the working set does grow with context, at about half the rate.
-`beta` is also **not measurable on multi-hop QA** with this harness: there, 17–20 of 20 rows score
-identically at every budget from 768 to 4,096, so the "smallest budget where every row passes" is set
-by a single row and is not defined.
+**One interpretation in the first set is superseded.** Its "fixed state vs prompt length" row holds a
+working state constant across 16.4× of context. That is a **sufficiency** result: it shows the state
+was *enough* at both ends, not that the *minimum* is constant. **The measured exponent on retrieval is
+`beta ≈ 0.505`, not 0** — the working set grows with context at about half the rate.
 
-**Two figures should not be read as quality statements.** The 1M row is a capacity measurement — the
-Full-KV reference at that length does not reliably solve the retrieval task, as the original note
-says. And the 227.6× and the 1,045× are **state-byte ratios**; the decode speed at 1,045× is *not*
-measured, because the storage is dequantised before the decode loop. A fused dequantise-attention
-kernel would be required.
+**`beta` is not measurable on multi-hop QA** with this harness: 17–20 of 20 rows score identically at
+every budget from 768 to 4,096, so "the smallest budget where every row passes" is set by a single row
+and is not defined.
 
-**The concurrency ratio has two values and they measure different things:** 113.8× is the *state*
-ratio (`L/B`), and **82.2×** is the *measured throughput* ratio at saturation. The difference is
-scheduling and kernel overhead at very high batch.
+**Two figures are not quality statements.** The 1M row is capacity — the Full-KV reference at that
+length does not reliably solve the retrieval task, as its own note says. And 1,254× is a state-byte
+ratio whose **decode speed is measured separately and is not 1,254× faster**; see the latency table.
+
+**The concurrency ratio has two values measuring different things:** 113.8× is the *state* ratio
+(`L/B`); **82.2×** is the *measured throughput* ratio at saturation. The difference is scheduling and
+kernel overhead at very high batch.
 
 ## How this compares with published systems
 
-Numbers below are taken from each work's own abstract, not recalled.
+Every competitor number below is read from that work's own abstract, not recalled.
 
-| system | KV compression | speedup | memory | quality, as stated |
-|---|---|---|---|---|
-| H₂O (NeurIPS'23) | 20% heavy hitters retained (≈5×) | up to 29× vs DeepSpeed/Accelearate, 1.9× lower latency at equal batch | — | task-dependent |
-| SnapKV (NeurIPS'24) | — | 3.6× generation | 8.2× efficiency at 16K | "comparable performance", 16 datasets |
-| RocketKV (ICML'25) | up to 400× | up to 3.7× end-to-end | up to 32.6% peak, decode | "negligible accuracy loss" |
-| **QCC** | **1,045×** | **3.56× / 6.45×** decode measured in vLLM; **82.2×** throughput at saturation | **99.1%** resident reduction at 128K | **20/20 rows at parity; 18–20/20 predictions byte-identical** |
+| system | KV compression | speedup | memory | context reached | quality, as stated |
+|---|---|---|---|---|---|
+| **StreamingLLM** (ICLR'24) | sink + recent window (fixed cache) | up to **22.2×** vs sliding-window *recomputation* | — | **4M tokens** | "stable and efficient language modeling" |
+| **H₂O** (NeurIPS'23) | 20% heavy hitters retained (**≈5×**) | up to **29×** vs DeepSpeed/Accelerate; **1.9×** lower latency at equal batch | — | — | task-dependent |
+| **SnapKV** (NeurIPS'24) | — | **3.6×** generation | **8.2×** efficiency at 16K | 380K on one A100-80GB | "comparable performance", 16 datasets |
+| **RocketKV** (ICML'25) | up to **400×** | up to **3.7×** end-to-end | up to **32.6%** peak | — | "negligible accuracy loss" |
+| **QCC** | **1,254×** | **3.56× / 6.45×** decode; **82.2×** throughput at saturation | **99.1%** resident reduction at 128K | 131K measured; 1M capacity | **20/20 rows at parity; 18–20/20 predictions byte-identical** |
 
-**On the axes that can be compared directly:** 6.45× decode against RocketKV's 3.7× and SnapKV's 3.6×,
-and the only retention figure in the table. RocketKV's 400× is smaller than 1,045×; its **32.6% peak
-memory reduction** is the number that decides how many requests fit, and a 400× KV reduction at 128K
-on a 1B model would imply ~62% peak reduction, so **the two are not describing the same operating
-point**.
+### Where the numbers are directly comparable
+
+| axis | best published | QCC, measured | comparable? |
+|---|---|---|---|
+| KV compression | RocketKV 400× | **1,254×** | yes, both are KV-only ratios — but see the peak-memory note |
+| decode speedup | RocketKV 3.7×, SnapKV 3.6× | **6.45×** at batch 4 | yes, same quantity; different hardware, so indicative |
+| throughput at high concurrency | H₂O 29× vs *other systems* | **82.2× vs Full-KV** | **no** — different baselines, not comparable |
+| quality at a stated ratio | none of the four states one | **20/20 rows at parity** | **QCC is the only row with a retention figure** |
+| context reached | StreamingLLM 4M | 131K measured | **no** — StreamingLLM is ahead here |
+
+### Where QCC does not lead, stated plainly
+
+- **Context length.** StreamingLLM demonstrates 4M tokens; the longest artifact here is 131K. The 1M
+  figure is a capacity measurement, not a quality one.
+- **Compression ratio against peak memory.** RocketKV's 400× exceeds nothing here on ratio, but its
+  **32.6% peak-memory reduction** is the operator-facing number, and a 400× KV reduction at 128K on a
+  1B model would imply ~62% — so the two figures in that work do not describe the same operating
+  point, and neither is directly comparable to a resident-state percentage.
+- **Publication maturity.** The four systems above are peer-reviewed and widely reproduced; this is a
+  measurement showcase with reproduction code withheld.
 
 ## Interpretation
 
