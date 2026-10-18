@@ -61,6 +61,10 @@ commands.
 | 32K decode throughput | Llama-3.2-1B, A10G 24 GiB | **2,139 tok/s vs 145 tok/s Full-KV — 14.76×** |
 | 32K fixed-SLA concurrency | same serving experiment | **32 vs 4 resident requests — 8×** |
 | 128K launch-free TPOT | Qwen2.5-0.5B, batch 8, speed configuration | **5.37×** |
+| **State compression, two axes** | Llama-3.1-8B, 50,146 tokens, 160 slots + int4 | **1,254×** at **20/20 rows at parity** |
+| **Decode speed vs active state** | Llama-3.2-1B, stock vLLM, batch 4 | **6.45×** (1,152 vs 130,816 slots) |
+| **Throughput at saturation** | same, 1,024 vs 12–16 requests | **82.2×** |
+| **State-demand exponent** | Llama-3.1-8B, 12,714 → 50,146 tokens | **beta ≈ 0.505** — compression grows as `sqrt(L)` |
 | Trainable parameters added | all configurations | **0** |
 
 The measured scaling trend is the key result: the context can become much longer
@@ -134,7 +138,46 @@ training.
 QCC combines query-aware exact-token retention with lexical retrieval anchors
 after an exact prefill. It can also compose with KV quantization.
 
-At matched retained width on the stored RULER evaluation:
+### Against published systems
+
+Every competitor number below is read from that work's own abstract, not recalled.
+Full detail and per-artifact provenance: [`docs/EVIDENCE.md`](docs/EVIDENCE.md).
+
+| System | KV compression | Speedup | Memory | Context reached | Quality, as stated |
+|---|---|---|---|---|---|
+| **StreamingLLM** (ICLR'24) | sink + recent window | up to **22.2×** vs sliding-window *recomputation* | — | **4M tokens** | "stable and efficient" |
+| **H₂O** (NeurIPS'23) | 20% heavy hitters (**≈5×**) | up to **29×** vs DeepSpeed/Accelerate; **1.9×** lower latency at equal batch | — | — | task-dependent |
+| **SnapKV** (NeurIPS'24) | — | **3.6×** generation | **8.2×** efficiency at 16K | 380K on one A100-80GB | "comparable performance" |
+| **RocketKV** (ICML'25) | up to **400×** | up to **3.7×** end-to-end | up to **32.6%** peak | — | "negligible accuracy loss" |
+| **QCC** | **1,254×** | **3.56× / 6.45×** decode; **82.2×** throughput at saturation | **99.1%** resident reduction at 128K | 131K measured; 1M capacity | **20/20 rows at parity; 18–20/20 byte-identical** |
+
+**Which axes are comparable, and which are not:**
+
+| Axis | Best published | QCC | Comparable? |
+|---|---|---|---|
+| KV compression | RocketKV 400× | **1,254×** | yes — both KV-only ratios |
+| Decode speedup | RocketKV 3.7×, SnapKV 3.6× | **6.45×** at batch 4 | yes, same quantity; different hardware |
+| High-concurrency throughput | H₂O 29× vs *other systems* | **82.2× vs Full-KV** | **no** — different baselines |
+| Quality at a stated ratio | **none of the four states a retention figure** | **20/20 rows at parity** | QCC is the only row with a number |
+| Context reached | StreamingLLM 4M | 131K measured | **no** — StreamingLLM leads |
+
+**Where QCC does not lead, stated plainly:** context length (StreamingLLM demonstrates
+4M tokens; the longest artifact here is 131K, and the 1M figure is capacity, not
+quality); peak memory against RocketKV's 32.6%; and publication maturity — all four
+systems above are peer-reviewed and widely reproduced, while this repository is a
+measurement showcase with reproduction code withheld.
+
+**One caveat that must travel with the compression figure:** 1,254× is a
+**state-byte** ratio. Decode speed at that footprint is measured separately and is
+**not** 1,254× faster — on the reference path, int4 dequantisation costs ~4.0 ms per
+step, giving ≈7.1 ms against 11.25 ms dense Full-KV and 3.10 ms dense at the same
+width. A fused dequantise-attention kernel is the highest-value engineering item
+remaining.
+
+### Against QCC's own ablations
+
+At matched retained width on the stored RULER evaluation — these are **ablations of
+QCC's own policy**, not published systems:
 
 | Policy | Aggregate retention |
 |---|---:|
@@ -144,8 +187,10 @@ At matched retained width on the stored RULER evaluation:
 | window-mean selection | 0.880 |
 | **QCC** | **1.008** |
 
-The repository also contains matched measurements against H2O-, TOVA-, Quest-,
-PyramidKV- and SnapKV-shaped policies.
+One caution on the row above: QCC's 1.008 was measured at **4,608** retained slots
+against 4,096 for the others. Re-measured at **matched** width (4,608 both), QCC
+retains **0.950** against **0.750** for attention-only selection — the same ordering
+with a larger gap.
 
 ## Deployment model
 
