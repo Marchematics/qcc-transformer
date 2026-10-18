@@ -7,6 +7,9 @@
 
 **Context-length-independent decode state for long-context LLM inference.**
 
+On a 75,003-token retrieval workload, measured on both arms in **one run**: **state 27.0× smaller,
+TPOT 1.81× lower, throughput 1.79× higher, and task quality identical at 1.0000.**
+
 QCC-Transformer turns the KV cache used during generation from a
 history-proportional structure into a fixed-budget working set.
 
