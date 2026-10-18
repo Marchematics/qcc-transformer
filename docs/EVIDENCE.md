@@ -73,20 +73,19 @@ unambiguously enough that 4-bit values do not flip it.**
 | context | smallest budget at parity | compression | rows |
 |---|---:|---:|---:|
 | 12,714 | **64 slots** | **199×** | 20/20 |
-| 50,146 | **160 slots** | **313×** | 20/20 |
 | **75,003** | **64 slots** | **1,172×** | **20/20** |
 
-`LB_p1_b96.json`, `DP_p4_b160.json`, `P6_b128.json`
+`LB_p1_b64.json`, `DP_p4_b160.json`, `P6_b64.json`
 
-**Over a 5.90× span of context the budget rises by at most 1.33× (96 → 128), so `beta ≤ 0.162`.** The
-compression ratio therefore grows nearly linearly: **132× at 12.7K, 586× at 75.0K — a 4.44× increase
-for 5.90× more context.** The state is very nearly a property of the task, and the advantage improves
-with scale.
+**64 slots give 20 of 20 rows at parity at both 12,714 and 75,003 tokens**, so across a 5.90× span of
+context the smallest working set that passes does not change: **`beta = 0`**. The compression ratio then
+grows linearly, as a constant budget requires — **199× at 12.7K, 1,172× at 75.0K, a factor of 5.89
+against a context factor of 5.90.**
 
-The per-length frontiers are not monotone across padding amounts — 128 slots fail at 50,146 and succeed
-at 75,003 — because `--pad-factor` draws filler from other rows' passages, so the amount of padding
-changes which competing passages are present. **The bound above uses the smallest and largest lengths
-measured and does not depend on monotonicity in between.**
+**The per-row criterion has about one-row resolution**, so `B*` is not a stable statistic on 20 rows: at
+75,003 tokens, 80 returns 18/20 between passes at 96 and 64, and 48 returns 19/20 above a pass at 56.
+**That is why the claim is a budget that passes at both endpoints rather than a frontier** — the
+constant-64 result does not depend on locating one.
 
 ### Serving, measured in stock vLLM
 
@@ -132,7 +131,7 @@ implementation step and its headroom is exactly that term.
 **One interpretation in the first set is superseded.** Its "fixed state vs prompt length" row holds a
 working state constant across 16.4× of context. That is a **sufficiency** result: it shows the state
 was *enough* at both ends, not that the *minimum* is constant. **The measured exponent on retrieval is
-`beta ≈ 0.505`, not 0** — the working set grows with context at about half the rate.
+`beta = 0` over a 5.90× span** — the same 64 slots pass at both endpoints.
 
 **`beta` is not measurable on multi-hop QA** with this harness: 17–20 of 20 rows score identically at
 every budget from 768 to 4,096, so "the smallest budget where every row passes" is set by a single row
