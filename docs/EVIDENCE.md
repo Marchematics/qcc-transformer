@@ -126,6 +126,40 @@ expensive way. **The 4.03 ms is the cost of a Python/torch elementwise unpack, w
 dequantise-attention kernel performs inside the matmul rather than before it**; the fusion is the next
 implementation step and its headroom is exactly that term.
 
+
+### All four advantages, in one experiment
+
+Every other section measures one thing at a time. **This is a single invocation of one script with both
+arms, the same 20 rows and the same 75,003-token context**, so quality, memory, latency and throughput
+come from the same process on the same requests — `PARETO_p6.json`, 40 records.
+
+| measure | Full-KV | **QCC** | ratio |
+|---|---:|---:|---:|
+| **quality** | 1.0000 | **1.0000** | **identical** |
+| **retained slots** | 75,003 | **64** | **1,172×** |
+| **resident state**, weights excluded | 9.50 GiB | **0.35 GiB** | **27.0×** |
+| **resident total**, weights included | 14.81 GiB | **5.66 GiB** | **2.62×** |
+| **TPOT** | 31.62 ms | **17.50 ms** | **1.81×** |
+| **throughput** | 31.86 tok/s | **57.14 tok/s** | **1.79×** |
+
+**Every dimension improves on the same data, and the quality is identical to four decimal places**,
+because retained slots keep their values and positions.
+
+**Two readings of the memory figure are both correct.** 27.0× is the state; 2.62×
+is the whole footprint, including **5.31 GiB of weights that no KV method touches**. An operator
+allocating a card sees 2.62×; an operator asking how many requests fit sees
+27.0×, because the weights are shared and the state is per-request.
+
+**The latency is measured on the compiled path rather than substituted.** Earlier figures came from
+running stock vLLM with a short contiguous active context, which is not what QCC does; this is gather
+over 64 compiled slots against a 75,003-token contiguous cache, in the same process. It is smaller than
+the substitution implied, and it is the real number: at this width decode is dominated by weight reads
+rather than by attention.
+
+**What this is not:** an engine measurement. It is the harness's decode loop, not a scheduler, so
+throughput and latency are per-request in isolation. The engine-level concurrency figure remains a
+substitution measurement and this does not replace it.
+
 ## Corrections
 
 **One interpretation in the first set is superseded.** Its "fixed state vs prompt length" row holds a
