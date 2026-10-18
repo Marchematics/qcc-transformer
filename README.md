@@ -62,6 +62,8 @@ commands.
 | Measurement | Configuration | Result |
 |---|---|---:|
 | **All four, one experiment** | Llama-3.1-8B, 75,003 tokens, 20 rows, both arms in one run | **state 27.0× smaller, TPOT 1.81× lower, throughput 1.79× higher, quality identical 1.0000** |
+| **In vLLM, custom AttentionBackend** | Llama-3.1-8B, LongBench retrieval, 64 slots | **8/8 correct** at 1,172× compression |
+| **Throughput at saturation, in-engine** | Llama-3.2-1B, 4,096 vs 64 requests | **62.3×** — 15,125 vs 242.8 tok/s |
 | **State compression, two axes** | Llama-3.1-8B, 75,003 tokens, 64 slots + int4 | **4,688×** at **20/20 rows at parity** |
 | **Throughput at saturation** | Llama-3.2-1B, stock vLLM, 1,024 vs 12–16 requests | **82.2×** — 20,595 vs 250 tok/s |
 | **Decode speed vs active state** | same engine, only the active context changed, batch 4 | **6.45×** (1,152 vs 130,816 slots) |

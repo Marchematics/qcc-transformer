@@ -174,6 +174,37 @@ rather than by attention.
 throughput and latency are per-request in isolation. The engine-level concurrency figure remains a
 substitution measurement and this does not replace it.
 
+### In vLLM, with a custom AttentionBackend
+
+The measurements above substitute the active context in stock vLLM. These run QCC's selection **inside**
+vLLM through a custom backend: paged read and write over vLLM's own KV layout, per-KV-head gather,
+chunked-prefill causal masking, retained positions from the offline compile.
+
+| check | result |
+|---|---|
+| LongBench `passage_retrieval_en`, full attention through the QCC backend | **8 / 8 correct** |
+| **same, 64 retained slots** | **8 / 8 correct** |
+| in-engine online selector, 64 slots | 1 / 8 |
+
+**The engine reproduces the offline selection's quality exactly at 1,172× compression.** The in-engine
+selector is what falls short, which is a scorer problem rather than a kernel problem.
+
+| arm | requests | throughput |
+|---|---:|---:|
+| Full-KV, 75,000 active tokens | 64 (preempting) | 242.8 tok/s |
+| **QCC state, 1,152 active tokens** | 4,096 | **15,125.0 tok/s** |
+
+**62.3× at saturation.** At a fixed load of 8 requests the ratio is 4.73× (209.8 against 992.0 tok/s).
+
+**And the boundary: at each one's saturation point the per-request latency is 263 ms against 271 ms —
+the same.** Both are throughput-saturated; the difference is tokens per second per card, not how fast one
+request finishes.
+
+**Why single-request TPOT cannot be 100×:** TPOT is bounded below by reading the weights once per token
+(3.2 ms for 8B at 4-bit), and these checkpoints declare `max_position_embeddings = 131,072`, so the
+longest context available is 131K where the measured ratio is 3.56×. A 100× ratio needs ~5.1M tokens
+whose Full-KV cache is 627 GiB.
+
 ## Corrections
 
 **One interpretation in the first set is superseded.** Its "fixed state vs prompt length" row holds a
