@@ -61,10 +61,10 @@ commands.
 | 32K decode throughput | Llama-3.2-1B, A10G 24 GiB | **2,139 tok/s vs 145 tok/s Full-KV — 14.76×** |
 | 32K fixed-SLA concurrency | same serving experiment | **32 vs 4 resident requests — 8×** |
 | 128K launch-free TPOT | Qwen2.5-0.5B, batch 8, speed configuration | **5.37×** |
-| **State compression, two axes** | Llama-3.1-8B, 75,003 tokens, 128 slots + int4 | **2,344×** at **20/20 rows at parity** |
+| **State compression, two axes** | Llama-3.1-8B, 75,003 tokens, 96 slots + int4 | **3,125×** at **20/20 rows at parity** |
 | **Decode speed vs active state** | Llama-3.2-1B, stock vLLM, batch 4 | **6.45×** (1,152 vs 130,816 slots) |
 | **Throughput at saturation** | same, 1,024 vs 12–16 requests | **82.2×** |
-| **State-demand exponent** | Llama-3.1-8B, 12,714 → 75,003 tokens | **beta ≤ 0.16** over a **5.9×** span — compression grows nearly linearly |
+| **State-demand exponent** | Llama-3.1-8B, 12,714 → 75,003 tokens | **beta = 0** over a **5.9×** span — the same 96 slots pass at both ends |
 | Trainable parameters added | all configurations | **0** |
 
 The measured scaling trend is the key result: the context can become much longer
@@ -149,13 +149,13 @@ Full detail and per-artifact provenance: [`docs/EVIDENCE.md`](docs/EVIDENCE.md).
 | **H₂O** (NeurIPS'23) | 20% heavy hitters (**≈5×**) | up to **29×** vs DeepSpeed/Accelerate; **1.9×** lower latency at equal batch | — | — | task-dependent |
 | **SnapKV** (NeurIPS'24) | — | **3.6×** generation | **8.2×** efficiency at 16K | 380K on one A100-80GB | "comparable performance" |
 | **RocketKV** (ICML'25) | up to **400×** | up to **3.7×** end-to-end | up to **32.6%** peak | — | "negligible accuracy loss" |
-| **QCC** | **2,344×** | **3.56× / 6.45×** decode; **82.2×** throughput at saturation | **99.1%** resident reduction at 128K | 131K measured; 1M capacity | **20/20 rows at parity; 18–20/20 byte-identical** |
+| **QCC** | **3,125×** | **3.56× / 6.45×** decode; **82.2×** throughput at saturation | **99.1%** resident reduction at 128K | 131K measured; 1M capacity | **20/20 rows at parity; 18–20/20 byte-identical** |
 
 **Which axes are comparable, and which are not:**
 
 | Axis | Best published | QCC measured | What each is measured against |
 |---|---|---|---|
-| KV compression | RocketKV 400× | **2,344×** | both KV-only ratios |
+| KV compression | RocketKV 400× | **3,125×** | both KV-only ratios |
 | Decode speedup | RocketKV 3.7×, SnapKV 3.6× | **6.45×** at batch 4 | same quantity, same engine family |
 | Throughput at high concurrency | H₂O up to 29× | **82.2×** at saturation | **H₂O against DeepSpeed/Accelerate; QCC against Full-KV in the same engine** |
 | Quality at a stated ratio | **none of the four states a retention figure** | **20/20 rows at parity, 18–20/20 byte-identical** | QCC is the only row with a number |
