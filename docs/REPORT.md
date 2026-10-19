@@ -151,16 +151,3 @@ QCC is a post-training runtime policy:
 
 This keeps adoption cost substantially lower than approaches that require a new
 architecture or retrained checkpoint family.
-
-## 8. Productization path
-
-The current implementation already covers the core bounded-KV mechanism,
-chunked prefill, batching, quality evaluation and serving measurement.
-
-The engineering roadmap extends this core to H100/H200/B200, hardened vLLM and
-TensorRT-LLM integration, 7B–70B models, workload-aware budget control and
-multi-GPU continuous batching.
-
-The intended product boundary is an inference runtime layer that reduces the GPU
-cost of long-context serving without requiring customers to replace their model
-checkpoints.

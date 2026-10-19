@@ -247,16 +247,8 @@ work served by the same GPU fleet.
 The core retention path, exact chunked prefill, fixed-width cache compilation,
 ragged batching, quality benchmarks and serving benchmarks are implemented.
 
-Hugging Face integration is available. vLLM integration is already present in
-the repository and is being hardened for production deployment.
-
-The next engineering phase expands the same runtime to:
-
-- H100/H200/B200 deployment;
-- production vLLM and TensorRT-LLM paths;
-- broader 7B–70B coverage;
-- workload-aware automatic budget selection;
-- multi-GPU continuous batching.
+Hugging Face integration is available, and a vLLM attention backend is present
+in the repository.
 
 ## Install
 
