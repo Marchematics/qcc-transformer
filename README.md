@@ -149,6 +149,31 @@ training.
 QCC combines query-aware exact-token retention with lexical retrieval anchors
 after an exact prefill. It can also compose with KV quantization.
 
+### On 2026 models
+
+Every figure from that checkpoint's own `config.json`, pulled 2026-10-20, FP8 KV:
+
+| model | KV/token | KV at max ctx | weights | **KV share** | **decode ratio** | capacity ratio |
+|---|---:|---:|---:|---:|---:|---:|
+| **Step-5-Preview** | **276 KiB** | **276 GiB** | 40 GiB | **87%** | **7.70×** | 16,384× |
+| **MiniMax-M3** | 30 KiB | 30 GiB | 30 GiB | 50% | **2.00×** | 16,384× |
+| **Kimi-K3** | 46.5 KiB | 46.5 GiB | 48 GiB | 49% | 1.97× | 16,384× |
+| **GLM-5.3** | 39 KiB | 39 GiB | 50 GiB | 44% | 1.78× | 16,384× |
+| **Qwen3.8-Flash-Next** | 24 KiB | 6 GiB | 10 GiB | 38% | 1.60× | 4,096× |
+| **DeepSeek-V4.1-Flash** | 20 KiB | 20 GiB | 37 GiB | 35% | 1.54× | 16,384× |
+| **Llama-3.1-8B** (2024) | 32 KiB | 4 GiB | 8 GiB | 33% | 1.16× | 2,048× |
+
+**Architecture decides, not parameter count.** Step-5-Preview makes only 23 of its 92 layers
+full-attention, so it carries **276 GiB of KV against 40 GiB of weights** and gains **7.70×** on the
+decode step — 6.6× more than on a 2024 GQA model.
+
+**The 2026 trend cuts both ways.** 1M contexts raise the capacity ratio to **16,384×**; MLA lowers KV per
+token to 20–46 KiB, which lowers the per-token speedup. Both are in the table.
+
+**Honest scope:** the decode ratios are arithmetic from published configs and a measured bandwidth
+model, **not measurements on those checkpoints** — I do not have them running. The capacity ratios are
+memory arithmetic. The end-to-end measurements in this repository remain the Llama ones.
+
 ### Against published systems
 
 Every competitor number below is read from that work's own abstract, not recalled.
