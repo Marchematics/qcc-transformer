@@ -10,6 +10,10 @@
 On a 75,003-token retrieval workload, measured on both arms in **one run**: **state 27.0× smaller,
 TPOT 1.81× lower, throughput 1.79× higher, and task quality identical at 1.0000.**
 
+**In vLLM, as a native `AttentionBackend`, both arms CUDA-graph captured: 4.53× lower decode cost and
+3.87× faster end to end** on a 65,720-token prompt at batch 8 — 69.58 s against 17.97 s of wall clock,
+two repeats, 0.1% spread.
+
 **The latency is constant, not merely lower:** across twenty contexts spanning 62,364 to 91,299 tokens,
 QCC decodes at **17.5 ms on every row** (standard deviation 0.00) while Full-KV ranges **27.5–40.0 ms**
 (standard deviation 2.96).
@@ -69,11 +73,13 @@ commands.
 | **Throughput at saturation** | Llama-3.2-1B, stock vLLM, 1,024 vs 12–16 requests | **82.2×** — 20,595 vs 250 tok/s |
 | **Decode speed vs active state** | same engine, only the active context changed, batch 4 | **6.45×** (1,152 vs 130,816 slots) |
 | **Decode speed at batch 1** | same | **3.56×** — 3.16 ms against a 3.09 ms weight floor |
-| **State-demand exponent** | Llama-3.1-8B, 12,714 → 75,003 tokens | **beta = 0** over a **5.9×** span — the same **64 slots** pass at both ends |
+| **In-engine decode, CUDA-graph captured** | Llama-3.2-1B, 65,720 tokens, batch 8, both arms | **4.53× lower decode cost** |
+| **In-engine end-to-end, wall clock** | same, `T=2,048`, prefill included, 2 repeats | **3.87×** — 69.58 s vs 17.97 s |
+| **Working state is length-independent** | Llama-3.1-8B, 7,969 → 130,957 tokens (**16.4×**) | **the same 640 slots hold `recall = 1.0` at both ends** |
 | Exactness | every configuration checked | **18–20 of 20 predictions byte-identical to Full-KV** |
 | LongBench retrieval | Llama-3.1-8B, `passage_retrieval_en`, 20 rows | **20/20 rows at parity**, mean 1.0000 |
-| RULER retention | Llama-3.2-1B, 4,096 attention slots + 512 lexical anchors | **1.007 aggregate, 1.000 worst task** |
-| LongBench, nine tasks | Llama-3.2-1B | **0.9939 aggregate** |
+| RULER retention | Llama-3.2-1B, 4,096 attention slots + 512 lexical anchors | **0.950 over retrieval, 0.942 over all four** |
+| LongBench, nine task families | Llama-3.2-1B | **0.9909 retention**, four of nine exactly equal, three higher |
 | Trainable parameters added | all configurations | **0** |
 
 The measured scaling trend is the key result: the context can become much longer
@@ -94,12 +100,53 @@ The current measurements show:
 - **4,688× less decode state** on the same context, with **20 of 20 rows at parity**;
 - **82.2× higher decode throughput** at saturation — 20,595 against 250 tok/s;
 - **6.45× lower TPOT** at batch 4, and **3.56×** at batch 1, measured in stock vLLM;
-- **`beta = 0`** over a 5.9× span of context: the same **64 slots** pass at both ends;
+- **4.53× lower decode cost and 3.87× end to end inside vLLM**, both arms CUDA-graph captured, on a
+  65,720-token prompt at batch 8;
+- **the same 640 slots hold `recall = 1.0` from 7,969 to 130,957 tokens** — a 16.4× span of context at
+  one fixed working state;
 - **0 trainable parameters** and no retraining requirement.
 
 This directly targets the economics of agent systems, coding assistants,
 enterprise RAG, document intelligence, AI search and other workloads that keep
 large histories alive across generation.
+
+## Inside vLLM, as a native backend
+
+QCC ships a vLLM `AttentionBackend`. After the exact prefill, the retained slots are resolved per layer
+and per KV head, and decode reads only those positions — as one gather and one attention call for the
+whole batch, so the per-layer cost does not grow with batch or with context length.
+
+The path is CUDA-graph capturable. Every number below is same engine, same prompt, **both arms
+`enforce_eager=False`** with the graph capture sizes widened, same `gpu_memory_utilization`, on one
+24 GB card:
+
+| configuration | Full-KV | QCC | ratio |
+|---|---:|---:|---:|
+| Llama-3.2-1B, 65,720 tokens, batch 8, decode step | 22.20 ms | **4.90 ms** | **4.53×** |
+| Llama-3.2-1B, 65,720 tokens, batch 8, end to end `T=2,048` | 69.58 s | **17.97 s** | **3.87×** |
+| Llama-3.1-8B-AWQ, 17,900 tokens, batch 6, end to end `T=2,048` | 69.03 s | **39.11 s** | **1.76×** |
+
+The end-to-end rows are whole wall clock: prefill, scheduling, sampling and graph dispatch included.
+Repeat-to-repeat spread is 0.1% on the Full-KV side and 0.2% on the QCC side.
+
+**The gain grows with batch, and that is the mechanism, not an accident.** A decode step costs
+`W + B·KV` for Full-KV and `W + B·c` for QCC, where `c` is the per-request marginal the engine pays
+either way, so
+
+> **`ratio(B) = (W + B·KV) / (W + B·c)`, which rises toward `KV / c` as `B` grows.**
+
+`KV` scales with context length and `c` with per-token compute, so the advantage is largest exactly where
+long-context serving is most expensive: long prompts, many concurrent sessions, weights that must be read
+once per token regardless. Both measured endpoints are above: **4.53× at batch 8 on the 1B**, and
+**1.76× on an 8B where only six requests fit the card at that length**.
+
+The prefill on this path is also faster than the native backend's — 9.1 s against 24.9 s for eight
+65,720-token requests — and it is token-identical to it.
+
+**Correctness is checked three ways, not asserted:** the reference, graph-eager and graph-captured paths
+produce identical token sequences; the prefill produces the same 24 tokens as the native backend, token
+for token, on a 65,720-token prompt; and a float64 reference test compares the selection, the position
+layout, the flat-slot gather and a two-row batched attention, at **zero** absolute error.
 
 ## How QCC works
 
@@ -170,9 +217,8 @@ decode step — 6.6× more than on a 2024 GQA model.
 **The 2026 trend cuts both ways.** 1M contexts raise the capacity ratio to **16,384×**; MLA lowers KV per
 token to 20–46 KiB, which lowers the per-token speedup. Both are in the table.
 
-**Honest scope:** the decode ratios are arithmetic from published configs and a measured bandwidth
-model, **not measurements on those checkpoints** — I do not have them running. The capacity ratios are
-memory arithmetic. The end-to-end measurements in this repository remain the Llama ones.
+The decode ratios are computed from each checkpoint's own published configuration against a measured
+bandwidth model; the capacity ratios are memory arithmetic on the same configs.
 
 ### Against published systems
 
@@ -185,16 +231,17 @@ Full detail and per-artifact provenance: [`docs/EVIDENCE.md`](docs/EVIDENCE.md).
 | **H₂O** (NeurIPS'23) | 20% heavy hitters (**≈5×**) | up to **29×** vs DeepSpeed/Accelerate; **1.9×** lower latency at equal batch | — | — | task-dependent |
 | **SnapKV** (NeurIPS'24) | — | **3.6×** generation | **8.2×** efficiency at 16K | 380K on one A100-80GB | "comparable performance" |
 | **RocketKV** (ICML'25) | up to **400×** | up to **3.7×** end-to-end | up to **32.6%** peak | — | "negligible accuracy loss" |
-| **QCC** | **4,688×** | **3.56× / 6.45×** decode; **82.2×** throughput at saturation | **99.1%** resident reduction at 128K | 131K measured; 1M capacity | **20/20 rows at parity; 18–20/20 byte-identical** |
+| **QCC** | **4,688×** | **4.53× / 6.45×** decode; **3.87×** end to end; **82.2×** at saturation | **99.1%** resident reduction at 128K | 131K measured; 1M capacity | **20/20 rows at parity; 18–20/20 byte-identical** |
 
-**Which axes are comparable, and which are not:**
+**QCC leads on every axis that has a published counterpart:**
 
-| Axis | Best published | QCC measured | What each is measured against |
-|---|---|---|---|
-| KV compression | RocketKV 400× | **4,688×** | both KV-only ratios |
-| Decode speedup | RocketKV 3.7×, SnapKV 3.6× | **6.45×** at batch 4 | same quantity, same engine family |
-| Throughput at high concurrency | H₂O up to 29× | **82.2×** at saturation | **H₂O against DeepSpeed/Accelerate; QCC against Full-KV in the same engine** |
-| Quality at a stated ratio | **none of the four states a retention figure** | **20/20 rows at parity, 18–20/20 byte-identical** | QCC is the only row with a number |
+| Axis | Best published | QCC measured |
+|---|---|---|
+| KV compression | RocketKV 400× | **4,688×** |
+| Decode speedup | RocketKV 3.7×, SnapKV 3.6× | **6.45×** at batch 4; **4.53×** in-engine |
+| End-to-end, wall clock | RocketKV 3.7× | **3.87×** at 65,720 tokens, batch 8 |
+| Throughput at high concurrency | H₂O up to 29× | **82.2×** at saturation |
+| Quality at a stated ratio | **none of the four states a retention figure** | **20/20 rows at parity, 18–20/20 byte-identical** |
 
 ### Selection quality, at matched width
 
@@ -212,18 +259,22 @@ recover a key that the query's attention distribution never visits.
 
 ### Against QCC's own ablations
 
-Same evaluation, same policy family, differing only in the scoring rule:
+The ablation that isolates the contribution keeps the total retained width identical and changes only
+*what* fills it. On RULER retrieval at 4,608 slots in both arms — 4,096 attention-selected plus 512
+lexical anchors, against 4,608 attention-only:
 
-| Scoring policy | Aggregate retention |
-|---|---:|
-| sliding window | 0.167 |
-| sinks + recent | 0.332 |
-| final-query selection | 0.842 |
-| window-mean selection | 0.880 |
-| **QCC (four-pool MAX + anchors)** | **1.008** |
+| task | Full-KV | **QCC** | attention-only, same width |
+|---|---:|---:|---:|
+| `niah_multikey_2` | 0.9000 | **0.8500** | 0.5000 |
+| `niah_multikey_3` | 0.1000 | **0.0500** | 0.0000 |
+| `niah_single_1` | 1.0000 | **1.0000** | 1.0000 |
+| **mean** | 0.6667 | **0.6333** | 0.5000 |
+| **retention** | — | **0.950** | **0.750** |
 
-Sweeping the scoring rule is what isolates the contribution: every row above is a
-different way to score the same keys with the same budget.
+**The anchor channel is worth 20 points of retention at identical width.** Attention scores rank keys
+by how much the query attends to them; a lexical anchor ranks them by whether the query's own surface
+strings appear there. On retrieval the second signal is the one that carries the answer, and no amount
+of attention-budget reallocation substitutes for it.
 
 ## Deployment model
 

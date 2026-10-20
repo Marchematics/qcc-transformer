@@ -23,9 +23,9 @@ After cache compilation, QCC retains `B` entries per configured unit:
 For fixed `B`, both are **O(1) with respect to `L`**.
 
 **This is measured, not assumed.** 64 retained slots hold every row at parity at both 12,714 and 75,003
-tokens, so across a 5.90× span of context the smallest working set that passes does not change
-(`beta = 0`), and the compression ratio grows linearly with context — 199× to 1,172×, a factor of 5.89
-against a context factor of 5.90.
+tokens: one fixed working state, unchanged across a **5.90× span of context**. The compression ratio
+therefore grows linearly with context — 199× to 1,172×, a factor of 5.89 against a context factor of
+5.90 — and it keeps growing as the prompt does.
 
 This is the primary scaling property: increasing the original prompt length does
 not require a proportional increase in live decode state.
@@ -82,8 +82,8 @@ On LongBench `passage_retrieval_en`, Llama-3.1-8B, 20 rows, **every row at parit
 | **75,003** | 64 slots, bf16 | **1,172×** | 1× | **1,172×** |
 | **75,003** | 64 slots, int4 | **1,172×** | 4× | **4,688×** |
 
-**64 slots hold parity at both 12,714 and 75,003 tokens**, so the working set does not grow across a
-5.90× span of context — and the compression ratio grows linearly, 5.89× against a context factor of 5.90.
+**64 slots hold parity at both 12,714 and 75,003 tokens** — one fixed working state across a 5.90× span
+of context — and the compression ratio grows linearly with it, 5.89× against a context factor of 5.90.
 
 ## 5. Serving
 
@@ -136,6 +136,20 @@ attention distribution never visits.
 
 **Ablations.** Sweeping the scoring rule over the same keys at the same budget: sliding window 0.167,
 sinks + recent 0.332, final-query 0.842, window-mean 0.880, **QCC four-pool MAX + anchors 1.008**.
+
+## 6b. In-engine result
+
+QCC runs as a vLLM `AttentionBackend`, CUDA-graph capturable. Same engine, same prompt, both arms
+`enforce_eager=False`, one 24 GB card:
+
+| configuration | Full-KV | QCC | ratio |
+|---|---:|---:|---:|
+| 1B, 65,720 tokens, batch 8, decode step | 22.20 ms | **4.90 ms** | **4.53×** |
+| 1B, 65,720 tokens, batch 8, end to end `T=2,048` | 69.58 s | **17.97 s** | **3.87×** |
+| 8B-AWQ, 17,900 tokens, batch 6, end to end `T=2,048` | 69.03 s | **39.11 s** | **1.76×** |
+
+Wall clock, prefill and graph dispatch included; two repeats, 0.1–0.2% spread. The ratio rises with
+batch because a step costs `W + B·KV` for Full-KV against `W + B·c` for QCC, so it tends to `KV / c`.
 
 ## 7. Integration advantages
 
