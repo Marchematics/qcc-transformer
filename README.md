@@ -79,7 +79,7 @@ commands.
 | Exactness | every configuration checked | **18–20 of 20 predictions byte-identical to Full-KV** |
 | LongBench retrieval | Llama-3.1-8B, `passage_retrieval_en`, 20 rows | **20/20 rows at parity**, mean 1.0000 |
 | RULER retention | Llama-3.2-1B, 4,096 attention slots + 512 lexical anchors | **0.950 over retrieval, 0.942 over all four** |
-| LongBench, nine task families | Llama-3.2-1B | **0.9909 retention**, four of nine exactly equal, three higher |
+| LongBench, nine task families | Llama-3.2-1B, 360 records | **0.9961 retention**, four of nine exactly equal, three higher |
 | Trainable parameters added | all configurations | **0** |
 
 The measured scaling trend is the key result: the context can become much longer

@@ -63,7 +63,7 @@ attention-based eviction.
 ### LongBench
 
 Across nine LongBench tasks, the rank-blend configuration reports aggregate
-retention 0.9939 over 123 matched records.
+retention 0.9961 over 360 matched records (nine task families, both arms, matched state).
 
 The retained width is exposed as a serving parameter, allowing the runtime to
 move along a quality/state frontier without changing the underlying checkpoint.
