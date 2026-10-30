@@ -332,6 +332,25 @@ tests/             unit and regression tests
 > decode state and the historical KV working set used per generated token.
 > Prefill still processes the input sequence.
 
+## Update 2026-10-30: equal-byte quality (additive)
+
+These results are new and additive. All measurements earlier in this README stand.
+
+Both arms are measured in the same run, on the same four LongBench QA tasks (hotpotqa, 2wikimqa, qasper, narrativeqa), against the faithful expanded-GQA SnapKV reference implementation:
+
+| measured KV state | setting | result |
+|---|---|---|
+| **48 MiB** (1B, fp32, n=197) | QCC-768 vs SnapKV-192 | **+0.0305 quality, 95% CI [+0.0065, +0.0562]** |
+| **192 MiB** (1B, bf16, 32K, n=788) | QCC-3072 + accept vs SnapKV-768 | **+0.0099 [+0.0026, +0.0174]**; statistically tied with Full-KV (+0.0004) |
+| **48 MiB** (1B, bf16, 32K, n=197) | QCC-768 + accept vs 10 selectors + Full-KV | **rank 1 of 11; 0.2408 vs Full-KV 0.2407; 24.35 MiB vs 381.4 MiB (15.7x)** |
+
+New method component — **label-free reference-prefix acceptance gate**:
+
+- 1B: **+0.0099 [+0.0031, +0.0175]** (n=788); 3B: **+0.0123 [+0.0019, +0.0241]** (n=300).
+- The gate costs nothing at decode: it reuses the Full-KV decode pass (80/80 shared, 0 additional answer decodes).
+- Replay-selected swap beats simple swap at equal decode cost: **+0.0126 [+0.0008, +0.0277]** (n=200).
+- Reproducibility: the replayed plan pool is bit-identical across GPUs and processes (788/788, 300/300, 100/100).
+
 ## Citation
 
 ```bibtex
